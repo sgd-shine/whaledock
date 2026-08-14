@@ -4,7 +4,7 @@
 
 ## 阶段
 
-**v0.1.0 已完成 macOS 真机落地、打包与本地安装，待推送 GitHub 并发布。** 源码运行与 `/Applications` 安装版均已用真实 dsh 验证；本地仓库完成首次提交后，由 SGD 决定何时创建远端并 push/tag。
+**v0.1.0 已完成 macOS 真机落地、打包、本地安装与 GitHub 自动发布。** 公开仓库为 `https://github.com/sgd-shine/harness-desktop`；标签 `v0.1.0` 已触发 GitHub Actions，云端 smoke、dmg/zip 构建与 Release 发布全部成功。
 
 ## 已验证 / 未验证
 
@@ -12,13 +12,14 @@
 
 安装验证：`npm run dist` 产出 arm64 dmg/zip；dmg 已通过 Finder 安装到 `/Applications/Harness Desktop.app`，从 Finder 启动后成功通过 GUI App 的 PATH 探测找到 Hermes Node/npx、启动 dsh，Cmd+Q 后 App、dsh 与 3080 监听全部清零。
 
+本地副本已整理：`/Applications/Harness Desktop.app` 与本地构建、dmg 内版本的关键哈希一致，确认已是最新版；挂载的 dmg 已推出，`release/mac-arm64/Harness Desktop.app` 已移入废纸篓，Launch Services 只保留 `/Applications` 正式安装版。当前启动进程也来自 `/Applications`。
+
 仍需一次人工触发确认：本机日志已确认 `⌘⇧H` 注册成功、托盘创建无错误且模板图在浅色/深色系统外观下加载；当前桌面自动化不能向其他前台应用发送真正的全局按键，也不能点击 SystemUIServer 状态项，因此这两项不能用自动化结果代替最终手按/手点。
 
 ## 待办
 
 1. 手动点一次菜单栏 H 图标，并在其他应用前台手按一次 `⌘⇧H` 完成最终人工确认。
-2. GitHub 建仓、推送、打 tag `v0.1.0` 触发自动发布。
-3. 补 README 截图；按 `docs/操作手册.md` 第 5 节拍演示视频。
+2. 补 README 截图；按 `docs/操作手册.md` 第 5 节拍演示视频。
 
 ## 环境备忘
 
