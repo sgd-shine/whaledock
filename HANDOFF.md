@@ -1,15 +1,29 @@
-# HANDOFF.md — 交接说明
+# HANDOFF.md — v0.1.1 发布交接
 
-更新：2026-08-14 · 交接方向：Claude（云端方案与实现）→ Codex（macOS 真机落地与发布完成）→ SGD（最终手动触发确认与拍视频）
+更新：2026-08-14 · Codex（macOS 真机回归与发布准备）→ SGD（最终人工触发与发布时机）
 
-## Codex 已完成
+## 已完成
 
-六阶段已执行：真实 dsh spawned/attach、错误态与日志、主窗口交互、窗口生命周期、进程清理、dmg/zip 构建、Finder 安装与 GUI PATH 探测均有本机证据；最终 smoke 12 项全过。公开仓库、`v0.1.0` 标签与 GitHub Release 已上线，云端 macOS job 的 smoke、构建、发布全部成功。唯一代码配置修复是禁止本地 `npm run dist` 自动选择 Keychain 中无关的签名身份，保持 v0.1 未签名分发边界。
+鲸坞 WhaleDock v0.1.1 的改名、原创鲸鱼与坞图标、旧配置迁移、dsh 默认版本锁定、审计遗留修复和 main push/PR CI 已收口。14 项 smoke、源码态真实 dsh、隐藏窗口后台恢复、外部服务 attach、Finder 安装版 spawned/attach、Cmd+Q 进程清理与 dmg/zip 构建均已在本机重新验证；这不是沿用 v0.1.0 的历史结果。
 
-## 给 SGD
+GitHub 仓库现为 `https://github.com/sgd-shine/whaledock`，旧地址自动重定向，本地 `origin` 已同步。代码只做本地英文提交，不会自动 push、打 tag 或发布。
 
-公开仓库为 `https://github.com/sgd-shine/harness-desktop`，在线安装包见 `https://github.com/sgd-shine/harness-desktop/releases/tag/v0.1.0`。本地产物仍在 `release/Harness Desktop-0.1.0-arm64.dmg` 与 `release/Harness Desktop-0.1.0-arm64-mac.zip`，唯一正式安装版为 `/Applications/Harness Desktop.app`；重复的构建副本已移入废纸篓、dmg 已推出。先手动完成菜单栏 H 图标点击与其他应用前台 `⌘⇧H` 两个最终触发确认，再按 `docs/操作手册.md` 第 5 节拍视频；不要把 `release/` 或 `node_modules/` 提交进仓库。
+## 本地产物与安装状态
 
-## 边界与未决
+- 安装版：`/Applications/WhaleDock.app`（v0.1.1，arm64，bundle ID `com.sgd.whaledock`，按既定边界未签名）。
+- 产物：`release/WhaleDock-0.1.1-arm64.dmg`、`release/WhaleDock-0.1.1-arm64-mac.zip`。
+- 旧 `/Applications/Harness Desktop.app` 已移到废纸篓，仍可恢复；dmg 已推出。
+- `release/` 与 `node_modules/` 继续由 `.gitignore` 排除，不进入提交。
 
-真实 dsh 本次仍使用 `web` 子命令并监听 3080，无交互式初始化问题；未来 rc 行为若变化，修改仍须收敛到 `lib/backend.js` 与 `lib/config.js`。GitHub 用户名已设为 `sgd-shine`。签名公证、自动更新、Windows 支持均明确不在 v0.1 范围（见 `docs/开发方案.md` 第 2、12 节）。
+## 给 SGD 的两个最终人工触发
+
+1. 分别在浅色与深色菜单栏目视鲸鱼托盘图，并在关窗后点击它确认窗口唤回。
+2. 保持另一个应用在前台，按 `⌘⇧H`，确认 WhaleDock 能呼出并再次隐藏。
+
+桌面自动化无法直接控制 SystemUIServer 状态项，也不能替代另一个前台应用发出真正的全局快捷键，因此这两项保留人工门槛。快捷键注册日志、template image 设置、16×16/32×32 托盘资源与关窗常驻均已验证。
+
+## 发布边界
+
+当前未签名构建无法让 Electron Notification 进入 macOS 通知中心；三次恢复失败时的发送失败日志与错误对话框兜底已通过。签名公证、通知中心真投递和 Mac 自动更新不在 v0.1.1 范围。上游 dsh 仍是 rc 版本；其端口、子命令与版本假设继续只允许维护在 `lib/backend.js` 与 `lib/config.js`。
+
+人工确认后，由 SGD 决定何时 push `main` 并推送 `v0.1.1` tag；tag 会触发 `.github/workflows/release.yml` 的云端 smoke、构建与 GitHub Release。
