@@ -1,0 +1,42 @@
+# 打 tag（比如 v0.1.0）自动构建 macOS 安装包并发布 Release
+# 用法：git tag v0.1.0 && git push origin v0.1.0
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Smoke test (no GUI)
+        run: npm run smoke
+
+      - name: Build .dmg / .zip
+        run: npx electron-builder --mac --publish never
+        env:
+          # 没有 Apple 开发者证书也能构建（未签名包，用户首次打开需右键→打开）
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.dmg
+            release/*.zip
+          generate_release_notes: true

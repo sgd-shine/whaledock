@@ -1,0 +1,42 @@
+{
+  "name": "harness-desktop",
+  "productName": "Harness Desktop",
+  "version": "0.1.0",
+  "description": "Unofficial macOS desktop app for DeepSeek Harness — auto-starts the local dsh backend and wraps its Web UI in a native window. 非官方 DeepSeek Harness macOS 桌面端：自动拉起本地 dsh 服务，用原生窗口承载 Web UI。",
+  "main": "main.js",
+  "author": "SGD",
+  "license": "MIT",
+  "homepage": "https://github.com/sgd-shine/harness-desktop",
+  "scripts": {
+    "start": "electron .",
+    "smoke": "node test/smoke.js",
+    "dist": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.sgd.harnessdesktop",
+    "productName": "Harness Desktop",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "splash.html",
+      "lib/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "target": [
+        { "target": "dmg", "arch": ["arm64"] },
+        { "target": "zip", "arch": ["arm64"] }
+      ]
+    }
+  }
+}
