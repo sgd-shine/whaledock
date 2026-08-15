@@ -1,0 +1,55 @@
+'use strict';
+
+// WhaleDock 自有的本地 Vision OCR 脚本。只读一个 argv 图片，stdout 只返回有限 JSON。
+ObjC.import('Foundation');
+ObjC.import('AppKit');
+ObjC.import('Vision');
+
+function failure(reason) {
+  return JSON.stringify({ schemaVersion: 1, ok: false, reason: reason });
+}
+
+function run(argv) {
+  try {
+    if (!argv || argv.length !== 1) return failure('script-error');
+    var input = String(argv[0]);
+    var image = $.NSImage.alloc.initWithContentsOfFile($(input));
+    if (!image) return failure('decode-failed');
+    var imageUrl = $.NSURL.fileURLWithPath($(input));
+    if (!imageUrl) return failure('decode-failed');
+
+    var request = $.VNRecognizeTextRequest.alloc.init;
+    if (!request) return failure('framework-unavailable');
+    request.recognitionLevel = $.VNRequestTextRecognitionLevelAccurate;
+    request.usesLanguageCorrection = true;
+
+    // JXA 把 `null` 桥接成 NSNull；Vision 的 CGImage initializer 在部分
+    // 系统版本会因此直接终止 osascript。URL + 空 NSDictionary 是稳定的
+    // typed initializer，仍只读取 argv 指定的本地图片。
+    var handler = $.VNImageRequestHandler.alloc.initWithURLOptions(
+      imageUrl,
+      $.NSDictionary.dictionary
+    );
+    if (!handler) return failure('framework-unavailable');
+    var errorRef = Ref();
+    if (!handler.performRequestsError($([request]), errorRef)) {
+      return failure('recognition-failed');
+    }
+
+    var lines = [];
+    var results = request.results;
+    var count = results ? Number(results.count) : 0;
+    for (var index = 0; index < count; index += 1) {
+      var observation = results.objectAtIndex(index);
+      var candidates = observation.topCandidates(1);
+      if (!candidates || Number(candidates.count) < 1) continue;
+      var candidate = candidates.objectAtIndex(0);
+      var text = ObjC.unwrap(candidate.string);
+      if (typeof text === 'string' && text.length > 0) lines.push(text);
+    }
+    if (lines.length === 0) return failure('no-text');
+    return JSON.stringify({ schemaVersion: 1, ok: true, text: lines.join('\n') });
+  } catch (_error) {
+    return failure('script-error');
+  }
+}

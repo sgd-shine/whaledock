@@ -11,11 +11,14 @@ const {
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { spawn } = require('child_process');
+const crypto = require('crypto');
+const { spawn, execFile } = require('child_process');
 const { pathToFileURL } = require('url');
 const config = require('./lib/config');
 const backend = require('./lib/backend');
 const events = require('./lib/events');
+const workspaces = require('./lib/workspaces');
+const imageInput = require('./lib/image-input');
 const log = require('./lib/log');
 const update = require('./lib/update');
 
@@ -35,6 +38,7 @@ const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const EVENT_BATCH_DELAY_MS = 200;
 const EVENT_LIVE_MAX_EVENTS = 10000;
 const EVENT_LIVE_MAX_BYTES = 4 * 1024 * 1024;
+const WORKSPACE_COORDINATOR_START_TOKEN = Symbol('workspace-coordinator-start');
 const MAX_RENDER_TOKEN_VALUE = 1_000_000_000_000;
 const MAX_RENDER_BUDGET_VALUE = 1_000_000_000;
 const MAX_RENDER_PRICE_VALUE = 1_000_000;
@@ -69,6 +73,130 @@ function safeText(value, fallback, maximum = 120) {
   if (typeof value !== 'string') return fallback;
   const clean = value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
   return clean ? clean.slice(0, maximum) : fallback;
+}
+
+function boundedPath(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 4096
+    && !value.includes('\0') ? value : null;
+}
+
+// 所有标题/菜单/设置都从 coordinator 的 committed view 重建，
+// 事务中 config 曾经写入 target 也不会提前改变用户可见状态。
+function workspaceSurfaceSnapshot(view, runtime = {}) {
+  const source = isPlainObject(view) ? view : {};
+  const current = isPlainObject(source.current) ? source.current : {};
+  const label = safeText(current.label, '当前工作区', 96);
+  const recent = (Array.isArray(source.recent) ? source.recent : [])
+    .filter(isPlainObject)
+    .slice(0, 10)
+    .map((item, index) => ({
+      path: boundedPath(item.path),
+      label: safeText(item.label, `最近工作区 ${index + 1}`, 96)
+    }))
+    .filter((item) => item.path);
+  return {
+    generation: Number.isSafeInteger(runtime.generation) && runtime.generation >= 0
+      ? runtime.generation : 0,
+    busy: runtime.busy === true,
+    current: {
+      configuredPath: boundedPath(current.configuredPath),
+      effectivePath: boundedPath(current.effectivePath),
+      label,
+      legacyHome: current.legacyHome === true
+    },
+    recent,
+    title: `鲸坞 WhaleDock — ${label}`
+  };
+}
+
+function hotkeyBindings(value) {
+  const source = isPlainObject(value) ? value : {};
+  const result = [];
+  if (typeof source.hotkey === 'string' && source.hotkey.trim()) {
+    result.push({ key: source.hotkey.trim(), kind: 'main' });
+  }
+  if (source.screenshotHotkeyEnabled === true
+      && typeof source.screenshotHotkey === 'string' && source.screenshotHotkey.trim()) {
+    result.push({ key: source.screenshotHotkey.trim(), kind: 'capture' });
+  }
+  if (result.length === 2 && result[0].key.toLowerCase() === result[1].key.toLowerCase()) {
+    throw new Error('截图快捷键不能与主窗口快捷键相同');
+  }
+  return result;
+}
+
+// 先把两个新绑定当成一笔运行时事务。返回的 rollback 供 config
+// 持久失败时调用；任一 register 失败时函数内部已恢复两个旧绑定。
+function applyHotkeyBindings(previous, next, runtime) {
+  if (!runtime || typeof runtime.register !== 'function' || typeof runtime.unregister !== 'function') {
+    throw new Error('快捷键运行时不可用');
+  }
+  const before = hotkeyBindings(previous);
+  const after = hotkeyBindings(next);
+  const unregister = (items) => {
+    for (const item of items) {
+      try { runtime.unregister(item.key); } catch (_error) { /* 继续恢复其他绑定 */ }
+    }
+  };
+  const register = (items) => {
+    const registered = [];
+    for (const item of items) {
+      let ok = false;
+      try { ok = runtime.register(item.key, item.kind) === true; } catch (_error) { ok = false; }
+      if (!ok) {
+        unregister(registered);
+        throw new Error(`快捷键 ${item.key} 被占用`);
+      }
+      registered.push(item);
+    }
+  };
+  const restoreBefore = () => {
+    try {
+      register(before);
+    } catch (error) {
+      throw new Error(`旧快捷键恢复失败：${error.message}`);
+    }
+  };
+
+  unregister(before);
+  try {
+    register(after);
+  } catch (error) {
+    unregister(after);
+    try { restoreBefore(); }
+    catch (restoreError) {
+      throw new Error(`${error.message}，且${restoreError.message}`);
+    }
+    throw new Error(`${error.message}，已恢复旧快捷键`);
+  }
+
+  let active = true;
+  return {
+    commit() { active = false; },
+    rollback() {
+      if (!active) return;
+      unregister(after);
+      restoreBefore();
+      active = false;
+    }
+  };
+}
+
+function captureDeliveryRequest(value) {
+  if (!isPlainObject(value)) throw new Error('图片交付请求必须是 plain object');
+  const allowed = new Set(['captureId', 'action', 'targetToken']);
+  if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error('图片交付请求含未批准字段');
+  if (typeof value.captureId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value.captureId)) {
+    throw new Error('captureId 无效');
+  }
+  if (!['send', 'copy', 'save-only'].includes(value.action)) throw new Error('图片交付动作无效');
+  const targetToken = value.targetToken == null ? null : value.targetToken;
+  if (targetToken !== null && (typeof targetToken !== 'string' || targetToken.length < 1
+      || targetToken.length > 256 || /[\u0000-\u001f\u007f]/.test(targetToken))) {
+    throw new Error('会话临时 token 无效');
+  }
+  if (value.action === 'send' && !targetToken) throw new Error('发送前必须选择会话');
+  return { captureId: value.captureId, action: value.action, targetToken };
 }
 
 // Renderer 只得到匿名聚合；不透传 event service 未来可能增加的字段。
@@ -399,6 +527,11 @@ let updateStartTimer = null;
 let updateIntervalTimer = null;
 let updateCheckPromise = null;
 const pendingBackendStops = new Set();
+const intentionalBackendStops = new Set();
+const pendingWorkspaceOperations = new Set();
+let workspacePostFinalizeEventActivation = false;
+let workspaceCommittedRecoveryPending = false;
+let workspaceRollbackBackendExpected = false;
 let eventService = null;
 let eventServiceError = null;
 let eventMonitor = null;
@@ -408,6 +541,19 @@ let attentionCount = 0;
 let lastNoticePayload = null;
 let eventShutdownPromise = null;
 let eventShutdownComplete = false;
+let workspaceCoordinator = null;
+let workspaceJournal = null;
+let captureWindow = null;
+let captureFileUrl = null;
+let captureState = null;
+let capturePromptAdapter = null;
+let captureChild = null;
+let ocrChild = null;
+let captureSerial = Promise.resolve();
+let captureShutdownPromise = null;
+let captureShutdownComplete = false;
+let captureEpoch = 0;
+let captureShuttingDown = false;
 
 // ---------- 单实例 ----------
 if (!MAIN_HELPER_TEST) {
@@ -424,15 +570,333 @@ if (!MAIN_HELPER_TEST) {
 
 // 从旧名 "Harness Desktop" 迁移配置（v0.1.1 改名鲸坞 WhaleDock，见 DECISIONS D10）
 function migrateLegacyConfig() {
-  try {
-    const ud = app.getPath('userData');
-    const legacyCfg = path.join(path.dirname(ud), 'Harness Desktop', 'config.json');
-    const newCfg = path.join(ud, 'config.json');
-    if (!fs.existsSync(newCfg) && fs.existsSync(legacyCfg)) {
+  const ud = app.getPath('userData');
+  const legacyCfg = path.join(path.dirname(ud), 'Harness Desktop', 'config.json');
+  const newCfg = path.join(ud, 'config.json');
+  if (!fs.existsSync(newCfg) && fs.existsSync(legacyCfg)) {
+    try {
       fs.mkdirSync(ud, { recursive: true });
       fs.copyFileSync(legacyCfg, newCfg);
+    } catch (cause) {
+      const error = new Error('旧版配置存在但迁移失败，未把该用户当成全新安装');
+      error.code = 'CONFIG_MIGRATION_FAILED';
+      error.cause = cause;
+      throw error;
     }
-  } catch (_e) { /* 迁移失败不阻塞启动，走默认配置 */ }
+  }
+}
+
+async function initializeWorkspaceConfig() {
+  migrateLegacyConfig();
+  const userData = app.getPath('userData');
+  let freshWorkspaceError = null;
+  try {
+    return config.init(userData, {
+      // factory 只在 config 真实 ENOENT 时调用；旧 null/缺字段不创建新目录。
+      freshDefaults: () => {
+        try {
+          return {
+            workdir: workspaces.ensureDefaultWorkspace(app.getPath('documents'), {
+              forbiddenRoots: forbiddenWorkspaceRoots()
+            }).canonicalPath
+          };
+        } catch (error) {
+          freshWorkspaceError = error;
+          throw error;
+        }
+      }
+    });
+  } catch (error) {
+    if (!freshWorkspaceError || error !== freshWorkspaceError) throw error;
+  }
+
+  const choice = await dialog.showMessageBox({
+    type: 'error',
+    message: '无法创建鲸坞默认工作区',
+    detail: '鲸坞不会回落到整个主目录启动。请选择一个其他文件夹，或退出后检查目录权限。',
+    buttons: ['选择其他文件夹', '退出'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true
+  });
+  if (choice.response !== 0) {
+    const error = new Error('用户取消了全新工作区选择');
+    error.code = 'ERR_WORKSPACE_BOOTSTRAP_CANCELLED';
+    throw error;
+  }
+  const selected = await dialog.showOpenDialog({
+    title: '选择鲸坞默认工作区',
+    properties: ['openDirectory', 'createDirectory']
+  });
+  if (selected.canceled || !selected.filePaths[0]) {
+    const error = new Error('未选择可用工作区，未启动后端');
+    error.code = 'ERR_WORKSPACE_BOOTSTRAP_CANCELLED';
+    throw error;
+  }
+  const canonical = workspaces.canonicalWorkspace(selected.filePaths[0], {
+    forbiddenRoots: forbiddenWorkspaceRoots()
+  });
+  return config.init(userData, { freshDefaults: { workdir: canonical.path } });
+}
+
+function forbiddenWorkspaceRoots() {
+  return config.protectedWorkspaceRoots({
+    homeDir: os.homedir(),
+    platform: process.platform
+  });
+}
+
+function currentWorkspaceSurface() {
+  const committed = workspaceCoordinator
+    ? workspaceCoordinator.snapshot()
+    : {
+        workdir: config.get('workdir'),
+        recentWorkdirs: config.get('recentWorkdirs') || [],
+        generation: 0
+      };
+  const view = workspaces.workspaceMenuView({
+    workdir: committed.workdir,
+    recentWorkdirs: committed.recentWorkdirs,
+    homeDir: os.homedir(),
+    platform: process.platform
+  });
+  return workspaceSurfaceSnapshot(view, {
+    generation: committed.generation,
+    busy: Boolean(workspaceCoordinator && workspaceCoordinator.busy)
+  });
+}
+
+function workspaceWindowTitle() {
+  try { return currentWorkspaceSurface().title; }
+  catch (_error) { return '鲸坞 WhaleDock'; }
+}
+
+function refreshWorkspaceSurfaces() {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle(workspaceWindowTitle());
+  if (app && typeof app.isReady === 'function' && app.isReady()) createAppMenu();
+  refreshTrayMenu();
+}
+
+function workspaceJournalBlocksStartup(journal = workspaceJournal) {
+  if (!journal || typeof journal.read !== 'function') return true;
+  try {
+    return journal.read() !== null;
+  } catch (_error) {
+    // 不可读、坏 JSON 或未来 schema 都必须保持 fail-closed；只有
+    // coordinator 的 recover/startAndConfirm 私有 token 能继续取证。
+    return true;
+  }
+}
+
+async function startWorkspaceBackend({ workdir, rollback = false, recovery = false }) {
+  backendReady = false;
+  await waitForPendingBackendStops();
+  const port = config.get('port');
+  if (quitting) throw Object.assign(new Error('App 正在退出，未启动工作区后端'), {
+    code: 'ERR_WORKSPACE_QUITTING'
+  });
+  if (await backend.isPortOpen(port)) {
+    const error = new Error('目标启动前端口已被占用，未 attach 也未提交工作区');
+    error.code = 'ERR_WORKSPACE_TARGET_PORT_OCCUPIED';
+    throw error;
+  }
+  const started = startManagedBackend({
+    workspaceJournalToken: WORKSPACE_COORDINATOR_START_TOKEN
+  });
+  try {
+    const ready = await backend.waitForPort(port, {
+      timeoutMs: 5 * 60 * 1000,
+      shouldAbort: () => quitting || started.exited || backendState !== started
+    });
+    if (!ready || quitting || started.exited || backendState !== started || spawnedByUs !== true) {
+      const error = new Error('切换后端未在目标工作区保持就绪');
+      error.code = 'ERR_WORKSPACE_BACKEND_NOT_READY';
+      error.state = started;
+      throw error;
+    }
+    if (backendState !== started || spawnedByUs !== true || started.exited) {
+      const error = new Error('工作区后端所有权在 cwd 取证前已变化');
+      error.code = 'ERR_WORKSPACE_TARGET_OWNERSHIP';
+      error.state = started;
+      throw error;
+    }
+    const proof = await backend.proveManagedWorkdir({ port, state: started });
+    if (!proof || proof.proven !== true || typeof proof.cwd !== 'string'
+        || proof.cwd.length < 1 || proof.cwd.length > 4096 || proof.cwd.includes('\0')) {
+      const error = new Error('无法证明目标后端的实际工作目录');
+      error.code = 'ERR_WORKSPACE_TARGET_CWD';
+      error.state = started;
+      throw error;
+    }
+    const forbiddenRoots = forbiddenWorkspaceRoots();
+    const actual = workspaces.canonicalWorkspace(proof.cwd, { forbiddenRoots });
+    const expected = workspaces.canonicalWorkspace(workdir || os.homedir(), { forbiddenRoots });
+    if (actual.key !== expected.key || backendState !== started
+        || spawnedByUs !== true || started.exited || quitting) {
+      const error = new Error('目标后端实际 cwd 与待提交工作区不一致');
+      error.code = 'ERR_WORKSPACE_TARGET_CWD';
+      error.state = started;
+      throw error;
+    }
+    backendReady = true;
+    if (rollback || recovery) workspaceRollbackBackendExpected = true;
+    return { state: started, effectiveWorkdir: actual.path };
+  } catch (error) {
+    backendReady = false;
+    try {
+      await stopOwnedBackend(started, { reason: '工作区目标启动失败清理' });
+    } catch (stopError) {
+      if (!stopError.state) stopError.state = started;
+      stopError.startError = error;
+      throw stopError;
+    }
+    if (!error.state) error.state = started;
+    throw error;
+  }
+}
+
+async function launchCommittedWorkspaceEventLayer(reason, options = {}) {
+  const state = backendState;
+  if (quitting || !backendReady || !spawnedByUs || !state || state.exited) {
+    if (!quitting && options.expectedManaged === true) {
+      workspaceCommittedRecoveryPending = true;
+    }
+    log.line('workspace', `${reason}后无可证明的托管后端，未启动事件层`);
+    return false;
+  }
+  const identity = { state, spawnedByUs: true };
+  workspacePostFinalizeEventActivation = true;
+  try {
+    const established = await launchEventLayer(identity);
+    if (!identityStillCurrent(identity)) {
+      // journal 已 finalize/remove，coordinator 不会再回滚这一代；等事务
+      // promise 退出 pending 集合后再走普通恢复，避免 busy 分支吞掉退出。
+      workspaceCommittedRecoveryPending = true;
+      log.line('workspace', `${reason}后端在事件层启动期间退出，事务结束后恢复`);
+      return false;
+    }
+    if (!established) {
+      log.line('events', `${reason}已完成，但事件层未建立；主 Harness 继续可用`);
+    }
+    return established;
+  } finally {
+    workspacePostFinalizeEventActivation = false;
+  }
+}
+
+function maybeRecoverCommittedWorkspaceBackend() {
+  if (!workspaceCommittedRecoveryPending || pendingWorkspaceOperations.size > 0) return;
+  workspaceCommittedRecoveryPending = false;
+  if (quitting || backendReady || backendState || startupPromise || recoveringBackend) return;
+  void recoverBackendInBackground();
+}
+
+function initializeWorkspaceCoordinator() {
+  workspaceJournal = workspaces.createWorkspaceJournalStore({
+    filePath: path.join(app.getPath('userData'), 'workspace-switch.json')
+  });
+  workspaceCoordinator = workspaces.createWorkspaceSwitchCoordinator({
+    platform: process.platform,
+    homeDir: os.homedir(),
+    canonicalize: (value) => workspaces.canonicalWorkspace(value, {
+      forbiddenRoots: forbiddenWorkspaceRoots()
+    }),
+    getConfig: () => ({
+      workdir: config.get('workdir'),
+      recentWorkdirs: config.get('recentWorkdirs') || []
+    }),
+    setWorkspaceConfig: async (patch) => { config.set(patch); },
+    getRuntime: () => ({ backendReady, spawnedByUs, state: backendState }),
+    isBudgetPaused: () => budgetIsPaused(),
+    journal: workspaceJournal,
+    invalidateCaptures: async () => { await cancelCurrentCapture('工作区正在切换'); },
+    quiesceEvents: async () => {
+      workspaceRollbackBackendExpected = false;
+      cancelBackendRecovery('切换工作区');
+      cancelForegroundStartup('切换工作区');
+      // 先在当前 generation 仍有效时落盘尾批，让 budget-crossed
+      // 持久 latch 与托管停机 effect 都完成；随后再失效 transport。
+      const monitor = eventMonitor;
+      if (monitor && monitor.batcher) await monitor.batcher.flush();
+      await stopEventLayer('切换工作区', { disconnect: true, flushBatch: true });
+    },
+    stopManaged: async (state) => {
+      await stopEventLayer('工作区事务停止托管后端', {
+        disconnect: true,
+        flushBatch: true
+      });
+      await stopOwnedBackend(state, { reason: '工作区事务停止托管后端' });
+    },
+    startAndConfirm: (options) => startWorkspaceBackend(options),
+    recoveryPortClear: async () => !(await backend.isPortOpen(config.get('port'))),
+    onCommit: async () => {
+      refreshWorkspaceSurfaces();
+      await launchCommittedWorkspaceEventLayer('工作区提交', { expectedManaged: true });
+    },
+    onRollback: async () => {
+      refreshWorkspaceSurfaces();
+      const expectedManaged = workspaceRollbackBackendExpected;
+      workspaceRollbackBackendExpected = false;
+      await launchCommittedWorkspaceEventLayer('工作区回滚', { expectedManaged });
+    }
+  });
+}
+
+function trackWorkspaceOperation(value) {
+  const pending = Promise.resolve(value);
+  pendingWorkspaceOperations.add(pending);
+  const remove = () => {
+    pendingWorkspaceOperations.delete(pending);
+    maybeRecoverCommittedWorkspaceBackend();
+  };
+  void pending.then(remove, remove);
+  return pending;
+}
+
+async function recoverWorkspaceAtStartup() {
+  if (!workspaceCoordinator) throw new Error('工作区协调器尚未初始化');
+  workspaceRollbackBackendExpected = false;
+  try {
+    const result = await trackWorkspaceOperation(workspaceCoordinator.recoverAtStartup());
+    if (result.status !== 'none') log.line('workspace', `启动恢复完成：${result.status}`);
+    return result;
+  } catch (error) {
+    if (error && error.code === 'ERR_WORKSPACE_JOURNAL_INVALID' && workspaceJournal) {
+      try { workspaceJournal.quarantineInvalid(); } catch (_quarantineError) { /* 保留原件仍 fail-closed */ }
+    }
+    log.line('workspace', `工作区 journal 恢复失败：${error && error.code || 'unknown'}`);
+    throw error;
+  }
+}
+
+async function switchWorkspace(target) {
+  if (!workspaceCoordinator) throw new Error('工作区协调器不可用');
+  if (quitting) throw new Error('App 正在退出，未开始新的工作区切换');
+  try {
+    const result = await trackWorkspaceOperation(workspaceCoordinator.switchTo(target));
+    if (mainWindow && !mainWindow.isDestroyed() && backendReady) {
+      mainWindow.destroy();
+      mainWindow = null;
+      openMainWindow();
+    }
+    return result;
+  } finally {
+    // coordinator 的 commit/rollback callback 仍处于 busy 队列内；
+    // promise 落定后再刷新一次，避免失败后菜单永久停在“正在切换”。
+    refreshWorkspaceSurfaces();
+  }
+}
+
+async function chooseAndSwitchWorkspace(parentWindow) {
+  const options = {
+    title: '选择并切换工作区',
+    properties: ['openDirectory', 'createDirectory']
+  };
+  const result = parentWindow && !parentWindow.isDestroyed()
+    ? await dialog.showOpenDialog(parentWindow, options)
+    : await dialog.showOpenDialog(options);
+  if (result.canceled || !result.filePaths[0]) return { status: 'cancelled' };
+  return switchWorkspace(result.filePaths[0]);
 }
 
 function baseUrl() {
@@ -789,10 +1253,15 @@ async function activateEventLayerForBackend(identity, options = {}) {
   }
 }
 
-function launchEventLayer(identity, options = {}) {
-  void activateEventLayerForBackend(identity, options).catch((error) => {
+async function launchEventLayer(identity, options = {}) {
+  try {
+    await activateEventLayerForBackend(identity, options);
+    return Boolean(eventMonitor && eventMonitor.established
+      && eventLayerCurrent(eventMonitor) && identityStillCurrent(identity));
+  } catch (error) {
     log.line('events', `事件层启动异常，主 Harness 继续可用：${error && error.code || 'unknown'}`);
-  });
+    return false;
+  }
 }
 
 async function handleEventTransportClosed(monitor, error) {
@@ -962,11 +1431,9 @@ async function applyBudgetCrossed(effect, monitor) {
   cancelBackendRecovery('今日预算已暂停');
   cancelForegroundStartup('今日预算已暂停');
   const ownedState = backendState;
-  backendState = null;
-  spawnedByUs = false;
   backendReady = false;
   invalidateMonitorFromPersistedEffect(monitor);
-  await stopManagedBackend(ownedState);
+  await stopOwnedBackend(ownedState, { reason: '日预算暂停托管后端' });
   log.line('events', `日预算已暂停托管后端：${effect.observedTokens}/${effect.limitTokens} tokens`);
   deliverTaskNotification({
     kind: 'waiting',
@@ -1004,14 +1471,14 @@ async function handleEventEffects(value, monitor) {
 
 // ---------- 启动 ----------
 async function onReady() {
-  migrateLegacyConfig();
   backend.setRuntimeInfo({
     execPath: process.execPath,
     resourcesPath: process.resourcesPath
   });
-  config.init(app.getPath('userData'));
+  await initializeWorkspaceConfig();
   log.init(path.join(app.getPath('userData'), 'logs'));
   initEventService();
+  initializeWorkspaceCoordinator();
   log.line('app', `鲸坞 WhaleDock v${app.getVersion()} 启动 (${process.platform}/${process.arch})`);
   initialStartMinimized = config.get('startMinimized') && !SMOKE;
 
@@ -1020,20 +1487,36 @@ async function onReady() {
   ipcMain.on('splash-action', onSplashAction);
   registerSettingsIpc();
   registerEventIpc();
+  registerCaptureIpc();
+  try { await imageInput.cleanupOwnedStaging({ stagingRoot: captureStagingRoot() }); }
+  catch (error) { log.line('capture', `启动清理 staging 失败：${error && error.code || 'unknown'}`); }
+  await recoverWorkspaceAtStartup();
   reconcileLoginItem();
   if (!initialStartMinimized) createSplash();
   else log.line('app', '启动最小化已启用：后台启动期间不创建启动页或主窗口');
   createTray();
   createAppMenu();
-  registerHotkey();
+  registerHotkeys();
   configureUpdateSchedule();
   await ensureBackendAndShow(!initialStartMinimized);
 }
 
-function startManagedBackend() {
+function startManagedBackend(options = {}) {
+  if (options.workspaceJournalToken !== WORKSPACE_COORDINATOR_START_TOKEN
+      && workspaceJournalBlocksStartup()) {
+    const error = new Error('工作区 journal 尚未闭环，拒绝普通路径启动后端');
+    error.code = 'ERR_WORKSPACE_JOURNAL_ACTIVE';
+    throw error;
+  }
   if (!backendStartAllowed(budgetIsPaused())) {
     const error = new Error('今日预算暂停中，拒绝自动拉起后端');
     error.code = 'BUDGET_PAUSED';
+    throw error;
+  }
+  if (backendState && spawnedByUs && backendState.exited !== true) {
+    const error = new Error('已有未确认退出的鲸坞托管后端，拒绝重复拉起');
+    error.code = 'ERR_BACKEND_STOP_UNCONFIRMED';
+    error.state = backendState;
     throw error;
   }
   let state = null;
@@ -1047,8 +1530,45 @@ function startManagedBackend() {
   return state;
 }
 
-function stopManagedBackend(state) {
-  const pending = backend.stop(state);
+function stopOwnedBackend(state, options = {}) {
+  const reason = safeText(options.reason, '停止托管后端', 100);
+  const pending = (async () => {
+    if (!state || typeof state !== 'object') {
+      const error = new Error(`${reason}：缺少可证明的托管进程`);
+      error.code = 'ERR_BACKEND_STOP_OWNERSHIP';
+      throw error;
+    }
+    backendReady = false;
+    if (state.exited !== true && (backendState !== state || spawnedByUs !== true)) {
+      const error = new Error(`${reason}：托管进程所有权已变化，拒绝停止未知进程`);
+      error.code = 'ERR_BACKEND_STOP_OWNERSHIP';
+      error.state = state;
+      throw error;
+    }
+    let stopError = null;
+    if (state.exited !== true) {
+      intentionalBackendStops.add(state);
+      try { await backend.stop(state); } catch (error) { stopError = error; }
+    }
+    if (state.exited !== true) {
+      const error = new Error(`${reason}：无法确认托管进程已经退出`);
+      error.code = 'ERR_BACKEND_STOP_UNCONFIRMED';
+      error.state = state;
+      if (stopError) error.cause = stopError;
+      // 保留 backendState/spawnedByUs；所有启动入口都会看到仍存活的
+      // owned identity，禁止在未确认退出时再拉起第二个后端。
+      throw error;
+    }
+    intentionalBackendStops.delete(state);
+    if (backendState === state) {
+      backendState = null;
+      spawnedByUs = false;
+    }
+    if (stopError) {
+      log.line('app', `${reason}时 stop 返回异常，但已确认进程退出：${stopError.code || 'unknown'}`);
+    }
+    return true;
+  })();
   pendingBackendStops.add(pending);
   const remove = () => pendingBackendStops.delete(pending);
   void pending.then(remove, remove);
@@ -1090,6 +1610,10 @@ function cancelForegroundStartup(reason) {
 async function ensureBackendAndShowOnce(generation, showWindow) {
   try {
     backendReady = false;
+    if (workspaceJournalBlocksStartup()) {
+      status('error', '工作区切换尚未安全收口', '请重新启动鲸坞，让 journal 恢复流程先完成');
+      return;
+    }
     const port = config.get('port');
     status('checking', '正在检查本地 Harness 服务…');
 
@@ -1153,10 +1677,8 @@ async function ensureBackendAndShowOnce(generation, showWindow) {
     // 重试前仍有自己拉起的旧进程时，必须先完整停掉，避免双开和退出漏清理。
     if (backendState && !backendState.exited) {
       const staleState = backendState;
-      backendState = null;
-      spawnedByUs = false;
       log.line('app', '检测到旧后端仍存活，停止后再重试');
-      await stopManagedBackend(staleState);
+      await stopOwnedBackend(staleState, { reason: '前台启动重试清理旧后端' });
       if (!startupIsCurrent(generation)) return;
     }
 
@@ -1257,6 +1779,10 @@ function notifyBackendRecoveryFailed() {
 
 async function recoverBackendInBackground() {
   if (recoveringBackend || quitting) return;
+  if (workspaceJournalBlocksStartup()) {
+    log.line('workspace', '活动 journal 尚未闭环，拒绝后台恢复或 attach');
+    return;
+  }
   recoveringBackend = true;
   const generation = ++backendRecoveryGeneration;
   const total = BACKEND_RECOVERY_DELAYS_MS.length;
@@ -1333,12 +1859,8 @@ async function recoverBackendInBackground() {
         log.line('app', `后台恢复：第 ${attempt}/${total} 次异常：${e && e.stack || e}`);
       }
 
-      if (attemptState && backendState === attemptState) {
-        backendState = null;
-        spawnedByUs = false;
-      }
-      if (attemptState && !attemptState.exited) {
-        await stopManagedBackend(attemptState);
+      if (attemptState) {
+        await stopOwnedBackend(attemptState, { reason: `后台恢复第 ${attempt}/${total} 次清理` });
         if (!recoveryIsCurrent(generation)) return;
       }
     }
@@ -1359,6 +1881,7 @@ async function recoverBackendInBackground() {
 
 function onBackendExit(state, code) {
   log.line('app', `dsh 进程退出 code=${code}`);
+  const intentionallyStopped = intentionalBackendStops.delete(state);
   if (state !== backendState) {
     log.line('app', '忽略已失去所有权的旧后端退出事件');
     return;
@@ -1370,7 +1893,24 @@ function onBackendExit(state, code) {
   void stopEventLayer('后端进程已退出', { disconnect: true }).catch((error) => {
     log.line('events', `后端退出时关闭事件层失败：${error && error.code || 'unknown'}`);
   });
+  if (intentionallyStopped) {
+    log.line('app', '托管后端按鲸坞请求确认退出，不触发异常恢复');
+    return;
+  }
   if (quitting || !wasSpawnedByUs) return;
+  if (workspaceCoordinator && workspaceCoordinator.busy) {
+    if (workspacePostFinalizeEventActivation) {
+      // onCommit/onRollback 只会在 journal finalize/remove 后运行；这时
+      // 已没有可回滚事务，待 pending promise 移除后再走普通恢复。
+      workspaceCommittedRecoveryPending = true;
+      log.line('workspace', '工作区已提交后端退出，事务结束后恢复');
+    } else {
+      // 目标后端在 journal 提交前退出时，由该事务唯一地回滚
+      // config/backend/journal，禁止另一条自动恢复链并发启动。
+      log.line('workspace', '工作区事务中后端退出，交由 coordinator 回滚');
+    }
+    return;
+  }
   if (startupPromise) {
     log.line('app', '后端在前台启动流程中退出，交由启动页处理');
     return;
@@ -1451,7 +1991,7 @@ function openMainWindow() {
     minWidth: 960,
     minHeight: 620,
     show: false,
-    title: '鲸坞 WhaleDock',
+    title: workspaceWindowTitle(),
     backgroundColor: '#0b0f19',
     webPreferences: { contextIsolation: true, nodeIntegration: false }
   });
@@ -1481,10 +2021,10 @@ function openMainWindow() {
     if (retryTimer) clearTimeout(retryTimer);
     retryTimer = null;
   });
-  // Harness Web UI 会把页面标题设为 "DeepSeek Harness"；保留鲸坞原生窗口品牌。
+  // Harness Web UI 会改页面标题；永远从 committed workspace 重算鲸坞标题。
   win.on('page-title-updated', (event) => {
     event.preventDefault();
-    if (!win.isDestroyed()) win.setTitle('鲸坞 WhaleDock');
+    if (!win.isDestroyed()) win.setTitle(workspaceWindowTitle());
   });
   win.once('ready-to-show', () => {
     if (quitting || win.isDestroyed()) return;
@@ -1760,6 +2300,641 @@ function registerEventIpc() {
   }));
 }
 
+// ---------- v0.4 截图与图片自有窗口 ----------
+let captureNotice = '';
+
+function captureStagingRoot() {
+  return path.join(app.getPath('userData'), 'capture-staging');
+}
+
+function ocrScriptsRoot(runtime = {}) {
+  const packaged = typeof runtime.packaged === 'boolean'
+    ? runtime.packaged : Boolean(app && app.isPackaged);
+  const base = packaged
+    ? (runtime.resourcesPath || process.resourcesPath)
+    : (runtime.appDir || __dirname);
+  if (typeof base !== 'string' || !path.isAbsolute(base) || base.includes('\0')) {
+    const error = new Error('OCR 脚本根目录不可证明');
+    error.code = 'ERR_CAPTURE_OCR_ROOT';
+    throw error;
+  }
+  return packaged ? path.join(base, 'ocr') : path.join(base, 'assets', 'ocr');
+}
+
+function captureTerminalStage(stage) {
+  return ['copied', 'done', 'failed', 'cancelled'].includes(stage);
+}
+
+function captureRendererState() {
+  if (!captureState) {
+    return {
+      stage: 'idle',
+      platform: process.platform,
+      instruction: process.platform === 'win32'
+        ? '请按 Win+Shift+S 框选，然后明确点击“读取剪贴板”。'
+        : '可拖入一张 PNG/JPEG，或显式读取剪贴板图片。'
+    };
+  }
+  return {
+    ...imageInput.captureRendererSnapshot(captureState),
+    platform: process.platform,
+    instruction: captureState.source === 'windows-clipboard' && captureState.stage === 'acquiring'
+      ? '请按 Win+Shift+S 框选，然后点击“读取剪贴板”。鲸坞不会监听剪贴板。'
+      : null,
+    notice: safeText(captureNotice, '', 240)
+  };
+}
+
+function sendCaptureState() {
+  if (captureWindow && !captureWindow.isDestroyed()) {
+    captureWindow.webContents.send('capture:state', captureRendererState());
+  }
+}
+
+function queueCaptureMutation(operation) {
+  const run = captureSerial.then(operation, operation);
+  captureSerial = run.catch(() => {});
+  return run;
+}
+
+async function closeCapturePromptAdapter(target = capturePromptAdapter) {
+  const promptAdapter = target;
+  if (capturePromptAdapter === promptAdapter) capturePromptAdapter = null;
+  if (promptAdapter) {
+    try { await promptAdapter.close(); } catch (_error) { /* 截图结束继续清理 staging */ }
+  }
+}
+
+function currentCaptureOwner() {
+  return captureState ? { captureId: captureState.captureId, epoch: captureEpoch } : null;
+}
+
+function captureOwnerCurrent(owner) {
+  return Boolean(owner && !quitting && !captureShuttingDown && captureState
+    && captureState.captureId === owner.captureId && captureEpoch === owner.epoch);
+}
+
+function requireCaptureOwner(owner) {
+  if (!captureOwnerCurrent(owner)) {
+    const error = new Error('图片处理代已失效');
+    error.code = 'ERR_CAPTURE_STALE';
+    throw error;
+  }
+  return captureState;
+}
+
+async function cleanupCaptureStaging(state = captureState) {
+  if (!state || typeof state.stagingPath !== 'string') return;
+  try {
+    await imageInput.cleanupStagingFile(state.stagingPath, captureStagingRoot());
+  } catch (_error) { /* 只清理受控文件，失败留待下次启动 */ }
+}
+
+async function cancelCurrentCapture(reason = '') {
+  // 先同步摘除所有全局所有权，再做任何 await。旧 OCR/prompt
+  // 即使稍后落定，也无法污染新 capture 或在退出时写剪贴板。
+  const state = captureState;
+  const promptAdapter = capturePromptAdapter;
+  const screenshotProcess = captureChild;
+  const recognitionProcess = ocrChild;
+  const win = captureWindow;
+  captureEpoch += 1;
+  captureState = null;
+  capturePromptAdapter = null;
+  captureChild = null;
+  ocrChild = null;
+  captureWindow = null;
+  captureNotice = '';
+  if (screenshotProcess && !screenshotProcess.killed) {
+    try { screenshotProcess.kill(); } catch (_error) { /* child 可能已退出 */ }
+  }
+  if (recognitionProcess && !recognitionProcess.killed) {
+    try { recognitionProcess.kill(); } catch (_error) { /* child 可能已退出 */ }
+  }
+  if (win && !win.isDestroyed()) win.destroy();
+  await closeCapturePromptAdapter(promptAdapter);
+  await cleanupCaptureStaging(state);
+  if (reason) log.line('capture', `当前图片处理已取消：${safeText(reason, '用户取消', 80)}`);
+}
+
+function beginCaptureState(source) {
+  if (quitting || captureShuttingDown) throw new Error('App 正在退出，未开始新的图片处理');
+  const workspace = currentWorkspaceSurface();
+  captureEpoch += 1;
+  captureNotice = '';
+  captureState = imageInput.createCapture({
+    captureId: crypto.randomUUID().replace(/-/g, ''),
+    source,
+    workspaceGeneration: workspace.generation,
+    workspaceLabel: workspace.current.label
+  });
+  return captureState;
+}
+
+function prepareCaptureAcquisition(source) {
+  if (!captureState || captureState.stage !== 'acquiring') {
+    const error = new Error('当前图片已进入确认流程，请先取消或完成');
+    error.code = 'ERR_CAPTURE_BUSY';
+    throw error;
+  }
+  // 在 IPC 入队前同步确定来源并换代；排队中的旧请求永远携带旧 owner，
+  // 不得在任一 await 后重新读取全局状态并认领新的 capture。
+  if (captureState.source !== source) beginCaptureState(source);
+  return captureState;
+}
+
+function openCaptureWindow(options = {}) {
+  const source = ['mac-capture', 'windows-clipboard', 'paste', 'drop'].includes(options.source)
+    ? options.source : 'drop';
+  if (!captureState || captureTerminalStage(captureState.stage)) beginCaptureState(source);
+  if (captureWindow && !captureWindow.isDestroyed()) {
+    if (options.show !== false) {
+      captureWindow.show();
+      captureWindow.focus();
+    }
+    sendCaptureState();
+    return captureWindow;
+  }
+  captureFileUrl = pathToFileURL(path.join(__dirname, 'capture.html')).href;
+  const win = new BrowserWindow({
+    width: 760,
+    height: 680,
+    minWidth: 640,
+    minHeight: 560,
+    show: false,
+    title: '截图与图片 · 鲸坞 WhaleDock',
+    backgroundColor: '#09111a',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-capture.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false
+    }
+  });
+  captureWindow = win;
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (event, url) => {
+    if (url !== captureFileUrl) event.preventDefault();
+  });
+  win.webContents.on('render-process-gone', () => {
+    if (captureWindow === win) void cancelCurrentCapture('图片窗口异常退出');
+  });
+  win.webContents.on('did-finish-load', () => {
+    if (captureWindow === win) sendCaptureState();
+  });
+  win.once('ready-to-show', () => {
+    if (captureWindow === win && options.show !== false && !win.isDestroyed()) {
+      win.show();
+      win.focus();
+    }
+  });
+  win.on('closed', () => {
+    if (captureWindow !== win) return;
+    captureWindow = null;
+    if (captureState) void cancelCurrentCapture('图片窗口已关闭');
+  });
+  void win.loadFile('capture.html');
+  return win;
+}
+
+function thumbnailDataUrl(image) {
+  const size = image.getSize();
+  const scale = Math.min(1, 720 / Math.max(size.width, size.height));
+  let preview = scale < 1
+    ? image.resize({
+        width: Math.max(1, Math.round(size.width * scale)),
+        height: Math.max(1, Math.round(size.height * scale)),
+        quality: 'good'
+      })
+    : image;
+  let value = preview.toDataURL();
+  if (Buffer.byteLength(value, 'utf8') > imageInput.LIMITS.maxThumbnailBytes) {
+    const smaller = Math.min(1, 360 / Math.max(size.width, size.height));
+    preview = image.resize({
+      width: Math.max(1, Math.round(size.width * smaller)),
+      height: Math.max(1, Math.round(size.height * smaller)),
+      quality: 'good'
+    });
+    value = preview.toDataURL();
+  }
+  if (Buffer.byteLength(value, 'utf8') > imageInput.LIMITS.maxThumbnailBytes) {
+    throw new Error('图片缩略图超过安全上限');
+  }
+  return value;
+}
+
+async function acquireImageBuffer(buffer, source, sourcePath, owner) {
+  const ownerState = requireCaptureOwner(owner);
+  if (ownerState.stage !== 'acquiring' || ownerState.source !== source) {
+    const error = new Error('当前图片已进入确认流程，请先取消或完成');
+    error.code = 'ERR_CAPTURE_BUSY';
+    throw error;
+  }
+  if (!Buffer.isBuffer(buffer) || buffer.length < 1
+      || buffer.length > imageInput.LIMITS.maxSourceBytes) {
+    const error = new Error('图片为空或超过 20 MiB 上限');
+    error.code = 'ERR_IMAGE_TOO_LARGE';
+    throw error;
+  }
+  const header = imageInput.inspectImageHeader(buffer);
+  const decoded = nativeImage.createFromBuffer(buffer);
+  if (decoded.isEmpty()) {
+    const error = new Error('图片无法解码');
+    error.code = 'ERR_IMAGE_DECODE';
+    throw error;
+  }
+  const dimensions = decoded.getSize();
+  imageInput.validateDecodedImage({
+    source,
+    sourceBytes: buffer.length,
+    header,
+    width: dimensions.width,
+    height: dimensions.height
+  });
+  const pngBuffer = decoded.toPNG();
+  const stagingPath = await imageInput.writeStagingPng({
+    stagingRoot: captureStagingRoot(),
+    captureId: ownerState.captureId,
+    pngBuffer
+  });
+  if (!captureOwnerCurrent(owner)) {
+    await imageInput.cleanupStagingFile(stagingPath, captureStagingRoot()).catch(() => {});
+    requireCaptureOwner(owner);
+  }
+  captureState = imageInput.reduceCapture(requireCaptureOwner(owner), {
+    type: 'acquired',
+    stagingPath,
+    ...(sourcePath ? { sourcePath } : {}),
+    thumbnail: thumbnailDataUrl(decoded),
+    width: dimensions.width,
+    height: dimensions.height
+  });
+  captureNotice = '图片已解码；请第一次确认是否保存并处理。';
+  openCaptureWindow({ source, show: true });
+  sendCaptureState();
+  return captureRendererState();
+}
+
+async function acquireDroppedFile(filePath, owner) {
+  requireCaptureOwner(owner);
+  if (typeof filePath !== 'string' || !boundedPath(filePath) || !path.isAbsolute(filePath)) {
+    throw new Error('只接受一个本地图片文件');
+  }
+  const stat = await fs.promises.lstat(filePath);
+  requireCaptureOwner(owner);
+  if (stat.isSymbolicLink() || !stat.isFile() || stat.size < 1
+      || stat.size > imageInput.LIMITS.maxSourceBytes) {
+    throw new Error('拖入项不是可用的单张图片');
+  }
+  const value = await fs.promises.readFile(filePath);
+  requireCaptureOwner(owner);
+  return acquireImageBuffer(value, 'drop', filePath, owner);
+}
+
+async function readClipboardImage(source, owner) {
+  requireCaptureOwner(owner);
+  const image = clipboard.readImage();
+  if (!image || image.isEmpty()) {
+    const error = new Error('剪贴板里没有可读取的图片');
+    error.code = 'ERR_CAPTURE_CLIPBOARD_EMPTY';
+    throw error;
+  }
+  const size = image.getSize();
+  if (!Number.isSafeInteger(size.width) || !Number.isSafeInteger(size.height)
+      || size.width < 1 || size.height < 1
+      || size.width > imageInput.LIMITS.maxSide || size.height > imageInput.LIMITS.maxSide
+      || size.width * size.height > imageInput.LIMITS.maxPixels) {
+    const error = new Error('剪贴板图片尺寸超过安全上限');
+    error.code = 'ERR_IMAGE_DIMENSIONS';
+    throw error;
+  }
+  return acquireImageBuffer(image.toPNG(), source, undefined, owner);
+}
+
+function hiddenOwnedWindows() {
+  const hidden = [];
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed() && win.isVisible()) {
+      hidden.push(win);
+      win.hide();
+    }
+  }
+  return () => {
+    for (const win of hidden) {
+      if (!win.isDestroyed()) win.show();
+    }
+  };
+}
+
+async function acquireMacScreenshot() {
+  const cancellation = cancelCurrentCapture();
+  const cancellationEpoch = captureEpoch;
+  await cancellation;
+  if (captureEpoch !== cancellationEpoch || captureState !== null
+      || quitting || captureShuttingDown) {
+    const error = new Error('截图请求已被新的图片处理替代');
+    error.code = 'ERR_CAPTURE_STALE';
+    throw error;
+  }
+  beginCaptureState('mac-capture');
+  const owner = currentCaptureOwner();
+  const planned = await imageInput.planMacCaptureStaging({
+    stagingRoot: captureStagingRoot(),
+    captureId: requireCaptureOwner(owner).captureId
+  });
+  requireCaptureOwner(owner);
+  const plan = imageInput.macCaptureCommand(planned.path);
+  const restore = hiddenOwnedWindows();
+  try {
+    const result = await new Promise((resolve) => {
+      const child = execFile(plan.file, plan.args, {
+        shell: false,
+        windowsHide: plan.windowsHide,
+        timeout: 120000,
+        maxBuffer: 64 * 1024
+      }, (error) => {
+        if (captureChild === child) captureChild = null;
+        resolve({ error });
+      });
+      captureChild = child;
+    });
+    if (!captureOwnerCurrent(owner)) return { cancelled: true };
+    let stat = null;
+    try { stat = await fs.promises.lstat(planned.path); } catch (_error) { /* Esc/权限失败 */ }
+    if (!captureOwnerCurrent(owner)) return { cancelled: true };
+    if (!stat || stat.isSymbolicLink() || !stat.isFile() || stat.size < 1
+        || stat.size > imageInput.LIMITS.maxSourceBytes) {
+      await cancelCurrentCapture(result.error ? '系统截图失败或被拒绝' : '用户取消系统截图');
+      return { cancelled: true };
+    }
+    const value = await fs.promises.readFile(planned.path);
+    requireCaptureOwner(owner);
+    return await acquireImageBuffer(value, 'mac-capture', undefined, owner);
+  } finally {
+    await imageInput.cleanupStagingFile(planned.path, captureStagingRoot()).catch(() => {});
+    restore();
+  }
+}
+
+function handleScreenshotHotkey() {
+  if (workspaceCoordinator && workspaceCoordinator.busy) {
+    log.line('capture', '工作区事务中，未开始新截图');
+    return;
+  }
+  if (captureState && !captureTerminalStage(captureState.stage)) {
+    openCaptureWindow({ source: captureState.source });
+    return;
+  }
+  if (process.platform === 'darwin') {
+    void queueCaptureMutation(acquireMacScreenshot).catch((error) => {
+      log.line('capture', `macOS 截图失败：${error && error.code || 'unknown'}`);
+      if (quitting || captureShuttingDown || (error && error.code === 'ERR_CAPTURE_STALE')) return;
+      captureNotice = '截图失败。可检查“系统设置 → 隐私与安全性 → 屏幕与系统音频录制”，或改用拖图。';
+      openCaptureWindow({ source: 'mac-capture' });
+      sendCaptureState();
+    });
+    return;
+  }
+  beginCaptureState(process.platform === 'win32' ? 'windows-clipboard' : 'drop');
+  openCaptureWindow({ source: captureState.source });
+}
+
+async function recognizeSavedCapture(owner) {
+  const savedState = requireCaptureOwner(owner);
+  const savedPath = savedState.savedPath;
+  const routeChoice = imageInput.selectImageRoute({
+    official: 'unknown',
+    plugin: 'unknown',
+    localOcr: ['darwin', 'win32'].includes(process.platform) ? 'available' : 'unavailable'
+  });
+  let route = routeChoice.route;
+  let ocrText = '';
+  let ocrTruncated = false;
+  if (route === 'local-ocr') {
+    const plan = imageInput.ocrCommand(process.platform, {
+      scriptsRoot: ocrScriptsRoot(),
+      imagePath: savedPath
+    });
+    const result = await imageInput.runBoundedOcr(plan, {
+      spawn: (file, args, options) => {
+        const child = spawn(file, args, options);
+        ocrChild = child;
+        child.once('close', () => { if (ocrChild === child) ocrChild = null; });
+        return child;
+      },
+      timeoutMs: 30000,
+      settleTimeoutMs: 1000
+    });
+    requireCaptureOwner(owner);
+    if (result.ok) {
+      ocrText = result.text;
+      ocrTruncated = result.truncated === true;
+    } else {
+      route = 'path-only';
+    }
+  }
+
+  await closeCapturePromptAdapter();
+  requireCaptureOwner(owner);
+  let promptAdapter = null;
+  let targets = [];
+  try {
+    promptAdapter = backend.createDshPromptAdapter({
+      port: config.get('port'),
+      expectedHostVersion: config.DSH_CONTRACT.hostVersion,
+      packageVersionProof: spawnedByUs && backendState
+        ? backendState.version : null
+    });
+    capturePromptAdapter = promptAdapter;
+    const listed = await promptAdapter.listTargets();
+    requireCaptureOwner(owner);
+    if (listed && listed.available === true && Array.isArray(listed.targets)) targets = listed.targets;
+  } catch (_error) { /* 会话写能力 fail-closed，保留复制 */ }
+  if (!captureOwnerCurrent(owner)) {
+    await closeCapturePromptAdapter(promptAdapter);
+    requireCaptureOwner(owner);
+  }
+  const deliveryText = imageInput.buildDeliveryText({
+    savedPath,
+    route,
+    ocrText,
+    ocrTruncated
+  });
+  captureState = imageInput.reduceCapture(requireCaptureOwner(owner), {
+    type: 'recognized',
+    route,
+    ocrText,
+    ocrTruncated,
+    deliveryText,
+    targets
+  });
+  captureNotice = targets.length
+    ? '图片已保存。请检查完整文本与目标会话，再做第二次确认。'
+    : '自动提交能力不可证明；图片已保存，可复制确认内容后手动粘贴。';
+  sendCaptureState();
+}
+
+async function failCaptureOwner(owner, error) {
+  if (!captureOwnerCurrent(owner)) return;
+  const state = captureState;
+  if (!captureTerminalStage(state.stage)) {
+    captureState = imageInput.reduceCapture(state, {
+      type: 'fail',
+      errorCode: error && error.code || 'capture-failed'
+    });
+    captureNotice = '本次图片处理未完成；已保存的图片不会被删除。';
+  }
+  await cleanupCaptureStaging(state);
+  await closeCapturePromptAdapter();
+  if (captureOwnerCurrent(owner)) sendCaptureState();
+}
+
+async function confirmCaptureSave(captureId) {
+  if (!captureState || captureState.captureId !== captureId) throw new Error('图片处理代已失效');
+  if (workspaceCoordinator && workspaceCoordinator.busy) throw new Error('工作区正在切换，请重新确认图片');
+  const owner = currentCaptureOwner();
+  captureState = imageInput.reduceCapture(requireCaptureOwner(owner), { type: 'confirm-save' });
+  sendCaptureState();
+  try {
+    const workspace = currentWorkspaceSurface();
+    const savingState = requireCaptureOwner(owner);
+    const savedPath = await imageInput.saveStagedImage({
+      stagingPath: savingState.stagingPath,
+      workspacePath: workspace.current.effectivePath,
+      forbiddenRoots: forbiddenWorkspaceRoots(),
+      workspaceGeneration: savingState.workspaceGeneration,
+      currentWorkspaceGeneration: workspace.generation
+    });
+    captureState = imageInput.reduceCapture(requireCaptureOwner(owner), { type: 'saved', savedPath });
+    sendCaptureState();
+    await recognizeSavedCapture(owner);
+    requireCaptureOwner(owner);
+    return captureRendererState();
+  } catch (error) {
+    await failCaptureOwner(owner, error);
+    throw error;
+  }
+}
+
+async function deliverCapture(value) {
+  const request = captureDeliveryRequest(value);
+  if (!captureState || captureState.captureId !== request.captureId) throw new Error('图片处理代已失效');
+  const owner = currentCaptureOwner();
+  if (request.action === 'save-only') {
+    captureState = imageInput.reduceCapture(requireCaptureOwner(owner), { type: 'save-only' });
+    captureNotice = '图片已保存，未发送也未写入剪贴板。';
+  } else if (request.action === 'copy') {
+    const state = requireCaptureOwner(owner);
+    clipboard.writeText(state.deliveryText);
+    captureState = imageInput.reduceCapture(state, { type: 'copied' });
+    captureNotice = '已把用户确认的文本与图片路径复制到剪贴板；剪贴板可被其他应用读取。';
+  } else {
+    const readyState = requireCaptureOwner(owner);
+    const promptAdapter = capturePromptAdapter;
+    captureState = imageInput.reduceCapture(readyState, { type: 'submit' });
+    sendCaptureState();
+    let result = { state: 'unknown', reason: 'adapter-unavailable' };
+    if (promptAdapter) {
+      try {
+        result = await promptAdapter.submitText({
+          targetToken: request.targetToken,
+          text: readyState.deliveryText,
+          clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        });
+      } catch (_error) {
+        result = { state: 'unknown', reason: 'adapter-error' };
+      }
+    }
+    // 取消/切工作区/退出后，unknown 也不得写剪贴板或更改新 capture。
+    const submittingState = requireCaptureOwner(owner);
+    if (result.state === 'accepted') {
+      captureState = imageInput.reduceCapture(submittingState, { type: 'accepted' });
+      captureNotice = '已提交。回答请回主 Harness 窗口查看；这不代表模型已完成回答。';
+    } else {
+      clipboard.writeText(submittingState.deliveryText);
+      captureState = imageInput.reduceCapture(submittingState, { type: 'copied' });
+      captureNotice = result.state === 'unknown'
+        ? '提交结果不确定，未自动重试。已复制确认内容；请先检查会话，避免重复。'
+        : '会话未接纳该请求。已复制确认内容，可手动粘贴。';
+    }
+  }
+  const finalState = requireCaptureOwner(owner);
+  const promptAdapter = capturePromptAdapter;
+  await cleanupCaptureStaging(finalState);
+  await closeCapturePromptAdapter(promptAdapter);
+  requireCaptureOwner(owner);
+  sendCaptureState();
+  return captureRendererState();
+}
+
+function trustedCaptureHandler(handler) {
+  return async (event, ...args) => {
+    if (!trustedLocalEvent(event, captureWindow, captureFileUrl)) {
+      throw new Error('拒绝非图片窗的 IPC 请求');
+    }
+    return handler(...args);
+  };
+}
+
+function registerCaptureIpc() {
+  const channels = [
+    'capture:get', 'capture:read-clipboard', 'capture:accept-drop',
+    'capture:confirm-save', 'capture:deliver', 'capture:cancel', 'capture:show-in-folder'
+  ];
+  for (const channel of channels) ipcMain.removeHandler(channel);
+  ipcMain.handle('capture:get', trustedCaptureHandler(async () => captureRendererState()));
+  ipcMain.handle('capture:read-clipboard', trustedCaptureHandler(async (mode) => {
+    if (!['explicit', 'paste'].includes(mode)) throw new Error('剪贴板读取动作无效');
+    const source = mode === 'paste' || process.platform !== 'win32'
+      ? 'paste' : 'windows-clipboard';
+    prepareCaptureAcquisition(source);
+    const owner = currentCaptureOwner();
+    requireCaptureOwner(owner);
+    return queueCaptureMutation(() => readClipboardImage(source, owner));
+  }));
+  ipcMain.handle('capture:accept-drop', trustedCaptureHandler(async (filePath) => {
+    prepareCaptureAcquisition('drop');
+    const owner = currentCaptureOwner();
+    requireCaptureOwner(owner);
+    return queueCaptureMutation(() => acquireDroppedFile(filePath, owner));
+  }));
+  ipcMain.handle('capture:confirm-save', trustedCaptureHandler(async (captureId) => (
+    queueCaptureMutation(() => confirmCaptureSave(captureId))
+  )));
+  ipcMain.handle('capture:deliver', trustedCaptureHandler(async (request) => (
+    queueCaptureMutation(() => deliverCapture(request))
+  )));
+  ipcMain.handle('capture:cancel', trustedCaptureHandler(async (captureId) => {
+    if (!captureState || captureState.captureId !== captureId) throw new Error('图片处理代已失效');
+    await cancelCurrentCapture('用户取消');
+    return { ok: true };
+  }));
+  ipcMain.handle('capture:show-in-folder', trustedCaptureHandler(async (captureId) => {
+    if (!captureState || captureState.captureId !== captureId || !captureState.savedPath) {
+      throw new Error('当前没有已保存图片');
+    }
+    shell.showItemInFolder(captureState.savedPath);
+    return { ok: true };
+  }));
+}
+
+function beginCaptureShutdown() {
+  if (captureShutdownPromise) return captureShutdownPromise;
+  captureShuttingDown = true;
+  captureShutdownPromise = (async () => {
+    await cancelCurrentCapture('App 正在退出');
+    // OCR / prompt 操作可能正在 captureSerial 里等待被 kill/abort 后落定。
+    // 退出须等它真正结束，再做最后一次受控目录清理。
+    await Promise.allSettled([captureSerial]);
+    await closeCapturePromptAdapter();
+    await imageInput.cleanupOwnedStaging({ stagingRoot: captureStagingRoot() });
+  })();
+  const markComplete = () => { captureShutdownComplete = true; };
+  void captureShutdownPromise.then(markComplete, markComplete);
+  return captureShutdownPromise;
+}
+
 // ---------- 设置窗 / 登录项 ----------
 function portableExecutableFile() {
   const value = process.env.PORTABLE_EXECUTABLE_FILE;
@@ -1827,20 +3002,13 @@ function reconcileLoginItem() {
   }
 }
 
-function switchHotkey(previous, next) {
-  if (previous === next) return;
-  if (previous) globalShortcut.unregister(previous);
-  let registered = false;
-  try { registered = globalShortcut.register(next, () => toggleWindow()); } catch (_e) { registered = false; }
-  if (registered) return;
-
-  let restored = !previous;
-  if (previous) {
-    try { restored = globalShortcut.register(previous, () => toggleWindow()); } catch (_e) { restored = false; }
-  }
-  throw new Error(restored
-    ? '该组合键被占用，已恢复原快捷键'
-    : '该组合键被占用，且原快捷键恢复失败；请重启鲸坞');
+function electronHotkeyRuntime() {
+  return {
+    unregister: (key) => globalShortcut.unregister(key),
+    register: (key, kind) => globalShortcut.register(key, kind === 'capture'
+      ? () => handleScreenshotHotkey()
+      : () => toggleWindow())
+  };
 }
 
 function settingsSnapshot() {
@@ -1858,7 +3026,8 @@ function settingsRuntime() {
     portable: isPortableBuild(),
     loginItem: loginItemStatus(),
     manualUrl: MANUAL_URL,
-    logsUrl: pathToFileURL(log.dirPath()).href
+    logsUrl: pathToFileURL(log.dirPath()).href,
+    workspace: currentWorkspaceSurface()
   };
 }
 
@@ -1878,27 +3047,30 @@ function trustedSettingsHandler(handler) {
 
 function registerSettingsIpc() {
   const channels = [
-    'settings:get', 'settings:apply', 'settings:choose-workdir',
+    'settings:get', 'settings:apply', 'settings:switch-workspace',
     'settings:restart-backend', 'settings:check-update'
   ];
   for (const channel of channels) ipcMain.removeHandler(channel);
 
   ipcMain.handle('settings:get', trustedSettingsHandler(async () => ({
     settings: settingsSnapshot(),
-    runtime: settingsRuntime()
+    runtime: settingsRuntime(),
+    workspace: currentWorkspaceSurface()
   })));
 
   ipcMain.handle('settings:apply', trustedSettingsHandler(async (patch) => {
     const before = config.get();
     const normalized = config.validateSettingsPatch(patch);
     const needsRestart = config.restartRequired(before, normalized);
-    const hotkeyChanged = Object.prototype.hasOwnProperty.call(normalized, 'hotkey')
-      && normalized.hotkey !== before.hotkey;
+    const hotkeyChanged = ['hotkey', 'screenshotHotkeyEnabled', 'screenshotHotkey']
+      .some((key) => Object.prototype.hasOwnProperty.call(normalized, key)
+        && normalized[key] !== before[key]);
     const loginChanged = Object.prototype.hasOwnProperty.call(normalized, 'openAtLogin')
       && normalized.openAtLogin !== before.openAtLogin;
     let login = loginItemStatus();
     let loginError = '';
     let configWritten = false;
+    let hotkeyTransaction = null;
     let eventEffects = [];
     const eventFields = new Set([
       'taskNotifications', 'budgetEnabled', 'dailyTokenBudget',
@@ -1906,7 +3078,9 @@ function registerSettingsIpc() {
     ]);
     const eventConfigChanged = Object.keys(normalized).some((key) => eventFields.has(key));
 
-    if (hotkeyChanged) switchHotkey(before.hotkey, normalized.hotkey);
+    if (hotkeyChanged) {
+      hotkeyTransaction = applyHotkeyBindings(before, { ...before, ...normalized }, electronHotkeyRuntime());
+    }
     if (loginChanged) {
       // loginItemStatus 的 desired 来自配置；先按新期望写系统，保存后再做真实回读。
       try { app.setLoginItemSettings(loginItemOptions(normalized.openAtLogin)); }
@@ -1930,14 +3104,16 @@ function registerSettingsIpc() {
           log.line('app', `事件配置失败后 config 回滚也失败：${rollbackError.message}`);
         }
       }
-      if (hotkeyChanged) {
-        try { switchHotkey(normalized.hotkey, before.hotkey); } catch (rollbackError) {
+      if (hotkeyTransaction) {
+        try { hotkeyTransaction.rollback(); } catch (rollbackError) {
           log.line('app', `配置写入失败后快捷键回滚也失败：${rollbackError.message}`);
         }
       }
       if (loginChanged) applyLoginItem(before.openAtLogin);
       throw error;
     }
+
+    if (hotkeyTransaction) hotkeyTransaction.commit();
 
     if (eventEffects.length) await handleEventEffects(eventEffects, eventMonitor);
     if (loginChanged) login = loginItemStatus(loginError);
@@ -1952,12 +3128,13 @@ function registerSettingsIpc() {
     };
   }));
 
-  ipcMain.handle('settings:choose-workdir', trustedSettingsHandler(async () => {
-    const result = await dialog.showOpenDialog(settingsWindow, {
-      title: '选择 Harness 工作目录',
-      properties: ['openDirectory', 'createDirectory']
-    });
-    return result.canceled ? null : result.filePaths[0] || null;
+  ipcMain.handle('settings:switch-workspace', trustedSettingsHandler(async () => {
+    const result = await chooseAndSwitchWorkspace(settingsWindow);
+    return {
+      ok: true,
+      result,
+      workspace: currentWorkspaceSurface()
+    };
   }));
 
   ipcMain.handle('settings:restart-backend', trustedSettingsHandler(async () => {
@@ -2258,11 +3435,52 @@ function runUpdateCheck(manual) {
 }
 
 // ---------- 托盘 / 菜单 / 快捷键 ----------
+function reportWorkspaceSwitchError(error, parentWindow) {
+  const messages = {
+    ERR_WORKSPACE_BUDGET_PAUSED: '今日预算暂停中，请先在任务看板确认“今日继续”。',
+    ERR_WORKSPACE_EXTERNAL_ATTACH: '当前接入的是外部 dsh。鲸坞不会停止外部服务，因此未切换工作区。',
+    ERR_WORKSPACE_RUNTIME_UNKNOWN: '当前后端归属无法证明，已按 fail-closed 拒绝切换。'
+  };
+  const detail = messages[error && error.code]
+    || '切换未完整提交，鲸坞已尽力恢复原工作区。请查看日志。';
+  const options = {
+    type: 'error', message: '工作区切换失败', detail,
+    buttons: ['好'], noLink: true
+  };
+  void (parentWindow && !parentWindow.isDestroyed()
+    ? dialog.showMessageBox(parentWindow, options) : dialog.showMessageBox(options));
+}
+
+function workspaceSubmenuTemplate() {
+  let surface;
+  try { surface = currentWorkspaceSurface(); }
+  catch (_error) {
+    return [{ label: '工作区状态不可用', enabled: false }];
+  }
+  const switchTo = (target) => {
+    void switchWorkspace(target).catch((error) => reportWorkspaceSwitchError(error, mainWindow));
+  };
+  return [
+    { label: `当前：${surface.current.label}`, type: 'checkbox', checked: true, enabled: false },
+    ...surface.recent.map((item) => ({ label: item.label, enabled: !surface.busy, click: () => switchTo(item.path) })),
+    { type: 'separator' },
+    {
+      label: surface.busy ? '正在切换工作区…' : '打开新文件夹…',
+      enabled: !surface.busy,
+      click: () => {
+        void chooseAndSwitchWorkspace(mainWindow).catch((error) => reportWorkspaceSwitchError(error, mainWindow));
+      }
+    }
+  ];
+}
+
 function trayMenuTemplate() {
   return [
     ...(attentionCount > 0 ? [{ label: `${attentionCount} 个任务待查看`, enabled: false }] : []),
     { label: '显示 / 隐藏窗口', click: () => toggleWindow() },
     { label: '任务与用量看板…', click: () => openDashboardWindow() },
+    { label: '截图与图片…', click: () => openCaptureWindow({ source: 'drop' }) },
+    { label: '工作区', submenu: workspaceSubmenuTemplate() },
     { label: '设置…', click: () => openSettingsWindow() },
     { label: '在浏览器中打开', click: () => shell.openExternal(baseUrl()) },
     { label: '检查更新…', click: () => { void runUpdateCheck(true); } },
@@ -2303,6 +3521,7 @@ function createAppMenu() {
         { role: 'about', label: '关于鲸坞 WhaleDock' },
         { type: 'separator' },
         { label: '任务与用量看板…', click: () => openDashboardWindow() },
+        { label: '截图与图片…', click: () => openCaptureWindow({ source: 'drop' }) },
         { label: '设置…', accelerator: 'Command+,', click: () => openSettingsWindow() },
         { type: 'separator' },
         { role: 'hide', label: '隐藏' },
@@ -2315,11 +3534,13 @@ function createAppMenu() {
       label: '文件',
       submenu: [
         { label: '任务与用量看板…', click: () => openDashboardWindow() },
+        { label: '截图与图片…', click: () => openCaptureWindow({ source: 'drop' }) },
         { label: '设置…', click: () => openSettingsWindow() },
         { type: 'separator' },
         { label: '退出鲸坞', click: () => { quitting = true; app.quit(); } }
       ]
     }]),
+    { label: '工作区', submenu: workspaceSubmenuTemplate() },
     {
       label: '编辑',
       submenu: [
@@ -2369,18 +3590,21 @@ function createAppMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-function registerHotkey() {
-  const hk = config.get('hotkey');
-  if (!hk) return;
+function registerHotkeys() {
   try {
-    const ok = globalShortcut.register(hk, () => toggleWindow());
-    log.line('app', `全局快捷键 ${hk} 注册${ok ? '成功' : '失败（可能被占用）'}`);
+    const transaction = applyHotkeyBindings({}, config.get(), electronHotkeyRuntime());
+    transaction.commit();
+    log.line('app', '主窗口与截图快捷键事务注册成功');
   } catch (e) {
-    log.line('app', `全局快捷键注册异常: ${e.message}`);
+    log.line('app', `全局快捷键事务注册失败: ${e.message}`);
   }
 }
 
 async function restartBackend(options = {}) {
+  if (workspaceJournalBlocksStartup()) {
+    log.line('workspace', '活动 journal 尚未闭环，拒绝普通重启或停止现有后端');
+    return false;
+  }
   const externalAttach = backendReady && !spawnedByUs && backendState === null;
   if (!backendStartAllowed(budgetIsPaused(), options.allowBudgetResume === true) && !externalAttach) {
     log.line('app', '今日预算暂停中，拒绝重新拉起托管后端');
@@ -2395,19 +3619,15 @@ async function restartBackend(options = {}) {
   const inFlightStartup = startupPromise;
 
   const currentState = backendState;
-  backendState = null;
-  spawnedByUs = false;
-  if (currentState && !currentState.exited) {
-    await stopManagedBackend(currentState);
+  if (currentState) {
+    await stopOwnedBackend(currentState, { reason: '用户重启清理当前后端' });
   }
 
   // 若重启发生在首次端口探测期间，旧启动流程可能稍后才 spawn；等它结束后再清一次。
   if (inFlightStartup) await inFlightStartup;
   const laterState = backendState;
-  backendState = null;
-  spawnedByUs = false;
-  if (laterState && laterState !== currentState && !laterState.exited) {
-    await stopManagedBackend(laterState);
+  if (laterState && laterState !== currentState) {
+    await stopOwnedBackend(laterState, { reason: '用户重启清理迟到后端' });
   }
   if (quitting) return;
 
@@ -2464,19 +3684,24 @@ if (!MAIN_HELPER_TEST) {
     void beginEventShutdown().catch((error) => {
       log.line('events', `事件层退出清理失败：${error && error.code || 'unknown'}`);
     });
+    void beginCaptureShutdown().catch((error) => {
+      log.line('capture', `图片资源退出清理失败：${error && error.code || 'unknown'}`);
+    });
   });
 
   app.on('will-quit', (e) => {
     globalShortcut.unregisterAll();
     if (backendState && spawnedByUs && !backendState.exited) {
       const st = backendState;
-      backendState = null;
-      spawnedByUs = false;
-      void stopManagedBackend(st);
+      void stopOwnedBackend(st, { reason: 'App 退出停止托管后端' }).catch((error) => {
+        log.line('app', `退出时未确认托管后端停止：${error && error.code || 'unknown'}`);
+      });
     }
     const pending = [
       ...pendingBackendStops,
-      ...(!eventShutdownComplete && eventShutdownPromise ? [eventShutdownPromise] : [])
+      ...pendingWorkspaceOperations,
+      ...(!eventShutdownComplete && eventShutdownPromise ? [eventShutdownPromise] : []),
+      ...(!captureShutdownComplete && captureShutdownPromise ? [captureShutdownPromise] : [])
     ];
     if (pending.length) {
       e.preventDefault();
@@ -2495,6 +3720,11 @@ if (MAIN_HELPER_TEST) {
     createPersistedEventBatcher,
     ingestLiveEvent,
     canStopForBudget,
-    backendStartAllowed
+    backendStartAllowed,
+    workspaceJournalBlocksStartup,
+    workspaceSurfaceSnapshot,
+    applyHotkeyBindings,
+    ocrScriptsRoot,
+    captureDeliveryRequest
   };
 }

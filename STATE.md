@@ -1,21 +1,47 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-15（v0.3.0 已公开发布）
+更新：2026-08-15（v0.4.0 实现完成，待发布）
 
 ## 阶段结论
 
-**v0.2.0 的工程、合规与发布闭环保留为历史证据；v0.3.0 批次 11 已完成实现、三平台 CI、正式 tag 与公开 GitHub Release，现为当前稳定版。**
+**v0.2.0 的工程/合规与 v0.3.0 的公开发布闭环保留为历史证据；v0.4.0 批次 12 的工作区管理与截图入口已完成源码实现和本地验证，当前为 implementation complete / release pending。公开稳定版仍是 v0.3.0。**
 
 - PR [#1](https://github.com/sgd-shine/whaledock/pull/1) 已合并；正式 tag 指向 main 提交 `d8a8a774…`。
 - 批次 7 审计修复：`591f6c1`
 - 批次 9 合规与构建可见性：`4e0c04c`
 - 当前稳定版：[`v0.3.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0)；非 draft、非 prerelease，`releases/latest` 已命中 v0.3 正式版（tag `v0.3.0`）。
+- 当前源码版本：`0.4.0`；尚无 v0.4 正式 tag、tag CI 或公开 Release，不得写成已发布。
 - 正式注解 tag 对象 `8af8f86a527a105c9dbe5a204e75afcdd9dba409` 指向提交 `fe2d4def7bb7ef1d9339b71b1e28236fd9e1eabf`；[main CI 31893926627](https://github.com/sgd-shine/whaledock/actions/runs/31893926627) 的 Ubuntu、Windows、macOS 全绿。
 - [Release run 31894036652](https://github.com/sgd-shine/whaledock/actions/runs/31894036652) 的构建与成品回读通过；attempt 2 的 publish job [95035294975](https://github.com/sgd-shine/whaledock/actions/runs/31894036652/job/95035294975) 成功发布八项资产。
 - 精确批准值 `release:v0.3.0:sha256:8a7e9f14cfdaee35eb5baaa016547ec0a5d32d110876436185f186a3257407ad` 仅用于本次 publish；Release 回读后已删除，仓库变量回读不存在。
 - 2026-08-15 SGD 决定：不发 beta；Windows 以“实验性支持（未真机验证）”发布；Intel 仅保留 Rosetta 抽查边界；无 S1 且 G1/成品材料闭环后，由 Codex 执行正式发布并临时设置、随即清除精确审批变量。
 
 Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不阻断本次发布，但不得改写为已经通过。
+
+## v0.4 批次 12 已实现，待发布
+
+### 工作区启动与切换
+
+- 只有 `config.json` 确实缺失的新用户才创建 `~/Documents/鲸坞工作台/默认工作区`；POSIX 尽量以 `0700` 创建。既有配置即使 `workdir:null` 也不迁移；默认目录创建失败时要求选目录或退出，不回落主目录启动。
+- 应用菜单和托盘都有“工作区”子菜单，显示当前/最近工作区与“打开新文件夹…”；主窗口标题从已提交快照显示工作区名。设置页中 workdir 改为只读状态+事务切换入口。
+- 所有切换共用一条串行队列和严格 journal：排空事件并停止归属可证的旧后端、持久 config、启动目标后端，以同一 child/generation 归属和 adapter 归一化的实际 cwd 证明后才 commit。外部 attach、预算 latch、归属/cwd 不明或回滚失败都 fail-closed，不停外部进程、不伪报切换。
+- 工作区是 dsh 默认 cwd，**不是文件读取沙箱**。并行多开（独立端口/多 backend/多主窗口）保留为 P2，本版未实现。
+
+### 截图、OCR 与会话交付
+
+- 三个入口进入同一个鲸坞自有图片窗口：macOS `screencapture -i` 系统框选，拖入/粘贴单图，以及显式读取剪贴板。Windows 快捷键只提示 `Win+Shift+S`，不持续监听或伪造跨平台框选。
+- 自有图片窗口使用 context isolation/sandbox 和最小 IPC，要求两次确认。第一次才以随机不覆盖文件名写入当前工作区 `鲸坞截图/`，并对 symlink/junction、越界与 workspace generation 变化 fail-closed；第二次才提交或复制完整 payload。
+- 理解路由固定为官方视觉槽位 → vision 插件槽位 → macOS Vision/JXA 或 Windows.Media.Ocr/PowerShell 本地 OCR → path-only。前两个槽位当前未发现可用合约，跳过不是故障；OCR 不可用也不阻断用户确认后保存图片。
+- `lib/backend.js` 中的 rc.6 prompt adapter 只在 loopback、根包版本证明、feature/contract 和普通会话目标都通过时，以固定 `queue`+单文本提交用户已检查的 OCR+路径。任一不满足就复制降级；超时/断线的不确定结果不自动重试。
+- 主 Harness BrowserWindow 继续无 preload、无 Node、无 DOM/脚本注入；不扫描、写入、迁移或清理 `~/.dsh`。
+
+### 批次 12 当前实证
+
+- 当前源码版本 `0.4.0`；本地 `npm run smoke` 实际为 **199 PASS / ALL PASS**。新增回归证明工作区 canonicalize 与图片保存都会拒绝 `~/.dsh` 本身、后代及 realpath/link 入口。`npm run compliance:verify` 通过；darwin/x64 inventory 仍是 526 包，closure `928f3fd6cf6a876eeeff8fedb0df8d2864265279da7e7cf6636c2a03d87afdde`。根 `dependencies` 仍为空，devDependencies 仍只有 electron/electron-builder，没有新许可闭包。
+- 隔离 userData `/private/tmp/whaledock-v04-gui` 中的 macOS arm64 源码态 GUI 已真实拉起 managed dsh。标题回读“默认工作区”；设置只读工作区/截图快捷键、应用菜单、自有 capture 窗口标签和取消都实际回读。退出后 dsh 与 3080 端口清零。
+- 首轮 GUI 发现 dropzone 事件漏接，导致 `captureId:null`；补入“dropzone 拖放”薄层静态/TDD 回归后，重验已在显示真实工作区标签的图片窗口中成功取消。该回读没有加载真实图片，不写成图片预览已通过。
+- macOS Vision/JXA 脚本已在 synthetic 图片上回读 OCR 成功；这是真实本地 OCR 脚本证据，不等于完整图片保存/交付 GUI 已走完。
+- 未向真实用户会话提交 prompt，未走完全量图片保存→OCR→复制/提交流。Windows、Intel Mac、系统权限和安装包 GUI 均未真机；macOS 仍未签名/公证。未签名 x64 成品回读不是 Intel 真机证据。
 
 ## v0.3 批次 11 已实现并发布
 
@@ -77,7 +103,8 @@ Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不
 ## 自动与成品验证
 
 - v0.2.0 正式 tag 当时的 `npm run smoke`：34/34，`ALL PASS`。
-- 当前 v0.3.0 源码态 `npm run smoke`：**119 PASS / ALL PASS**（基础 34 + config 13 + events 24 + backend adapter 20 + main 24 + wrapper 4）。
+- v0.3.0 正式发布时的 `npm run smoke`：**119 PASS / ALL PASS**（基础 34 + config 13 + events 24 + backend adapter 20 + main 24 + wrapper 4）。
+- 当前 v0.4.0 源码态 `npm run smoke`：**199 PASS / ALL PASS**；新增工作区事务/journal、受保护目录拒绝、图片状态/受控文件、dsh prompt fail-closed 适配与 Electron 工作区/图片薄层，四个子套件全部纳入统一 smoke。
 - 首次 v0.3 main CI [31893823255](https://github.com/sgd-shine/whaledock/actions/runs/31893823255) 仅 Windows 因静态测试写死 LF、不兼容 CRLF 失败，功能套件已通过；第一轮修复后 [31893926627](https://github.com/sgd-shine/whaledock/actions/runs/31893926627) 三平台全绿。
 - 正式 Release run [31894036652](https://github.com/sgd-shine/whaledock/actions/runs/31894036652) 与 attempt 2 publish job [95035294975](https://github.com/sgd-shine/whaledock/actions/runs/31894036652/job/95035294975) 成功；公开 Release 的八项资产为 `SHA256SUMS-mac.txt` 372 B、`SHA256SUMS-win.txt` 189 B、arm64 zip 204,753,794 B、arm64 dmg 185,260,077 B、portable 161,260,244 B、x64 zip 207,735,735 B、x64 dmg 188,143,119 B、Setup 161,448,096 B。
 - `npm run compliance:verify`：SOURCES 与 THIRD_PARTY_NOTICES 确定性检查通过。
@@ -114,10 +141,12 @@ Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不
 
 ## 尚未完成
 
-1. v0.3 Electron 系统通知权限、Notification→Dock/托盘/banner 可见降级链尚未真机；目前只有代码/纯 Node 与静态证据。
-2. v0.3 真实 managed backend 跨预算线后的进程树停止、App 重启 latch 不绕过、“今日继续”恢复尚未做 GUI+真进程闭环。外部 attach 已实现为只告警、不 stop，但仍需安装版补证。
-3. 现有深/浅战报为对比度修复前样张；修复后色彩、对比度、中文排版与剪贴板真实读回仍需最终人工验收。
-4. Windows 全线真机与 Intel 真机均未做；Intel 仍只有 Apple Silicon + Rosetta，Windows 仍是未签名、未真机的实验性支持。
-5. macOS/Windows 签名与 Apple 公证未做，属于 S3，本次明确不执行。
+1. v0.4 尚未走三平台 tag CI、正式 tag、Release 成品回读和公开发布；当前稳定版仍是 v0.3.0。
+2. v0.4 未对真实会话提交 prompt，未走完图片保存→OCR→复制/提交的全量 GUI 链；Windows.Media.Ocr、Windows `Win+Shift+S`/剪贴板、macOS 屏幕录制权限和安装包 GUI 仍待真机。
+3. v0.4 并行多开保留为 P2；官方视觉 API 与 vision 插件只保留可探测槽位。
+4. v0.3 Electron 系统通知权限及 Notification→Dock/托盘/banner 可见降级链尚未真机；真实 managed backend 跨预算线后的进程树停止、App 重启 latch 和“今日继续”恢复也未做 GUI+真进程闭环。
+5. 现有深/浅战报为对比度修复前样张；修复后色彩、对比度、中文排版与剪贴板真实读回仍需最终人工验收。
+6. Windows 全线真机与 Intel 真机均未做；Intel 仍只有 Apple Silicon + Rosetta，未签名 x64 成品回读也不是 Intel 真机；Windows 仍是未签名、未真机的实验性支持。
+7. macOS/Windows 签名与 Apple 公证未做，属于 S3，本次明确不执行。
 
 详细发布证据与人工体验边界见 `HANDOFF.md`。

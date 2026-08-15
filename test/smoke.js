@@ -523,6 +523,24 @@ async function main() {
       result.status === 0 ? file : `${file} exit=${result.status}`);
   }
 
+  // v0.4 工作区、图片、prompt 适配与 Electron 薄层也必须由统一 smoke 真实执行。
+  for (const [file, label] of [
+    ['workspaces-smoke.js', '工作区事务与 journal'],
+    ['image-input-smoke.js', '图片状态与受控文件'],
+    ['backend-prompt-smoke.js', 'dsh prompt fail-closed 适配器'],
+    ['main-v04-smoke.js', 'Electron 工作区/图片薄层']
+  ]) {
+    const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
+      cwd: path.join(__dirname, '..'),
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024
+    });
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    check(`v0.4: ${label}直测纳入统一 smoke`, result.status === 0,
+      result.status === 0 ? file : `${file} exit=${result.status}`);
+  }
+
   console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILED`);
   process.exit(failed === 0 ? 0 : 1);
 }

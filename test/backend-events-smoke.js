@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const backend = require('../lib/backend');
+const config = require('../lib/config');
 const events = require('../lib/events');
 
 let passed = 0;
@@ -150,6 +151,134 @@ async function main() {
     }
     throw new Error(`unexpected method: ${request.method}`);
   };
+
+  await test('managed workdir proof 要求仍存活的鲸坞 child，坏 state 零请求', async () => {
+    let fetchCalls = 0;
+    const prove = (state) => backend.proveManagedWorkdir({
+      port: 4319,
+      state,
+      fetch: async () => {
+        fetchCalls += 1;
+        throw new Error('invalid state must not fetch');
+      }
+    });
+    for (const state of [null, {}, { child: {}, exited: true }]) {
+      await assert.rejects(prove(state), (error) => error.code === 'ERR_DSH_WORKDIR_STATE');
+    }
+    assert.equal(fetchCalls, 0);
+  });
+
+  await test('managed workdir proof 使用严格 rc.6 host.describe loopback wire 并只返回 cwd', async () => {
+    const state = { child: { pid: 321 }, exited: false };
+    const seen = [];
+    const result = await backend.proveManagedWorkdir({
+      port: 4319,
+      state,
+      mintRpcId: () => 'workdir-rpc-1',
+      fetch: async (url, init) => {
+        const request = JSON.parse(init.body);
+        seen.push({ url: String(url), init, request });
+        return serverResponse(request, {
+          version: config.DSH_CONTRACT.hostVersion,
+          cwd: '/private/managed-workspace',
+          attachedSessions: 2,
+          canOpenPath: true,
+          provider: 'must-not-leak',
+          model: 'must-not-leak'
+        }, { response: { url: 'http://127.0.0.1:4319/api/host.describe' } });
+      }
+    });
+    assert.deepEqual(result, { proven: true, cwd: '/private/managed-workspace' });
+    assert.equal(JSON.stringify(result).includes('must-not-leak'), false);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].url, 'http://127.0.0.1:4319/api/host.describe');
+    assert.equal(seen[0].init.method, 'POST');
+    assert.equal(seen[0].init.redirect, 'error');
+    assert.deepEqual(seen[0].request, {
+      type: 'client-request',
+      rpcId: 'workdir-rpc-1',
+      method: 'host.describe',
+      payload: {}
+    });
+  });
+
+  await test('managed workdir proof 对版本/cwd/redirect/超限/timeout/state 漂移均 fail-closed', async () => {
+    const baseState = () => ({ child: { pid: 654 }, exited: false });
+    const proveWith = (fetch, overrides = {}) => backend.proveManagedWorkdir({
+      port: 4319,
+      state: baseState(),
+      mintRpcId: () => 'workdir-rpc-bad',
+      fetch,
+      ...overrides
+    });
+    await assert.rejects(proveWith(async (_url, init) => {
+      const request = JSON.parse(init.body);
+      return serverResponse(request, {
+        version: '9.9.9', cwd: '/managed', attachedSessions: 0, canOpenPath: true
+      });
+    }), (error) => error.code === 'ERR_DSH_WORKDIR_VERSION');
+    await assert.rejects(proveWith(async (_url, init) => {
+      const request = JSON.parse(init.body);
+      return serverResponse(request, {
+        version: config.DSH_CONTRACT.hostVersion,
+        cwd: '../relative', attachedSessions: 0, canOpenPath: true
+      });
+    }), (error) => error.code === 'ERR_DSH_WORKDIR_CONTRACT');
+    await assert.rejects(proveWith(async (_url, init) => {
+      const request = JSON.parse(init.body);
+      return serverResponse(request, {
+        version: config.DSH_CONTRACT.hostVersion,
+        cwd: '/managed', attachedSessions: 0, canOpenPath: true
+      }, { response: { url: 'http://example.test/api/host.describe' } });
+    }), (error) => error.code === 'ERR_DSH_WORKDIR_REDIRECT');
+    await assert.rejects(proveWith(async (_url, init) => {
+      const request = JSON.parse(init.body);
+      return serverResponse(request, {
+        version: config.DSH_CONTRACT.hostVersion,
+        cwd: '/managed', attachedSessions: 0, canOpenPath: true,
+        padding: 'x'.repeat(2048)
+      });
+    }, { maxResponseBytes: 256 }), (error) => error.code === 'ERR_DSH_WORKDIR_RESPONSE_TOO_LARGE');
+
+    let timeoutCalls = 0;
+    await assert.rejects(proveWith((_url, init) => {
+      timeoutCalls += 1;
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        }, { once: true });
+      });
+    }, { timeoutMs: 5 }), (error) => error.code === 'ERR_DSH_WORKDIR_TIMEOUT');
+    assert.equal(timeoutCalls, 1);
+    await assert.rejects(proveWith(async (_url, init) => {
+      const request = JSON.parse(init.body);
+      return new Promise((resolve) => {
+        setTimeout(() => resolve(serverResponse(request, {
+          version: config.DSH_CONTRACT.hostVersion,
+          cwd: '/late-managed', attachedSessions: 0, canOpenPath: true
+        })), 10);
+      });
+    }, { timeoutMs: 5 }), (error) => error.code === 'ERR_DSH_WORKDIR_TIMEOUT');
+
+    const changed = baseState();
+    const childAtStart = changed.child;
+    await assert.rejects(backend.proveManagedWorkdir({
+      port: 4319,
+      state: changed,
+      mintRpcId: () => 'workdir-rpc-changed',
+      fetch: async (_url, init) => {
+        changed.exited = true;
+        const request = JSON.parse(init.body);
+        return serverResponse(request, {
+          version: config.DSH_CONTRACT.hostVersion,
+          cwd: '/managed', attachedSessions: 0, canOpenPath: true
+        });
+      }
+    }), (error) => error.code === 'ERR_DSH_WORKDIR_STATE');
+    assert.equal(changed.child, childAtStart);
+  });
 
   const adapter = backend.createDshEventsAdapter({
     port: 4319,

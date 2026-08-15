@@ -53,6 +53,18 @@ v0.3.0 已作为当前稳定版公开发布：[正式 Release](https://github.co
 
 发布门精确批准值 `release:v0.3.0:sha256:8a7e9f14cfdaee35eb5baaa016547ec0a5d32d110876436185f186a3257407ad` 只在本次 publish 中临时存在；Release 与资产回读后已删除，仓库变量回读不存在。
 
+## v0.4.0 源码实现完成，待发布
+
+v0.4.0 的批次 12 已在源码态完成，当前状态是 **implementation complete / release pending**；当前已公开的稳定下载版仍是 [`v0.3.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0)。
+
+- **单工作区管理**：只有 `config.json` 确实不存在的新用户才会创建 `~/Documents/鲸坞工作台/默认工作区`（POSIX 尽量为 `0700`）；既有配置即使 `workdir:null` 也原样尊重，不暗中迁移。
+- **菜单、托盘与标题**：两处都有“工作区”子菜单，可切换最近目录或打开新文件夹；标题显示已提交的工作区名。切换使用串行 journal，必须完成旧后端停止、config 持久、新后端归属与实际 cwd 回读后才提交；失败回滚或 fail-closed。
+- **截图与图片入口**：支持 macOS 系统框选快捷键、拖图进鲸坞自有窗口、显式读取/粘贴剪贴板三种入口。Windows 快捷键只引导 `Win+Shift+S`，完成后由用户主动读取剪贴板，不持续监听。
+- **两次确认与本地降级**：第一次确认后才把图片安全保存到当前工作区的 `鲸坞截图/`，第二次确认后才交付文本。路由为官方视觉槽位 → vision 插件槽位 → macOS Vision / Windows.Media.Ocr 本地 OCR → 仅路径；锁定的 rc.6 prompt 合约不能精确证明时，复制同一份用户已检查文本并提示手动粘贴。
+- **不侵入 Harness**：主 Harness BrowserWindow 仍无 preload、无 Node、无 DOM/脚本注入。工作区只是 dsh 默认 cwd，**不是文件读取沙箱**。
+
+本地统一 `npm run smoke` 已回读 **199 PASS / ALL PASS**。工作区选择与图片保存还会在字面路径和 realpath 两层拒绝 `~/.dsh` 本身、后代及链接目标。隔离的 macOS arm64 源码态 GUI 已用真实 managed dsh 回读默认工作区标题、菜单、设置中的只读工作区/截图快捷键和自有图片窗口，并完成取消清理；退出后 dsh 与 3080 端口清零。真实 prompt 提交、完整图片保存/交付流、Windows、Intel、系统权限与安装包 GUI 仍待独立验证。
+
 ## 下载与安装
 
 从 [GitHub Releases](https://github.com/sgd-shine/whaledock/releases) 按电脑选择产物：
@@ -106,10 +118,12 @@ v0.3.0 已作为当前稳定版公开发布：[正式 Release](https://github.co
 | 全局快捷键 | `CommandOrControl+Shift+H` | 保存后试注册；占用时回滚旧快捷键 |
 | 自动检查新版本 | 开启 | 保存后立即生效 |
 | 端口 | `3080` | 保存后需重启后端 |
-| 工作目录 | 用户主目录 | 保存后需重启后端 |
+| 工作区 | 仅新配置默认为 `Documents/鲸坞工作台/默认工作区` | 设置页只读；从菜单/托盘或“选择并切换…”执行完整后端事务 |
 | 后端版本 | `0.1.0-rc.6` | 控制 npx 回退；内置引擎只在该值与包内版本一致时可用；保存后需重启后端 |
 | 优先使用内置引擎 | 关闭 | 保存后需重启后端 |
 | 自定义启动命令 | 留空 | 高级选项；保存后需重启后端 |
+| 启用截图快捷键 | 开启 | 关闭时真实解除注册 |
+| 截图快捷键 | `CommandOrControl+Shift+S` | 不得与主窗口快捷键相同；注册失败时回滚 |
 
 Windows 便携版的开机自启指向当前 exe；移动文件后，下次启动会尝试把登录项修正到新路径。为了稳定自启，建议把便携版放到固定目录，或改用安装版。macOS 未签名版若不能注册登录项，设置页会如实提示到「系统设置 → 通用 → 登录项」手动处理。
 
@@ -161,7 +175,7 @@ npm run dist:win         # Windows x64 Setup + portable（建议在 Windows runn
 node scripts/macos-build-visibility.js --out-dir=release --check
 ```
 
-`npm run smoke` 是不依赖图形界面的纯 Node 测试集。当前 v0.3 源码态本地回读为 **119 PASS / ALL PASS**：基础 34 项、config 13 项、events 24 项、backend adapter 20 项、main 24 项，加 4 项统一纳入检查。这是本地纯 Node 证据；正式 tag 提交的 main CI 31893926627 另行证明 Ubuntu、Windows 与 macOS 三平台全绿。
+`npm run smoke` 是不依赖图形界面的纯 Node 测试集。当前 v0.4 源码态本地回读为 **199 PASS / ALL PASS**，新增覆盖配置/默认工作区、串行切换与 journal 恢复、受保护目录拒绝、安全图片落盘、OCR 路由、rc.6 prompt fail-closed 适配和 Electron 薄层信任边界。这是本地纯 Node 证据；v0.3 正式 tag 提交的 main CI 31893926627 仍只证明 v0.3 的 Ubuntu、Windows 与 macOS 三平台状态，v0.4 尚未 tag/发布。
 
 ## 常见问题
 
@@ -173,6 +187,10 @@ node scripts/macos-build-visibility.js --out-dir=release --check
 
 **外部 dsh 达到每日预算会怎样** — v0.3 只标记超限并提醒“外部服务仍在运行”，不会停止不属于鲸坞的进程。只有鲸坞当次自己拉起且 generation/进程身份仍匹配的 managed backend 才可停止。
 
+**切换工作区后，AI 就不能读其他目录了吗** — 不是。工作区是 dsh 的默认 cwd 和鲸坞截图的保存根，不是读取沙箱。请仍不要把不希望 AI 访问的敏感文件放在可访问路径。
+
+**截图后为什么只提示复制粘贴** — 锁定的 DeepSeek 通道是 text-only。只有本地 loopback、rc.6 根包/合约证明和目标会话都通过时，鲸坞才会在第二次确认后提交 OCR 文本+图片路径。任一条件不满足就复制已预览的同一份文本，请用户自己粘贴；超时/断线结果不确定时也不自动重试。
+
 **Windows 退出后还有 node/dsh 进程** — 先从托盘选择「退出」，再查看设置页/日志。Windows 版用 `taskkill /T` 清理托管的进程树；若真机验收失败，第一步应复制日志定位，不要猜测性改命令。
 
 **想跟随最新 dsh** — 可把后端版本改为 `latest`，但上游仍是 rc，可能出现破坏性变化，而且与包内锁定版本不一致时不会走内置引擎。稳定使用建议保留默认 `0.1.0-rc.6`。
@@ -182,6 +200,7 @@ node scripts/macos-build-visibility.js --out-dir=release --check
 - [操作手册](docs/操作手册.md)
 - [v0.2 开发方案](docs/开发方案-v0.2-2026-08-15.md)
 - [v0.3 开发方案](docs/开发方案-v0.3-2026-08-15.md)
+- [v0.4 开发方案](docs/开发方案-v0.4-2026-08-15.md)
 - [产品审计与路线图](docs/产品审计与路线图-2026-08-14.md)
 - [AI 编码代理工程约定](AGENTS.md)
 
@@ -189,6 +208,7 @@ node scripts/macos-build-visibility.js --out-dir=release --check
 
 - **v0.2.0**：已发布的历史稳定版。
 - **v0.3.0**：批次 11 已实现并公开发布，是当前稳定下载版；通知、真实 managed 预算停止/恢复、Windows 与 Intel 真机仍是发布后补证边界。
+- **v0.4.0**：批次 12 的单工作区切换与截图入口 v1 已在源码态完成，待三平台 CI、tag 与公开 Release。并行多开（独立端口/多后端/多主窗口）明确保留为 P2，本版未实现。
 
 ## License
 

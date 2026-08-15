@@ -213,6 +213,8 @@
     box-shadow: 0 0 0 3px var(--focus);
     outline: none;
   }
+  input[readonly] { color: var(--muted); cursor: default; }
+  input[readonly]:hover { border-color: var(--line-strong); }
   input:disabled { color: var(--faint); opacity: .62; cursor: not-allowed; }
   .grow { flex: 1 1 auto; width: 100%; }
   .port { width: 104px; }
@@ -452,6 +454,24 @@
           </div>
           <div class="row">
             <div>
+              <div class="row-label">启用截图快捷键</div>
+              <div class="row-note">macOS 调用系统框选；Windows 只打开 Win+Shift+S 引导</div>
+            </div>
+            <label class="switch" aria-label="启用截图快捷键">
+              <input id="screenshotHotkeyEnabled" type="checkbox">
+              <span class="track"></span>
+            </label>
+          </div>
+          <div class="row stack">
+            <label class="row-label" for="screenshotHotkey">截图快捷键</label>
+            <div class="row-note">不得与主窗口快捷键相同；关闭开关后会真实解除注册</div>
+            <div class="field-line">
+              <input id="screenshotHotkey" class="grow" type="text" autocomplete="off" spellcheck="false" placeholder="CommandOrControl+Shift+S">
+              <button id="reset-screenshot-hotkey" class="button">恢复默认</button>
+            </div>
+          </div>
+          <div class="row">
+            <div>
               <div class="row-label">自动检查新版本</div>
               <div class="row-note">仅访问 GitHub Releases，不携带用户标识</div>
             </div>
@@ -484,9 +504,10 @@
           </div>
           <div class="row stack">
             <label class="row-label" for="workdir">工作目录</label>
+            <div class="row-note">只读显示已提交的工作区。切换是完整后端事务；工作区不是文件读取沙箱。</div>
             <div class="field-line">
-              <input id="workdir" class="grow" type="text" autocomplete="off" spellcheck="false" placeholder="使用用户主目录">
-              <button id="choose-workdir" class="button">选择…</button>
+              <input id="workdir" class="grow" type="text" readonly aria-readonly="true" placeholder="正在读取已提交工作区">
+              <button id="choose-workdir" class="button">选择并切换…</button>
             </div>
           </div>
         </div>
@@ -644,19 +665,20 @@
   const api = window.whaleSettings;
   const fieldNames = [
     'openAtLogin', 'startMinimized', 'hotkey', 'checkUpdates',
-    'port', 'workdir', 'dshVersion', 'preferBundled', 'command',
+    'screenshotHotkeyEnabled', 'screenshotHotkey',
+    'port', 'dshVersion', 'preferBundled', 'command',
     'taskNotifications', 'budgetEnabled', 'dailyTokenBudget',
     'priceInputPerMillion', 'priceCacheReadPerMillion', 'priceOutputPerMillion'
   ];
   const booleanFields = new Set([
     'openAtLogin', 'startMinimized', 'checkUpdates', 'preferBundled',
-    'taskNotifications', 'budgetEnabled'
+    'screenshotHotkeyEnabled', 'taskNotifications', 'budgetEnabled'
   ]);
   const numberFields = new Set([
     'port', 'dailyTokenBudget', 'priceInputPerMillion',
     'priceCacheReadPerMillion', 'priceOutputPerMillion'
   ]);
-  const backendFields = new Set(['port', 'workdir', 'dshVersion', 'preferBundled', 'command']);
+  const backendFields = new Set(['port', 'dshVersion', 'preferBundled', 'command']);
   const els = Object.fromEntries(fieldNames.map((name) => [name, document.getElementById(name)]));
   const saveButton = document.getElementById('save');
   const cancelButton = document.getElementById('cancel');
@@ -683,9 +705,11 @@
       openAtLogin: Boolean(source && source.openAtLogin),
       startMinimized: Boolean(source && source.startMinimized),
       hotkey: String((source && source.hotkey) || 'CommandOrControl+Shift+H'),
+      screenshotHotkeyEnabled: source && source.screenshotHotkeyEnabled !== undefined
+        ? Boolean(source.screenshotHotkeyEnabled) : true,
+      screenshotHotkey: String((source && source.screenshotHotkey) || 'CommandOrControl+Shift+S'),
       checkUpdates: source && source.checkUpdates !== undefined ? Boolean(source.checkUpdates) : true,
       port: Number(source.port),
-      workdir: (source && source.workdir) || null,
       dshVersion: String((source && source.dshVersion) || ''),
       preferBundled: Boolean(source && source.preferBundled),
       command: (source && source.command) || null,
@@ -710,7 +734,7 @@
       return raw === '' ? NaN : Number(raw);
     }
     const value = els[name].value.trim();
-    if (name === 'workdir' || name === 'command') return value || null;
+    if (name === 'command') return value || null;
     return value;
   }
 
@@ -727,7 +751,7 @@
     const patch = {};
     for (const name of fieldNames) {
       const current = valueOf(name);
-      const original = snapshot[name] == null && (name === 'workdir' || name === 'command') ? null : snapshot[name];
+      const original = snapshot[name] == null && name === 'command' ? null : snapshot[name];
       if (current !== original) patch[name] = current;
     }
     return patch;
@@ -751,6 +775,15 @@
     saveButton.disabled = busy || !dirty;
     cancelButton.disabled = busy;
     updateButton.disabled = busy || !els.checkUpdates.checked;
+    els.screenshotHotkey.disabled = busy || !els.screenshotHotkeyEnabled.checked;
+    document.getElementById('reset-screenshot-hotkey').disabled = busy || !els.screenshotHotkeyEnabled.checked;
+  }
+
+  function renderWorkspace(payload) {
+    const workspace = payload && (payload.workspace || payload.runtime && payload.runtime.workspace);
+    const current = workspace && workspace.current;
+    document.getElementById('workdir').value = current && current.effectivePath
+      ? current.effectivePath : '工作区不可用';
   }
 
   function showRestartNotice(show) {
@@ -768,7 +801,7 @@
   function renderRuntime(payload) {
     const runtime = runtimeFrom(payload);
     runtimeSnapshot = { ...runtimeSnapshot, ...runtime };
-    document.getElementById('app-version').textContent = runtimeSnapshot.version || runtimeSnapshot.appVersion || '0.2.0';
+    document.getElementById('app-version').textContent = runtimeSnapshot.version || runtimeSnapshot.appVersion || '0.4.0';
     const platform = runtimeSnapshot.platform || '未知平台';
     const arch = runtimeSnapshot.arch || '未知架构';
     document.getElementById('platform-arch').textContent = `${platform} / ${arch}`;
@@ -822,6 +855,7 @@
       snapshot = normalizedConfig(payload);
       renderConfig(snapshot);
       renderRuntime(payload);
+      renderWorkspace(payload);
       setStatus('设置已是最新', 'success');
     } catch (error) {
       setStatus(messageOf(error, '读取设置失败，请关闭后重试'), 'error');
@@ -859,11 +893,11 @@
     button.disabled = true;
     button.classList.add('loading');
     try {
-      const result = await api.chooseWorkdir();
-      const selected = typeof result === 'string' ? result : result && (result.path || result.workdir || result.filePaths && result.filePaths[0]);
-      if (selected) {
-        els.workdir.value = selected;
-        els.workdir.dispatchEvent(new Event('input', { bubbles: true }));
+      const result = await api.switchWorkspace();
+      if (responseFailed(result)) throw new Error(messageOf(result, '工作区切换失败'));
+      if (result && result.result && result.result.status !== 'cancelled') {
+        renderWorkspace(result);
+        setStatus('工作区已完整切换', 'success');
       }
     } catch (error) {
       setStatus(messageOf(error, '无法打开目录选择器'), 'error');
@@ -948,6 +982,11 @@
     els.hotkey.value = 'CommandOrControl+Shift+H';
     els.hotkey.dispatchEvent(new Event('input', { bubbles: true }));
     els.hotkey.focus();
+  });
+  document.getElementById('reset-screenshot-hotkey').addEventListener('click', () => {
+    els.screenshotHotkey.value = 'CommandOrControl+Shift+S';
+    els.screenshotHotkey.dispatchEvent(new Event('input', { bubbles: true }));
+    els.screenshotHotkey.focus();
   });
   document.getElementById('choose-workdir').addEventListener('click', chooseWorkdir);
   document.getElementById('check-update').addEventListener('click', checkUpdate);
