@@ -10,6 +10,8 @@
   "scripts": {
     "start": "electron .",
     "smoke": "node test/smoke.js",
+    "bundle:dsh": "node scripts/bundle-dsh.js",
+    "predist": "npm run bundle:dsh",
     "dist": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac"
   },
   "devDependencies": {
@@ -29,6 +31,18 @@
       "lib/**/*",
       "assets/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/dsh-runtime",
+        "to": "dsh-runtime",
+        "filter": ["package.json", "package-lock.json", "manifest.json"]
+      },
+      {
+        "from": "vendor/dsh-runtime/node_modules",
+        "to": "dsh-runtime/node_modules",
+        "filter": ["**/*"]
+      }
     ],
     "mac": {
       "category": "public.app-category.developer-tools",

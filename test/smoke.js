@@ -85,7 +85,8 @@ async function main() {
     pathValue: `${path.join(tmp, 'missing')};${shimDir}`,
     pathModule: portableWindowsPath
   });
-  check('backend: Windows which 命中临时 dsh.cmd 垫片', windowsDsh === dshShim,
+  check('backend: Windows which 命中临时 dsh.cmd 垫片',
+    Boolean(windowsDsh) && path.normalize(windowsDsh) === path.normalize(dshShim),
     windowsDsh || 'null');
 
   const darwinKill = backend.killPlan(1234, 'darwin');
@@ -121,6 +122,53 @@ async function main() {
       && windowsSpawnCall.options.detached === false
       && windowsSpawnCall.options.windowsHide === true);
   fakeWindowsChild.emit('exit', 0, null);
+
+  const bundledResources = path.join(tmp, 'packaged-resources');
+  const bundledRoot = path.join(bundledResources, 'dsh-runtime');
+  const bundledPackage = path.join(
+    bundledRoot, 'node_modules', '@deepseek-ai', 'dsh'
+  );
+  fs.mkdirSync(path.join(bundledPackage, 'lib'), { recursive: true });
+  fs.writeFileSync(path.join(bundledPackage, 'lib', 'bin.js'), '// smoke fixture\n');
+  fs.writeFileSync(path.join(bundledRoot, 'manifest.json'), JSON.stringify({
+    dshVersion: '0.1.0-rc.6'
+  }));
+  const fakeRuntimeInfo = {
+    execPath: '/Applications/WhaleDock.app/Contents/MacOS/WhaleDock',
+    resourcesPath: bundledResources
+  };
+  const bundledFallback = backend.resolveCommand({ dshVersion: '0.1.0-rc.6' }, {
+    findCommand: () => null,
+    runtimeInfo: fakeRuntimeInfo
+  });
+  const bundledPreferred = backend.resolveCommand({
+    dshVersion: '0.1.0-rc.6',
+    preferBundled: true
+  }, {
+    findCommand: () => { throw new Error('preferBundled 不应继续 PATH 探测'); },
+    runtimeInfo: fakeRuntimeInfo
+  });
+  const pathFirst = backend.resolveCommand({
+    dshVersion: '0.1.0-rc.6',
+    preferBundled: false
+  }, {
+    findCommand: (name) => name === 'dsh' ? '/test/bin/dsh' : null,
+    runtimeInfo: fakeRuntimeInfo
+  });
+  const missingBundled = backend.resolveCommand({ dshVersion: '0.1.0-rc.6' }, {
+    findCommand: () => null,
+    runtimeInfo: { execPath: '/test/WhaleDock', resourcesPath: path.join(tmp, 'missing') }
+  });
+  check('backend: 内置引擎第四级探测与 preferBundled 次序',
+    bundledFallback
+      && bundledFallback.bundled === true
+      && bundledFallback.env.ELECTRON_RUN_AS_NODE === '1'
+      && bundledFallback.args[0] === '--expose-internals'
+      && bundledFallback.args[1].endsWith(path.join('@deepseek-ai', 'dsh', 'lib', 'bin.js'))
+      && bundledPreferred.bundled === true
+      && pathFirst.file === '/test/bin/dsh'
+      && missingBundled === null,
+    bundledFallback ? bundledFallback.label : 'null');
 
   // 端口应当未开
   check('backend: 端口初始未开', !(await backend.isPortOpen(PORT)));
@@ -162,8 +210,10 @@ async function main() {
     pinned.file === '/test/bin/npx'
       && pinned.shell === false
       && pinned.version === '0.1.0-rc.6'
-      && JSON.stringify(pinned.args) === JSON.stringify(['-y', '@deepseek-ai/dsh@0.1.0-rc.6', 'web'])
-      && pinned.label === 'npx -y @deepseek-ai/dsh@0.1.0-rc.6 web'
+      && JSON.stringify(pinned.args) === JSON.stringify([
+        '-y', '@deepseek-ai/dsh@0.1.0-rc.6', 'web', '--port', '3080'
+      ])
+      && pinned.label === 'npx -y @deepseek-ai/dsh@0.1.0-rc.6 web --port 3080'
       && latest.args[1] === '@deepseek-ai/dsh@latest'
       && latest.version === 'latest'
       && empty.args[1] === '@deepseek-ai/dsh@0.1.0-rc.6',

@@ -76,6 +76,10 @@ function status(phase, text, detail) {
 // ---------- 启动 ----------
 async function onReady() {
   migrateLegacyConfig();
+  backend.setRuntimeInfo({
+    execPath: process.execPath,
+    resourcesPath: process.resourcesPath
+  });
   config.init(app.getPath('userData'));
   log.init(path.join(app.getPath('userData'), 'logs'));
   log.line('app', `鲸坞 WhaleDock v${app.getVersion()} 启动 (${process.platform}/${process.arch})`);
@@ -484,7 +488,11 @@ function openMainWindow() {
     win.show();
     win.focus();
     closeSplash();
-    if (SMOKE) setTimeout(() => { console.log('SMOKE_OK'); app.exit(0); }, 1200);
+    if (SMOKE) setTimeout(() => {
+      console.log('SMOKE_OK');
+      // 走 before-quit / will-quit，确保由本 App 启动的 dsh 先被回收。
+      app.quit();
+    }, 1200);
   });
 
   // 关窗口 = 收进托盘，不退出（Cmd+Q 才是真退出）
