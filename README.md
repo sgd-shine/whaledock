@@ -1,91 +1,145 @@
 # 鲸坞 WhaleDock
 
-**DeepSeek Harness (dsh) 非官方桌面客户端** — 给鲸鱼一个靠岸的坞：一键启动，把 Harness 从浏览器标签页变成一个真正的桌面应用。
+**DeepSeek Harness（dsh）非官方桌面客户端**：给鲸鱼一个靠岸的坞。双击启动，把 Harness 从浏览器标签页变成一个真正的桌面应用。
 
-*WhaleDock — unofficial desktop client for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): auto-starts the local `dsh` backend and wraps its Web UI in a native window, with tray icon and global hotkey.*
+*WhaleDock is an unofficial desktop client for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It starts or attaches to the local `dsh` backend and displays its Web UI in a native Electron window.*
 
-> ⚠️ 本项目是社区作品，与 DeepSeek 官方无关（Unofficial）。DeepSeek Harness 本体是 DeepSeek 开源的 AI Agent 运行框架（MIT 协议）。本项目原名 Harness Desktop，自 v0.1.1 起更名为鲸坞 WhaleDock。
+> ⚠️ 本项目是社区作品，与 DeepSeek 官方无关（Unofficial）。DeepSeek Harness 本体以 MIT 协议开源。本项目原名 Harness Desktop，自 v0.1.1 起更名为鲸坞 WhaleDock。
 
-## 为什么需要它
+## v0.2 带来了什么
 
-Harness 目前只提供网页界面：每次使用都要先开终端敲 `npx @deepseek-ai/dsh web`，再去浏览器里找 `127.0.0.1:3080` 那个标签页。鲸坞把这两步合成一次点击——打开 App，它自动帮你把本地 `dsh` 服务拉起来，然后用原生窗口承载整个界面。
+- **Windows 与双架构 Mac**：提供 Windows x64 安装器/便携版，以及 macOS arm64、x64 独立安装包
+- **免装 Node**：安装包内置锁定版 dsh 运行环境；电脑没有 Node 也能启动
+- **设置窗口**：可视化修改快捷键、端口、工作目录、后端版本、内置引擎优先级、开机自启、启动最小化与更新开关
+- **更新提醒**：Windows 安装版可下载、校验并一键静默安装；Windows 便携版与 macOS 提醒后打开下载页
+- **自动托管后端**：启动时拉起 `dsh web`，退出时清理整个进程树；若端口上已有 Harness，则直接接入
+- **后台恢复**：窗口收入托盘后，托管的后端若意外退出，会按 1/2/4 秒自动重启三次
+- **原生体验**：记住窗口位置与大小、全局快捷键、托盘菜单、刷新/缩放/全屏，站外链接交给系统浏览器
+- **启动页与日志**：实时显示启动日志；端口上的服务不像 Harness 时先警告，不会默默接错网页
 
-## 功能
+后端默认锁定 `@deepseek-ai/dsh@0.1.0-rc.6`。上游仍处于 rc 阶段，因此升级锁定版本前需要重新验证；鲸坞不会写入或清理 `~/.dsh`。
 
-- **自动托管后端**：启动 App 时自动运行 `dsh web`，退出时干净地关掉整个进程组；如果检测到你已经在终端里跑了服务，会直接接入而不是重复启动
-- **后台自动恢复**：窗口收进托盘后若后端意外退出，会按 1/2/4 秒自动重启三次；失败后提醒查看日志
-- **后端版本锁定**：默认锁定经过验证的 dsh 版本，上游 rc 阶段的破坏性变更不会让 App 一夜变砖（可在配置中改为 `latest` 跟随最新）
-- **原生窗口**：独立 Dock 图标、记住窗口位置大小、⌘R 刷新、缩放、全屏，站外链接自动跳系统浏览器
-- **菜单栏托盘**：常驻菜单栏，关窗口不退出，随点随用
-- **全局快捷键**：默认 `⌘⇧H` 在任何应用里一键呼出 / 隐藏
-- **启动页与日志**：启动过程实时显示后端日志，出错时一键复制日志排查
-- **智能找 Node**：自动兼容 Homebrew / nvm / volta 安装的 Node（GUI 应用继承不到终端 PATH 的经典坑已处理）
+## 下载与安装
 
-## 环境要求
+从 [GitHub Releases](https://github.com/sgd-shine/whaledock/releases) 按电脑选择产物：
 
-macOS 13+（Apple Silicon），已安装 [Node.js](https://nodejs.org) 22.12 或更高版本。源码安装/构建需要 Node 22.12+（Electron 43 的要求）；安装版仍会调用系统里的 Node/npx 来运行 dsh。首次使用 Harness 需要在其界面中配置 DeepSeek API Key（见[官方仓库](https://github.com/deepseek-ai/deepseek-harness)说明）。Windows 与免装 Node 版本在 v0.2 路线图中（见 docs/）。
+| 电脑 | 下载文件 | 安装方式 |
+| --- | --- | --- |
+| Apple Silicon Mac | `WhaleDock-<版本>-arm64.dmg` | 打开 dmg，拖入「应用程序」 |
+| Intel Mac | `WhaleDock-<版本>-x64.dmg` | 打开 dmg，拖入「应用程序」 |
+| Windows 10/11 x64 | `WhaleDock-Setup-<版本>.exe` | 双击，按当前用户安装 |
+| Windows 10/11 x64 便携使用 | `WhaleDock-<版本>-portable.exe` | 放到固定目录后直接双击；无需安装 |
 
-## 安装
+安装版已经带有内置引擎，**普通用户不需要另装 Node.js，也不需要打开终端**。首次进入 Harness 后，仍需按[官方说明](https://github.com/deepseek-ai/deepseek-harness)配置所需的模型/API Key。
 
-**方式一：下载安装包。** 从 [Releases](https://github.com/sgd-shine/whaledock/releases) 页面下载最新的 `.dmg`，拖入「应用程序」。安装包未做 Apple 签名公证，首次打开请**右键点击 App → 打开**（只需一次）。
+### macOS 首次打开
 
-**方式二：源码运行。**
+当前安装包没有 Apple 签名与公证。首次打开若被 Gatekeeper 拦截，请在「应用程序」中**右键 WhaleDock → 打开 → 打开**；之后可正常双击。
+
+### Windows SmartScreen
+
+当前 Windows 安装器没有代码签名。SmartScreen 出现「Windows 已保护你的电脑」时：
+
+1. 确认文件来自本仓库的 Releases 页面；
+2. 点击「更多信息」；
+3. 核对应用名后点击「仍要运行」。
+
+请不要从第三方下载站获取安装包。Release 同时提供 `SHA256SUMS-win.txt` / `SHA256SUMS-mac.txt`，可用于核对下载文件。
+
+> Windows 版 dsh 行为和半自动更新链路必须以 SGD 对 beta 产物的 Windows 真机验收为准；验收完成前不要把 CI 构建成功等同于 Windows 人工验收通过。
+
+## 内置引擎如何工作
+
+鲸坞按以下顺序寻找后端：
+
+1. 你填写的自定义命令；
+2. PATH 中已经安装的 `dsh`；
+3. PATH 中的 `npx`，并锁定 `0.1.0-rc.6`；
+4. 安装包自带的 dsh 运行环境。
+
+因此，已有 Node/dsh 的开发者仍可沿用自己的环境；没有 Node 的电脑会自动落到内置引擎。若本机 Node 环境混乱，可在「设置 → 后端」勾选「优先使用内置引擎」，让内置引擎排到系统 PATH 探测之前。该开关默认关闭。
+
+## 设置
+
+从托盘菜单选择「设置…」。macOS 还可以按 `⌘,`，Windows 可从「文件 → 设置…」进入。
+
+| 设置 | 默认值 | 生效方式 |
+| --- | --- | --- |
+| 开机自动启动 | 关闭 | 保存后立即与系统登录项对账 |
+| 启动时最小化到托盘 | 关闭 | 下次启动生效；启动失败仍会弹出错误页 |
+| 全局快捷键 | `CommandOrControl+Shift+H` | 保存后试注册；占用时回滚旧快捷键 |
+| 自动检查新版本 | 开启 | 保存后立即生效 |
+| 端口 | `3080` | 保存后需重启后端 |
+| 工作目录 | 用户主目录 | 保存后需重启后端 |
+| 后端版本 | `0.1.0-rc.6` | 控制 npx 回退；内置引擎只在该值与包内版本一致时可用；保存后需重启后端 |
+| 优先使用内置引擎 | 关闭 | 保存后需重启后端 |
+| 自定义启动命令 | 留空 | 高级选项；保存后需重启后端 |
+
+Windows 便携版的开机自启指向当前 exe；移动文件后，下次启动会尝试把登录项修正到新路径。为了稳定自启，建议把便携版放到固定目录，或改用安装版。macOS 未签名版若不能注册登录项，设置页会如实提示到「系统设置 → 通用 → 登录项」手动处理。
+
+配置文件位置：
+
+- macOS：`~/Library/Application Support/WhaleDock/config.json`
+- Windows：`%APPDATA%\WhaleDock\config.json`
+
+正常使用优先通过设置窗口修改。旧版 Harness Desktop 的 macOS 配置会在首次启动时迁移。
+
+## 更新检查与隐私
+
+更新检查不是遥测。开启「自动检查新版本」后，鲸坞只会请求固定地址 `https://api.github.com/repos/sgd-shine/whaledock/releases/latest`，请求只带 GitHub API 所需的 `Accept` 和固定应用 `User-Agent`，**不会附加账号、设备号、安装 ID、配置内容或其他用户标识**。像任何网络请求一样，GitHub 仍会看到连接所必需的网络信息（例如来源 IP），但鲸坞不会额外生成或上报身份数据。
+
+该功能由 `checkUpdates` 总开关控制：关闭后，启动后检查、每 24 小时检查和手动检查都不会发出更新请求。可随时重新开启。
+
+- Windows 安装版：下载同一 Release 的 Setup 与 `SHA256SUMS-win.txt`，SHA-256 校验通过后才提供「重启并更新」；安装动作仍由用户确认
+- Windows 便携版：不会覆盖正在运行的 exe，只提醒并打开 Releases 下载页
+- macOS：只提醒新版并打开 Releases 下载页；在完成签名公证前不做应用内自动替换
+- 两个平台都可「跳过此版本」或选择「稍后」
+
+GitHub 的 `releases/latest` 默认不返回 prerelease，因此 beta Release 不会被推给正式版用户。
+
+## 从源码运行与构建
+
+只有**源码开发/构建**需要 Node.js 22.12 或更高版本；安装版用户不需要。
 
 ```bash
 git clone https://github.com/sgd-shine/whaledock.git
 cd whaledock
 npm install
+npm run smoke
 npm start
 ```
 
-## 配置
-
-配置文件在 `~/Library/Application Support/WhaleDock/config.json`（也可通过菜单「后端 → 打开配置文件」直达；从旧版 Harness Desktop 升级时会自动迁移原配置）：
-
-| 字段 | 默认值 | 说明 |
-| --- | --- | --- |
-| `port` | `3080` | Harness Web UI 端口 |
-| `autoStartBackend` | `true` | 是否由 App 自动启动后端 |
-| `command` | `null` | 自定义启动命令（如 `dsh web`），留空自动探测 |
-| `dshVersion` | `0.1.0-rc.6` | npx 回退路径安装的 dsh 版本；设为 `latest` 跟随最新 |
-| `workdir` | `null` | 后端工作目录，留空为用户主目录 |
-| `hotkey` | `CommandOrControl+Shift+H` | 全局呼出快捷键 |
-
-> 注：若配置了自定义 `command`，或自行全局安装了 `dsh`（`npm i -g @deepseek-ai/dsh`），其版本由用户维护；`dshVersion` 仅对 npx 自动回退路径生效。
-
-## 从源码打包
+构建命令：
 
 ```bash
-npm run dist        # 产物在 release/ 目录（.dmg 和 .zip）
-npm run smoke       # 纯 Node 冒烟测试，14 项断言（不需要图形界面）
+npm run dist:mac:arm64   # Apple Silicon dmg + zip
+npm run dist:mac:x64     # Intel Mac dmg + zip
+npm run dist:win         # Windows x64 Setup + portable（建议在 Windows runner）
 ```
 
-打 tag 推送到 GitHub 会由 Actions 自动构建并发布 Release：
+每个 dist 命令会先生成与目标平台/架构匹配的内置 dsh 运行环境，产物写入 `release/`。不要把一个平台生成的 `vendor/dsh-runtime/` 直接拿去打另一个平台的包。
 
-```bash
-git tag v0.1.1 && git push origin v0.1.1
-```
-
-## 工作原理
-
-App 启动后先探测 `127.0.0.1:3080` 是否已有服务：有则直接接入；没有则解析出可用的 `dsh`（或回退到 `npx -y @deepseek-ai/dsh@<锁定版本> web`）并作为独立进程组启动，等端口就绪后用 Electron 窗口加载界面。退出时向整个进程组发 SIGTERM 优雅关停。核心进程管理逻辑在 `lib/backend.js`，不依赖 Electron，可以用 `npm run smoke` 单独测试。
+`npm run smoke` 是不依赖图形界面的纯 Node 测试集；GitHub Actions 会在 Ubuntu、Windows 与 macOS 上运行同一套测试。
 
 ## 常见问题
 
-**打开时提示"无法验证开发者"** — 安装包未签名（签名公证需要 Apple 开发者账号）。右键 App → 打开，之后就正常了。
+**启动很久没有进入主窗口** — 若正在走 npx 路径，首次下载 dsh 可能需要几分钟。想绕开本机 Node 环境，可在设置中启用「优先使用内置引擎」。
 
-**提示"找不到 Node.js / dsh"** — 去 [nodejs.org](https://nodejs.org) 下载 LTS 安装包装好，再点「重试」。
+**端口 3080 上有服务，但提示不像 Harness** — 可能是其他程序占用了端口。优先打开设置改端口；确认确实是 Harness 时，也可以选择「仍然接入」。弱特征检查失败只提示，不会删除或停止端口上的外部进程。
 
-**首次启动等很久** — 第一次运行 `npx` 需要下载 Harness 组件，取决于网速，之后就快了。也可以先在终端 `npm i -g @deepseek-ai/dsh` 装好再用。
+**我已经在终端启动了 dsh** — 鲸坞会识别并接入已有 Harness；退出鲸坞时不会关闭这个外部服务。
 
-**我自己在终端里已经启动了 dsh** — 没关系，App 会检测到并直接接入，不会重复启动，退出时也不会关掉你终端里的服务。
+**Windows 退出后还有 node/dsh 进程** — 先从托盘选择「退出」，再查看设置页/日志。Windows 版用 `taskkill /T` 清理托管的进程树；若真机验收失败，第一步应复制日志定位，不要猜测性改命令。
 
-**想用最新版 dsh** — 把配置里的 `dshVersion` 改成 `latest`（上游为 rc 阶段，新版可能有破坏性变更，出问题改回默认值即可）。
+**想跟随最新 dsh** — 可把后端版本改为 `latest`，但上游仍是 rc，可能出现破坏性变化，而且与包内锁定版本不一致时不会走内置引擎。稳定使用建议保留默认 `0.1.0-rc.6`。
 
 ## 文档
 
-完整设计文档见 [docs/开发方案.md](docs/开发方案.md)，从零上手的图文指南见 [docs/操作手册.md](docs/操作手册.md)，历史产品审计见 [docs/产品审计与路线图-2026-08-14.md](docs/产品审计与路线图-2026-08-14.md)，当前版本路线见 [docs/路线图定稿-2026-08-14.md](docs/路线图定稿-2026-08-14.md)，AI 编码代理的工程约定见 [AGENTS.md](AGENTS.md)。
+- [操作手册](docs/操作手册.md)
+- [v0.2 开发方案](docs/开发方案-v0.2-2026-08-15.md)
+- [产品审计与路线图](docs/产品审计与路线图-2026-08-14.md)
+- [AI 编码代理工程约定](AGENTS.md)
 
 ## License
 
-[MIT](LICENSE) © 2026 SGD。DeepSeek Harness 归 DeepSeek 所有并以 MIT 协议开源；本项目未使用 DeepSeek 的商标与素材，"鲸坞"名称与鲸鱼图标均为原创几何设计。
+[MIT](LICENSE) © 2026 SGD。DeepSeek Harness 归 DeepSeek 所有并以 MIT 协议开源；本项目未使用 DeepSeek 的商标与素材，「鲸坞」名称与鲸鱼图标均为原创几何设计。

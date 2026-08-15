@@ -566,12 +566,13 @@
 
   function normalizedConfig(payload) {
     const source = payload && (payload.config || payload.settings || payload);
+    if (!source || source.port === undefined) throw new Error('设置数据缺少端口');
     return {
       openAtLogin: Boolean(source && source.openAtLogin),
       startMinimized: Boolean(source && source.startMinimized),
       hotkey: String((source && source.hotkey) || 'CommandOrControl+Shift+H'),
       checkUpdates: source && source.checkUpdates !== undefined ? Boolean(source.checkUpdates) : true,
-      port: Number((source && source.port) || 3080),
+      port: Number(source.port),
       workdir: (source && source.workdir) || null,
       dshVersion: String((source && source.dshVersion) || ''),
       preferBundled: Boolean(source && source.preferBundled),

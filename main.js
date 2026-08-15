@@ -917,9 +917,15 @@ async function remindOnlyUpdate(result, portableWindows = false) {
     cancelId: 2,
     noLink: true
   });
-  if (response === 0) await shell.openExternal(result.release.url || update.RELEASE_PAGE);
-  else if (response === 1) config.set({ skipVersion: result.latestVersion });
-  return { ok: true, updateAvailable: true, version: result.latestVersion, message: `发现新版本 ${result.latestVersion}` };
+  if (response === 0) {
+    await shell.openExternal(result.release.url || update.RELEASE_PAGE);
+    return { ok: true, updateAvailable: true, version: result.latestVersion, message: '已打开下载页' };
+  }
+  if (response === 1) {
+    config.set({ skipVersion: result.latestVersion });
+    return { ok: true, updateAvailable: true, version: result.latestVersion, message: `已跳过版本 ${result.latestVersion}` };
+  }
+  return { ok: true, updateAvailable: true, version: result.latestVersion, message: '稍后再更新' };
 }
 
 async function removeUpdateTemp(dir) {
@@ -1086,9 +1092,10 @@ function runUpdateCheck(manual) {
 // ---------- 托盘 / 菜单 / 快捷键 ----------
 function createTray() {
   try {
-    const img = nativeImage.createFromPath(path.join(__dirname, 'assets', 'trayTemplate.png'));
+    const iconName = isMac ? 'trayTemplate.png' : 'trayColor.png';
+    const img = nativeImage.createFromPath(path.join(__dirname, 'assets', iconName));
     if (img.isEmpty()) return;
-    img.setTemplateImage(true);
+    img.setTemplateImage(isMac);
     tray = new Tray(img);
     tray.setToolTip('鲸坞 WhaleDock');
     tray.setContextMenu(Menu.buildFromTemplate([
