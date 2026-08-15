@@ -14,7 +14,7 @@
       },
       {
         "path": "compliance/inventory-win32-x64.json",
-        "sha256": "b81deaee3f5668d260c3afb81249f8bb3d915086894cd7033862f5b5e7685e48"
+        "sha256": "27dfe3481633345cd9fef204250b9383f919de3671d08ed292c0cc8f44b41f10"
       }
     ],
     "declarations": [

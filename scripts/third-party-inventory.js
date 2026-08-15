@@ -994,8 +994,8 @@ function buildNotices(inventoryDir, sourcePath) {
 async function main() {
   const command = process.argv[2];
   const options = parseArgs(process.argv.slice(3));
-  if (!['generate', 'verify', 'notices', 'sources'].includes(command)) {
-    throw new Error('用法：third-party-inventory.js <generate|verify|notices|sources> --runtime=... --inventory=...');
+  if (!['generate', 'snapshot', 'verify', 'notices', 'sources'].includes(command)) {
+    throw new Error('用法：third-party-inventory.js <generate|snapshot|verify|notices|sources> --runtime=... --inventory=...');
   }
   const inventories = path.resolve(ROOT, options.inventories || 'compliance');
   const sourcePath = path.resolve(ROOT, options.sources || 'compliance/SOURCES.json');
@@ -1030,8 +1030,17 @@ async function main() {
 
   const runtime = path.resolve(ROOT, options.runtime || 'vendor/dsh-runtime');
   const inventoryPath = path.resolve(ROOT, options.inventory || 'compliance/inventory.json');
+  if (command === 'snapshot' && !options.inventory) {
+    throw new Error('snapshot 必须显式指定 --inventory，避免覆盖仓库清单');
+  }
   await ensureCanonicalTexts(command === 'generate');
   const actual = buildInventory(runtime, command === 'generate');
+  if (command === 'snapshot') {
+    if (fs.existsSync(inventoryPath)) throw new Error(`snapshot 输出已存在，拒绝覆盖：${inventoryPath}`);
+    writeInventory(inventoryPath, actual);
+    console.log(`THIRD_PARTY_INVENTORY_SNAPSHOT ${actual.target.platform}/${actual.target.arch} packages=${actual.packageCount} closure=${actual.closureSha256}`);
+    return;
+  }
   if (command === 'generate') {
     writeInventory(inventoryPath, actual);
     console.log(`THIRD_PARTY_INVENTORY_READY ${actual.target.platform}/${actual.target.arch} packages=${actual.packageCount} closure=${actual.closureSha256}`);

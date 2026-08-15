@@ -42,7 +42,11 @@ jobs:
       - name: Generate Windows x64 runtime inventory evidence
         if: runner.os == 'Windows'
         shell: pwsh
-        run: node scripts/third-party-inventory.js generate --runtime=vendor/dsh-runtime --inventory="$env:RUNNER_TEMP/inventory-win32-x64-actual.json"
+        run: node scripts/third-party-inventory.js snapshot --runtime=vendor/dsh-runtime --inventory="$env:RUNNER_TEMP/inventory-win32-x64-actual.json"
+
+      - name: Confirm Windows inventory snapshot was read-only
+        if: runner.os == 'Windows'
+        run: git diff --exit-code
 
       - name: Upload Windows x64 runtime inventory evidence
         if: runner.os == 'Windows'

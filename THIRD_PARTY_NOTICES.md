@@ -12,7 +12,7 @@ WhaleDock 本体使用 MIT 许可证。安装包另外包含锁定版 dsh runtim
 | --- | ---: | --- | --- | --- | --- |
 | darwin/arm64 | 526 | `9f5613cbc121665e69cf75142c1131c76ec08b591085b93666fe9f6b8c0d3841` | `4faee9c69f434eb2f608deb51711e30170655c61754792d3e9dd9ab031867266` | `7806698906c19ac7260958a398e96606c3d7f53a3c7151ccbbef5da36a2d0c75` | [inventory-darwin-arm64.json](compliance/inventory-darwin-arm64.json) |
 | darwin/x64 | 526 | `928f3fd6cf6a876eeeff8fedb0df8d2864265279da7e7cf6636c2a03d87afdde` | `6900f36addfeed22aad0ba5d616e3dd4f58cc63a9aa160aa8a11b8211d3c6111` | `7806698906c19ac7260958a398e96606c3d7f53a3c7151ccbbef5da36a2d0c75` | [inventory-darwin-x64.json](compliance/inventory-darwin-x64.json) |
-| win32/x64 | 525 | `47ad1d95ef88e9de4a85a09b212b107738bf73b5d4a47340db4086b4b7fa0ac4` | `a3114001dda8b35cc4a6f4b7c75ab8175fb2981f5dfb7ed12df7c6bac5aec3bb` | `7806698906c19ac7260958a398e96606c3d7f53a3c7151ccbbef5da36a2d0c75` | [inventory-win32-x64.json](compliance/inventory-win32-x64.json) |
+| win32/x64 | 525 | `47ad1d95ef88e9de4a85a09b212b107738bf73b5d4a47340db4086b4b7fa0ac4` | `783388d01d7edd11279d67a3261e538700136d27143050c4a31377d2dd29015a` | `7806698906c19ac7260958a398e96606c3d7f53a3c7151ccbbef5da36a2d0c75` | [inventory-win32-x64.json](compliance/inventory-win32-x64.json) |
 
 ## 许可证家族（跨目标去重包）
 
