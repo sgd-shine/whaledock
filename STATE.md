@@ -1,16 +1,17 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-15（v0.2 G1 闭环，正式发布执行中）
+更新：2026-08-15（v0.2.0 正式 Release 已公开）
 
 ## 阶段结论
 
-**v0.2.0 的工程实现、macOS 本地验收与公开再分发材料已经完成；当前在 PR 合并与正式 Release 阶段。**
+**v0.2.0 的工程实现、macOS 本地验收、公开再分发材料与正式 GitHub Release 已全部闭环。**
 
-- 开发分支：`codex/v0.2-production`
-- PR：<https://github.com/sgd-shine/whaledock/pull/1>
+- PR [#1](https://github.com/sgd-shine/whaledock/pull/1) 已合并；正式 tag 指向 main 提交 `d8a8a774…`。
 - 批次 7 审计修复：`591f6c1`
 - 批次 9 合规与构建可见性：`4e0c04c`
-- 当前稳定版：`v0.1.1`；`v0.2.0` tag / Release 尚不存在。
+- 当前稳定版：[`v0.2.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.2.0)；正式注解 tag 对象 `9c9022eb…` 指向提交 `d8a8a774…`。
+- Release run [31887672606](https://github.com/sgd-shine/whaledock/actions/runs/31887672606) 的 macOS/Windows 构建与成品合规回读通过；attempt 2 的 publish job [95020360258](https://github.com/sgd-shine/whaledock/actions/runs/31887672606/job/95020360258) 成功发布八项资产。
+- 精确批准值 `release:v0.2.0:sha256:fb1ef01f2567b33fd1ed91aed5e50fa02c8bb4c4db06d2eb8f26acbe08551347` 仅用于本次 publish，Release 回读后已立即删除；仓库变量当前不存在。
 - 2026-08-15 SGD 决定：不发 beta；Windows 以“实验性支持（未真机验证）”发布；Intel 仅保留 Rosetta 抽查边界；无 S1 且 G1/成品材料闭环后，由 Codex 执行正式发布并临时设置、随即清除精确审批变量。
 
 Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不阻断本次发布，但不得改写为已经通过。
@@ -54,7 +55,8 @@ Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不
 - 三目标 closure：arm64 `9f5613cb…`、x64 `928f3fd6…`、Windows `47ad1d95…`；runtime tree 分别 `4faee9c6…`、`6900f36a…`、`783388d0…`。Windows 值来自原生 Windows runner；它与 macOS 交叉安装的差异仅限 npm 根层平台胶水，525/525 包及全部原生二进制哈希一致。
 - 隔离未签名 x64 `electron-builder --mac dir` 实构建成功；成品回读 `PACKAGED_COMPLIANCE_VERIFIED copies=1`，NOTICE SHA-256 `3126a904…`；App 可见性 `staging=0 unexpected=0 visible=1`。临时构建已删除。
 - `node --check`、Release/CI YAML 解析与 `git diff --check` 通过；根 `dependencies` 为空，devDependencies 仍只有 electron 与 electron-builder；`lib/` 无 Electron require。
-- 远端 PR 的最终 head CI 尚待本轮文档提交后确认；旧 run 只证明旧 head，不用于合并判断。
+- 正式 tag 提交的 main CI [31887550725](https://github.com/sgd-shine/whaledock/actions/runs/31887550725) 三平台全绿；Release 两个构建 job 均为 success，Windows 使用原生完整 runtime tree `783388d0…` 精确过门。
+- 首次失败候选的 Release run [31886840491](https://github.com/sgd-shine/whaledock/actions/runs/31886840491) 与 Windows 原生取证 run [31887203247](https://github.com/sgd-shine/whaledock/actions/runs/31887203247) 保留为审计链：前者没有创建 Release，后者证明差异仅来自 npm 平台胶水；没有删改或冒充首次成功。
 
 ## macOS 真机证据
 
@@ -75,14 +77,13 @@ Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不
 | `WhaleDock-0.2.0-x64.dmg` | 188,031,380 | 179.3 | `49ec1e8f86a6561828318222cf67fd0ec6e0223253b933bb2666bd31524cc420` |
 | `WhaleDock-0.2.0-x64-mac.zip` | 207,168,381 | 197.6 | `d21fccd7e624b8c05b506c42b6f90fe6765137bbd64c82143ff0689c0243abf8` |
 
-这些本地哈希不替代即将由 GitHub Actions 生成的正式云端资产。最终 build-time darwin/x64 runtime 约 347.2 MiB；单个本地候选包均低于 500 MB。
+这些本地候选哈希不替代 GitHub Release 的正式云端资产。正式 Release 已提供 arm64/x64 的 dmg+zip、Windows Setup+portable 及两份校验和，共八项；最终 build-time darwin/x64 runtime 约 347.2 MiB，单个正式安装资产均低于 500 MB。
 
 ## 尚未完成
 
-1. PR 最终 head CI、合并与 main CI。
-2. `v0.2.0` Release workflow、精确审批值、八项云端资产与 `releases/latest` 回读。
-3. 本机安装版“检查更新 → 已是最新”的 GUI 回读。
-4. Windows 全线真机与 Intel 真机均未做；Windows 按实验性支持发布，后续失败先取日志，不做猜测性大改。
-5. macOS/Windows 签名与 Apple 公证未做，属于 S3，本次明确不执行。
+1. 本机安装版“检查更新 → 已是最新”的 GUI 人工回读；API `releases/latest` 已确认返回 `v0.2.0`，但两者不互相替代。
+2. Windows 全线真机与 Intel 真机均未做；Windows 按实验性支持发布，后续失败先取日志，不做猜测性大改。
+3. Windows Setup/portable、SmartScreen、无 Node 冷启动、自启、进程树与半自动更新仍待发布后人工体验补证。
+4. macOS/Windows 签名与 Apple 公证未做，属于 S3，本次明确不执行。
 
-详细发布顺序与证据边界见 `HANDOFF.md`。
+详细发布证据与人工体验边界见 `HANDOFF.md`。
