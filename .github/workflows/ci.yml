@@ -32,3 +32,28 @@ jobs:
 
       - name: Smoke test
         run: npm run smoke
+
+      # Windows 的 npm .bin/shim 与原生包必须在真实 Windows runner 上留证；
+      # 先上传实际清单再做精确 diff，失败时仍可下载 JSON 定位，避免只在 tag 构建才发现漂移。
+      - name: Bundle Windows x64 runtime for inventory audit
+        if: runner.os == 'Windows'
+        run: npm run bundle:dsh -- --platform=win32 --arch=x64
+
+      - name: Generate Windows x64 runtime inventory evidence
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: node scripts/third-party-inventory.js generate --runtime=vendor/dsh-runtime --inventory="$env:RUNNER_TEMP/inventory-win32-x64-actual.json"
+
+      - name: Upload Windows x64 runtime inventory evidence
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-runtime-inventory-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 7
+          path: ${{ runner.temp }}/inventory-win32-x64-actual.json
+
+      - name: Compare Windows x64 runtime inventory
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: git diff --no-index --exit-code -- compliance/inventory-win32-x64.json "$env:RUNNER_TEMP/inventory-win32-x64-actual.json"
