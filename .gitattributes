@@ -1,2 +1,4 @@
-# 第三方原始许可证按上游字节哈希固定；禁止 checkout 换行转换，也不把上游空白当仓库格式错误。
+# 合规证据按仓库原始字节做 SHA-256 绑定；禁止 Windows checkout 改写换行，也不把上游空白当仓库格式错误。
 licenses/** -text -whitespace
+compliance/** -text -whitespace
+THIRD_PARTY_NOTICES.md -text -whitespace
