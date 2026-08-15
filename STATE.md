@@ -1,22 +1,23 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-15（v0.2.0 已发布；v0.3.0 实现完成、Release 待定）
+更新：2026-08-15（v0.3.0 已公开发布）
 
 ## 阶段结论
 
-**v0.2.0 的工程实现、macOS 本地验收、公开再分发材料与正式 GitHub Release 已全部闭环；v0.3.0 批次 11 已完成实现与本地候选验证，但尚未 tag、CI 或 Release。**
+**v0.2.0 的工程、合规与发布闭环保留为历史证据；v0.3.0 批次 11 已完成实现、三平台 CI、正式 tag 与公开 GitHub Release，现为当前稳定版。**
 
 - PR [#1](https://github.com/sgd-shine/whaledock/pull/1) 已合并；正式 tag 指向 main 提交 `d8a8a774…`。
 - 批次 7 审计修复：`591f6c1`
 - 批次 9 合规与构建可见性：`4e0c04c`
-- 当前稳定版：[`v0.2.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.2.0)；正式注解 tag 对象 `9c9022eb…` 指向提交 `d8a8a774…`。
-- Release run [31887672606](https://github.com/sgd-shine/whaledock/actions/runs/31887672606) 的 macOS/Windows 构建与成品合规回读通过；attempt 2 的 publish job [95020360258](https://github.com/sgd-shine/whaledock/actions/runs/31887672606/job/95020360258) 成功发布八项资产。
-- 精确批准值 `release:v0.2.0:sha256:fb1ef01f2567b33fd1ed91aed5e50fa02c8bb4c4db06d2eb8f26acbe08551347` 仅用于本次 publish，Release 回读后已立即删除；仓库变量当前不存在。
+- 当前稳定版：[`v0.3.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0)；非 draft、非 prerelease，`releases/latest` 已命中 v0.3 正式版（tag `v0.3.0`）。
+- 正式注解 tag 对象 `8af8f86a527a105c9dbe5a204e75afcdd9dba409` 指向提交 `fe2d4def7bb7ef1d9339b71b1e28236fd9e1eabf`；[main CI 31893926627](https://github.com/sgd-shine/whaledock/actions/runs/31893926627) 的 Ubuntu、Windows、macOS 全绿。
+- [Release run 31894036652](https://github.com/sgd-shine/whaledock/actions/runs/31894036652) 的构建与成品回读通过；attempt 2 的 publish job [95035294975](https://github.com/sgd-shine/whaledock/actions/runs/31894036652/job/95035294975) 成功发布八项资产。
+- 精确批准值 `release:v0.3.0:sha256:8a7e9f14cfdaee35eb5baaa016547ec0a5d32d110876436185f186a3257407ad` 仅用于本次 publish；Release 回读后已删除，仓库变量回读不存在。
 - 2026-08-15 SGD 决定：不发 beta；Windows 以“实验性支持（未真机验证）”发布；Intel 仅保留 Rosetta 抽查边界；无 S1 且 G1/成品材料闭环后，由 Codex 执行正式发布并临时设置、随即清除精确审批变量。
 
 Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不阻断本次发布，但不得改写为已经通过。
 
-## v0.3 批次 11 已实现（release pending）
+## v0.3 批次 11 已实现并发布
 
 ### 事件、连续性与持久化
 
@@ -37,7 +38,7 @@ Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不
 
 ### 批次 11 当前实证
 
-- 当前源码版本为 `0.3.0`；本地 `npm run smoke` 实际为 **119 PASS / ALL PASS**，分解为基础 34 + config 13 + events 24 + backend adapter 20 + main 24 + 4 项 wrapper。这是本地纯 Node 证据，不是 v0.3 CI/Release 证据。
+- 当前源码版本为 `0.3.0`；本地 `npm run smoke` 实际为 **119 PASS / ALL PASS**，分解为基础 34 + config 13 + events 24 + backend adapter 20 + main 24 + 4 项 wrapper。这是本地纯 Node 证据，与正式 tag 提交的三平台 CI/Release 证据分开记录。
 - macOS arm64 源码态已真实 attach 当前 dsh，探测 13 个会话并进入 live；只证明 rc.6 host/list/history/WS 合约形状，外部服务的 npm 根包版本未证明。
 - 匿名看板已在真实 GUI 显示。对比度修复前的深/浅流程样张已经 GUI 保存，尺寸均为 1080×1440：深色 357,713 B / `163732dc25f4f5eea8b4acc650a3281e643b95c6d9ba9abb9af01e2fb6055600`，浅色 336,785 B / `dac1ebce2fef2572a5bb23211109c99c3287ec81615ee6e1785472986e9f9f40`。它们只证明保存流程/像素尺寸，不代表修复后最终色彩。
 - 系统通知、真实 managed 预算 stop/resume、Windows 与 Intel 真机均未验证。约 200–400ms hard-crash 窗口仍是明确产品边界，不宣称 exactly-once。
@@ -76,7 +77,9 @@ Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不
 ## 自动与成品验证
 
 - v0.2.0 正式 tag 当时的 `npm run smoke`：34/34，`ALL PASS`。
-- 当前 v0.3.0 源码态 `npm run smoke`：**119 PASS / ALL PASS**（基础 34 + config 13 + events 24 + backend adapter 20 + main 24 + wrapper 4）。这是本地纯 Node 结果；v0.3 tag、三平台 CI、打包与 Release 尚未执行。
+- 当前 v0.3.0 源码态 `npm run smoke`：**119 PASS / ALL PASS**（基础 34 + config 13 + events 24 + backend adapter 20 + main 24 + wrapper 4）。
+- 首次 v0.3 main CI [31893823255](https://github.com/sgd-shine/whaledock/actions/runs/31893823255) 仅 Windows 因静态测试写死 LF、不兼容 CRLF 失败，功能套件已通过；第一轮修复后 [31893926627](https://github.com/sgd-shine/whaledock/actions/runs/31893926627) 三平台全绿。
+- 正式 Release run [31894036652](https://github.com/sgd-shine/whaledock/actions/runs/31894036652) 与 attempt 2 publish job [95035294975](https://github.com/sgd-shine/whaledock/actions/runs/31894036652/job/95035294975) 成功；公开 Release 的八项资产为 `SHA256SUMS-mac.txt` 372 B、`SHA256SUMS-win.txt` 189 B、arm64 zip 204,753,794 B、arm64 dmg 185,260,077 B、portable 161,260,244 B、x64 zip 207,735,735 B、x64 dmg 188,143,119 B、Setup 161,448,096 B。
 - `npm run compliance:verify`：SOURCES 与 THIRD_PARTY_NOTICES 确定性检查通过。
 - 当前 darwin/x64 runtime inventory 回读：526 包，closure `928f3fd6cf6a876eeeff8fedb0df8d2864265279da7e7cf6636c2a03d87afdde`。
 - 三目标 closure：arm64 `9f5613cb…`、x64 `928f3fd6…`、Windows `47ad1d95…`；runtime tree 分别 `4faee9c6…`、`6900f36a…`、`783388d0…`。Windows 值来自原生 Windows runner；它与 macOS 交叉安装的差异仅限 npm 根层平台胶水，525/525 包及全部原生二进制哈希一致。
@@ -111,11 +114,10 @@ Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不
 
 ## 尚未完成
 
-1. v0.3 尚未创建 tag、运行三平台 CI/Release、打包或公开发布；路线图状态为 **implementation complete / release pending**。
-2. v0.3 Electron 系统通知权限、Notification→Dock/托盘/banner 可见降级链尚未真机；目前只有代码/纯 Node 与静态证据。
-3. v0.3 真实 managed backend 跨预算线后的进程树停止、App 重启 latch 不绕过、“今日继续”恢复尚未做 GUI+真进程闭环。外部 attach 已实现为只告警、不 stop，但仍需安装版补证。
-4. 现有深/浅战报为对比度修复前样张；修复后色彩、对比度、中文排版与剪贴板真实读回仍需最终人工验收。
-5. Windows 全线真机与 Intel 真机均未做；Intel 仍只有 Apple Silicon + Rosetta，Windows 仍是未签名、未真机的实验性支持。
-6. macOS/Windows 签名与 Apple 公证未做，属于 S3，本次明确不执行。
+1. v0.3 Electron 系统通知权限、Notification→Dock/托盘/banner 可见降级链尚未真机；目前只有代码/纯 Node 与静态证据。
+2. v0.3 真实 managed backend 跨预算线后的进程树停止、App 重启 latch 不绕过、“今日继续”恢复尚未做 GUI+真进程闭环。外部 attach 已实现为只告警、不 stop，但仍需安装版补证。
+3. 现有深/浅战报为对比度修复前样张；修复后色彩、对比度、中文排版与剪贴板真实读回仍需最终人工验收。
+4. Windows 全线真机与 Intel 真机均未做；Intel 仍只有 Apple Silicon + Rosetta，Windows 仍是未签名、未真机的实验性支持。
+5. macOS/Windows 签名与 Apple 公证未做，属于 S3，本次明确不执行。
 
 详细发布证据与人工体验边界见 `HANDOFF.md`。

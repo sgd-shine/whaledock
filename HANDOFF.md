@@ -1,16 +1,16 @@
-# HANDOFF.md — WhaleDock v0.2 已发布 / v0.3 候选交接
+# HANDOFF.md — WhaleDock v0.3.0 正式发布交接
 
-更新：2026-08-15 · v0.2.0 正式 Release 闭环；v0.3.0 批次 11 实现完成、Release 待定
+更新：2026-08-15 · v0.3.0 批次 11 实现与正式 Release 已闭环
 
 ## 当前结论
 
-v0.2 工程、macOS 本地验收、G1 第三方材料与正式公开发布已经闭环。v0.3 的任务事件、用量/费用看板、通知、每日软预算与战报实现已完成，当前状态是 **implementation complete / release pending**。
+v0.2 工程、macOS 本地验收、G1 第三方材料与正式公开发布保留为历史证据。v0.3 的任务事件、用量/费用看板、通知、每日软预算与战报已实现，并以 `v0.3.0` 公开发布；当前状态是 **implementation complete / released**。
 
 - PR [#1](https://github.com/sgd-shine/whaledock/pull/1) 已合并。
 - 批次 7 审计修复：`591f6c1`
 - 批次 9 合规与构建可见性：`4e0c04c`
-- 当前稳定版：[`v0.2.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.2.0)；正式注解 tag 对象 `9c9022eb…` 指向 `d8a8a774…`。
-- Release run [31887672606](https://github.com/sgd-shine/whaledock/actions/runs/31887672606) 成功；attempt 2 的 publish job [95020360258](https://github.com/sgd-shine/whaledock/actions/runs/31887672606/job/95020360258) 已发布八项资产。
+- 当前稳定版：[`v0.3.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0)；正式注解 tag 对象 `8af8f86a527a105c9dbe5a204e75afcdd9dba409` 指向 `fe2d4def7bb7ef1d9339b71b1e28236fd9e1eabf`。
+- main CI [31893926627](https://github.com/sgd-shine/whaledock/actions/runs/31893926627) 三平台全绿；Release run [31894036652](https://github.com/sgd-shine/whaledock/actions/runs/31894036652) 成功，attempt 2 publish job [95035294975](https://github.com/sgd-shine/whaledock/actions/runs/31894036652/job/95035294975) 已发布八项资产。
 - 本机 `/Applications/WhaleDock.app` 为 v0.2.0 arm64；Spotlight 只发现这一份正式安装。
 
 2026-08-15 SGD 的发布决定已覆盖旧的 beta-first 流程：不发 beta；Windows 真机验收不再阻断发布，改为“实验性支持（未真机验证）”；Intel 只保留 Rosetta 抽查边界；在没有 S1 冲突且 G1/成品材料闭环时，Codex 获预授权临时设置精确审批值、发布并立即删除变量。
@@ -30,7 +30,7 @@ v0.2 工程、macOS 本地验收、G1 第三方材料与正式公开发布已经
 
 ### 当前自动与 GUI 证据
 
-- 当前源码版本 `0.3.0`；`npm run smoke` 已实际回读 **119 PASS / ALL PASS**：基础 34、config 13、events 24、backend adapter 20、main 24，加 4 项 wrapper 纳入检查。这是本地纯 Node 证据，不是 v0.3 CI、打包或 Release 证据。
+- 当前源码版本 `0.3.0`；`npm run smoke` 已实际回读 **119 PASS / ALL PASS**：基础 34、config 13、events 24、backend adapter 20、main 24，加 4 项 wrapper 纳入检查。这是本地纯 Node 证据，与远程 CI、打包与 Release 证据分开记录。
 - macOS arm64 源码态已真实 attach 当前 dsh，看到 13 个会话并进入 live。因为是外部服务，只能证明 rc.6 host/list/history/WS 形状符合，**不能证明对方 npm 根包就是 `0.1.0-rc.6`**。
 - rc.6 历史兼容与单会话 50,000 条尾部基线仍会标记 `history-gap`；当前看板对此如实显示，不用局部数据伪造完整账单。
 - 匿名看板已真实显示。深色战报 `/Users/shine/Downloads/WhaleDock-v03-dark-test.png`：357,713 B，SHA-256 `163732dc25f4f5eea8b4acc650a3281e643b95c6d9ba9abb9af01e2fb6055600`；浅色战报 `/Users/shine/Downloads/WhaleDock-v03-light-test.png`：336,785 B，SHA-256 `dac1ebce2fef2572a5bb23211109c99c3287ec81615ee6e1785472986e9f9f40`。两张都由 GUI 保存并回读为 1080×1440。
@@ -42,7 +42,25 @@ v0.2 工程、macOS 本地验收、G1 第三方材料与正式公开发布已经
 - 用量/费用固定是“dsh 已观测用量，非账单”；history gap 后费用 fail-closed，不显示伪精确总额。
 - 系统通知权限及 Notification→Dock/托盘/banner 可见降级、真实 managed backend 预算 stop/resume 仍未真机闭环。
 - Windows 仍是未签名、未真机的实验性支持；Intel x64 仍只有 Apple Silicon + Rosetta 抽查，不是 Intel 真机；macOS 仍未签名/公证。
-- v0.3 尚无 tag、远程 CI、打包产物或 GitHub Release，不得把本地 smoke/GUI 证据改写成已发布。
+
+## 正式 v0.3.0 发布证据
+
+1. 首次 main CI [31893823255](https://github.com/sgd-shine/whaledock/actions/runs/31893823255) 的 macOS/Ubuntu 通过，Windows 唯一失败是静态测试写死 LF、无法匹配 CRLF；第一轮修复后 [31893926627](https://github.com/sgd-shine/whaledock/actions/runs/31893926627) 三平台全绿。
+2. 正式注解 tag 对象 `8af8f86a527a105c9dbe5a204e75afcdd9dba409` 指向已通过 main CI 的提交 `fe2d4def7bb7ef1d9339b71b1e28236fd9e1eabf`。
+3. Release run [31894036652](https://github.com/sgd-shine/whaledock/actions/runs/31894036652) 的构建与成品回读通过；attempt 2 publish job [95035294975](https://github.com/sgd-shine/whaledock/actions/runs/31894036652/job/95035294975) 成功。
+4. 精确批准值 `release:v0.3.0:sha256:8a7e9f14cfdaee35eb5baaa016547ec0a5d32d110876436185f186a3257407ad` 只在本次 publish 中临时存在；Release 与资产回读后已删除，仓库变量回读不存在。
+5. [`v0.3.0` Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0) 已公开，为非 draft、非 prerelease；`releases/latest` 已命中 v0.3 正式版（tag `v0.3.0`）。
+
+已发布八项资产：
+
+- [x] `WhaleDock-0.3.0-arm64-mac.zip`（204,753,794 B）
+- [x] `WhaleDock-0.3.0-arm64.dmg`（185,260,077 B）
+- [x] `WhaleDock-0.3.0-x64-mac.zip`（207,735,735 B）
+- [x] `WhaleDock-0.3.0-x64.dmg`（188,143,119 B）
+- [x] `WhaleDock-Setup-0.3.0.exe`（161,448,096 B）
+- [x] `WhaleDock-0.3.0-portable.exe`（161,260,244 B）
+- [x] `SHA256SUMS-mac.txt`（372 B）
+- [x] `SHA256SUMS-win.txt`（189 B）
 
 ## G1 已完成
 
@@ -95,7 +113,7 @@ v0.2 工程、macOS 本地验收、G1 第三方材料与正式公开发布已经
 
 ## Windows 发布后补证清单
 
-这些项目不阻塞 v0.2.0，但任何结果都必须如实记录：Setup/SmartScreen、无 Node 的内置 dsh 首启、Ctrl+Shift+H、退出进程树、半自动更新、portable、自启路径自愈、启动最小化、升级后系统只保留一个 WhaleDock 入口。
+这些项目不阻塞 v0.3.0 的已完成发布，但任何结果都必须如实记录：Setup/SmartScreen、无 Node 的内置 dsh 首启、Ctrl+Shift+H、退出进程树、半自动更新、portable、自启路径自愈、启动最小化、升级后系统只保留一个 WhaleDock 入口。
 
 失败时提供 `%APPDATA%\WhaleDock\logs\whaledock.log`、Windows 版本、资产名与 SHA-256、最后 50 行日志、相关父子进程/PID 和截图。不得删除或整理 `%USERPROFILE%\.dsh`，先区分 WhaleDock 兼容层、安装闭包与上游 dsh 行为。
 

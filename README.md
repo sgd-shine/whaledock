@@ -19,9 +19,9 @@
 
 后端默认锁定 `@deepseek-ai/dsh@0.1.0-rc.6`。上游仍处于 rc 阶段，因此升级锁定版本前需要重新验证；鲸坞不会写入或清理 `~/.dsh`。
 
-## v0.3 当前进度：实现完成，待发布
+## v0.3.0 已公开发布
 
-v0.3 的源码实现与本地候选验收已完成，但还没有创建 v0.3 tag、CI/Release 或新的安装资产；Releases 页当前稳定版仍是 v0.2.0。
+v0.3.0 已作为当前稳定版公开发布：[正式 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0) 为非 draft、非 prerelease，`releases/latest` 已命中 v0.3 正式版（tag `v0.3.0`）。正式注解 tag 对象 `8af8f86a527a105c9dbe5a204e75afcdd9dba409` 指向提交 `fe2d4def7bb7ef1d9339b71b1e28236fd9e1eabf`；[main CI 31893926627](https://github.com/sgd-shine/whaledock/actions/runs/31893926627) 三平台全绿，[Release run 31894036652](https://github.com/sgd-shine/whaledock/actions/runs/31894036652) 的 attempt 2 publish job [95035294975](https://github.com/sgd-shine/whaledock/actions/runs/31894036652/job/95035294975) 已发布八项资产。
 
 - **任务与用量看板**：独立本地窗口显示今日/本周已观测 token、估算费用、顶层/子代理聚合和最近匿名任务。固定口径是“**dsh 已观测用量，非账单**”。
 - **任务通知**：完成、失败与等待人工事件在本地持久成功后才进入 Electron Notification，并可降级到 Dock、托盘与鲸坞自有 banner。
@@ -37,6 +37,21 @@ v0.3 的源码实现与本地候选验收已完成，但还没有创建 v0.3 tag
 - rc.6 history 兼容与单会话 50,000 条尾部基线仍会如实标记 `history-gap`；看板不把局部数据写成完整账单。
 - 匿名看板已真实显示，深/浅战报均已通过 GUI 保存并回读为 1080×1440。这两张是对比度修复前的流程/尺寸样张，不代表最终色彩验收。
 - 系统通知、真实 managed 预算停止/恢复、Windows 与 Intel Mac 仍未做真机验收。
+
+### v0.3.0 正式资产
+
+| 资产 | 精确字节数 |
+| --- | ---: |
+| `WhaleDock-0.3.0-arm64-mac.zip` | 204,753,794 B |
+| `WhaleDock-0.3.0-arm64.dmg` | 185,260,077 B |
+| `WhaleDock-0.3.0-x64-mac.zip` | 207,735,735 B |
+| `WhaleDock-0.3.0-x64.dmg` | 188,143,119 B |
+| `WhaleDock-Setup-0.3.0.exe` | 161,448,096 B |
+| `WhaleDock-0.3.0-portable.exe` | 161,260,244 B |
+| `SHA256SUMS-mac.txt` | 372 B |
+| `SHA256SUMS-win.txt` | 189 B |
+
+发布门精确批准值 `release:v0.3.0:sha256:8a7e9f14cfdaee35eb5baaa016547ec0a5d32d110876436185f186a3257407ad` 只在本次 publish 中临时存在；Release 与资产回读后已删除，仓库变量回读不存在。
 
 ## 下载与安装
 
@@ -146,7 +161,7 @@ npm run dist:win         # Windows x64 Setup + portable（建议在 Windows runn
 node scripts/macos-build-visibility.js --out-dir=release --check
 ```
 
-`npm run smoke` 是不依赖图形界面的纯 Node 测试集。当前 v0.3 源码态本地回读为 **119 PASS / ALL PASS**：基础 34 项、config 13 项、events 24 项、backend adapter 20 项、main 24 项，加 4 项统一纳入检查。未创建 v0.3 tag 或 CI，不能把本地 smoke 写成远程发布证据。
+`npm run smoke` 是不依赖图形界面的纯 Node 测试集。当前 v0.3 源码态本地回读为 **119 PASS / ALL PASS**：基础 34 项、config 13 项、events 24 项、backend adapter 20 项、main 24 项，加 4 项统一纳入检查。这是本地纯 Node 证据；正式 tag 提交的 main CI 31893926627 另行证明 Ubuntu、Windows 与 macOS 三平台全绿。
 
 ## 常见问题
 
@@ -172,8 +187,8 @@ node scripts/macos-build-visibility.js --out-dir=release --check
 
 ## 版本路线图
 
-- **v0.2.0**：已发布，是当前稳定下载版。
-- **v0.3.0**：批次 11 实现完成，本地候选验证已有部分 GUI 证据；**release pending**，尚无 tag、v0.3 CI 或 Release 资产。
+- **v0.2.0**：已发布的历史稳定版。
+- **v0.3.0**：批次 11 已实现并公开发布，是当前稳定下载版；通知、真实 managed 预算停止/恢复、Windows 与 Intel 真机仍是发布后补证边界。
 
 ## License
 
