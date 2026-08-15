@@ -47,6 +47,25 @@ function jpegHeader(width, height) {
   ]);
 }
 
+function existingPathIdentity(value, options = {}) {
+  const platform = options.platform || process.platform;
+  const realpathSync = options.realpathSync
+    || fs.realpathSync.native
+    || fs.realpathSync;
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  let resolved = pathApi.normalize(realpathSync(value));
+  if (platform === 'win32') {
+    if (resolved.startsWith('\\\\?\\UNC\\')) resolved = `\\\\${resolved.slice(8)}`;
+    else if (resolved.startsWith('\\\\?\\')) resolved = resolved.slice(4);
+    resolved = resolved.toLowerCase();
+  }
+  return resolved;
+}
+
+function assertSameExistingPath(actual, expected, options = {}) {
+  assert.equal(existingPathIdentity(actual, options), existingPathIdentity(expected, options));
+}
+
 function fakeChild({ stdout = '', stderr = '', code = 0, waitForKill = false } = {}) {
   const child = new EventEmitter();
   child.stdout = new PassThrough();
@@ -73,6 +92,24 @@ async function main() {
   const stagingRoot = path.join(tmp, 'capture-staging');
   const workspace = path.join(tmp, 'workspace');
   fs.mkdirSync(workspace);
+
+  await test('既有路径身份先 realpath：Windows 长路径/8.3 别名统一，POSIX 大小写精确', async () => {
+    const shortAlias = 'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\stage';
+    const longAlias = 'C:\\Users\\runneradmin\\AppData\\Local\\Temp\\stage';
+    const fakeRealpathSync = (value) => {
+      if (value === shortAlias) return 'C:\\Users\\runneradmin\\AppData\\Local\\Temp\\stage';
+      if (value === longAlias) return '\\\\?\\C:\\Users\\RUNNERADMIN\\AppData\\Local\\Temp\\stage';
+      return value;
+    };
+    assertSameExistingPath(shortAlias, longAlias, {
+      platform: 'win32',
+      realpathSync: fakeRealpathSync
+    });
+    assert.notEqual(
+      existingPathIdentity('/tmp/Stage', { platform: 'linux', realpathSync: (value) => value }),
+      existingPathIdentity('/tmp/stage', { platform: 'linux', realpathSync: (value) => value })
+    );
+  });
 
   await test('PNG/JPEG header 精确识别，伪格式与坏尺寸 fail-closed', async () => {
     assert.deepEqual(imageInput.inspectImageHeader(pngHeader(800, 600)), {
@@ -178,7 +215,7 @@ async function main() {
       randomBytes
     });
     assert.deepEqual(Object.keys(plan), ['path']);
-    assert.equal(path.dirname(plan.path), fs.realpathSync(plannedRoot));
+    assertSameExistingPath(path.dirname(plan.path), plannedRoot);
     assert.match(path.basename(plan.path), /^whaledock-capture-[a-f0-9]+\.png$/);
     assert.equal(fs.existsSync(plan.path), false);
     if (process.platform !== 'win32') {
@@ -193,7 +230,7 @@ async function main() {
       pngBuffer: pngHeader(16, 16),
       randomBytes
     });
-    assert.equal(path.dirname(stagingPath), fs.realpathSync(stagingRoot));
+    assertSameExistingPath(path.dirname(stagingPath), stagingRoot);
     assert.match(path.basename(stagingPath), /^whaledock-capture-[a-f0-9]+\.png$/);
     assert.equal(fs.lstatSync(stagingPath).isFile(), true);
     if (process.platform !== 'win32') {
@@ -225,7 +262,7 @@ async function main() {
       now: new Date('2026-08-15T12:34:56.000Z'),
       randomBytes
     });
-    assert.equal(path.dirname(savedPath), path.join(fs.realpathSync(workspace), '鲸坞截图'));
+    assertSameExistingPath(path.dirname(savedPath), path.join(workspace, '鲸坞截图'));
     assert.match(path.basename(savedPath), /^鲸坞截图-20260815-123456-[a-f0-9]+\.png$/);
     assert.equal(fs.readFileSync(savedPath).equals(fs.readFileSync(stagingPath)), true);
     if (process.platform !== 'win32') assert.equal(fs.statSync(savedPath).mode & 0o777, 0o600);

@@ -37,7 +37,7 @@ Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不
 
 ### 批次 12 当前实证
 
-- 当前源码版本 `0.4.0`；本地 `npm run smoke` 实际为 **199 PASS / ALL PASS**。新增回归证明工作区 canonicalize 与图片保存都会拒绝 `~/.dsh` 本身、后代及 realpath/link 入口。`npm run compliance:verify` 通过；darwin/x64 inventory 仍是 526 包，closure `928f3fd6cf6a876eeeff8fedb0df8d2864265279da7e7cf6636c2a03d87afdde`。根 `dependencies` 仍为空，devDependencies 仍只有 electron/electron-builder，没有新许可闭包。
+- 当前源码版本 `0.4.0`；本地 `npm run smoke` 实际为 **200 PASS / ALL PASS**。新增回归证明 Windows 长路径/8.3 别名按真实路径身份比较，工作区 canonicalize 与图片保存都会拒绝 `~/.dsh` 本身、后代及 realpath/link 入口。`npm run compliance:verify` 通过；darwin/x64 inventory 仍是 526 包，closure `928f3fd6cf6a876eeeff8fedb0df8d2864265279da7e7cf6636c2a03d87afdde`。根 `dependencies` 仍为空，devDependencies 仍只有 electron/electron-builder，没有新许可闭包。
 - 隔离 userData `/private/tmp/whaledock-v04-gui` 中的 macOS arm64 源码态 GUI 已真实拉起 managed dsh。标题回读“默认工作区”；设置只读工作区/截图快捷键、应用菜单、自有 capture 窗口标签和取消都实际回读。退出后 dsh 与 3080 端口清零。
 - 首轮 GUI 发现 dropzone 事件漏接，导致 `captureId:null`；补入“dropzone 拖放”薄层静态/TDD 回归后，重验已在显示真实工作区标签的图片窗口中成功取消。该回读没有加载真实图片，不写成图片预览已通过。
 - macOS Vision/JXA 脚本已在 synthetic 图片上回读 OCR 成功；这是真实本地 OCR 脚本证据，不等于完整图片保存/交付 GUI 已走完。
@@ -104,7 +104,7 @@ Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不
 
 - v0.2.0 正式 tag 当时的 `npm run smoke`：34/34，`ALL PASS`。
 - v0.3.0 正式发布时的 `npm run smoke`：**119 PASS / ALL PASS**（基础 34 + config 13 + events 24 + backend adapter 20 + main 24 + wrapper 4）。
-- 当前 v0.4.0 源码态 `npm run smoke`：**199 PASS / ALL PASS**；新增工作区事务/journal、受保护目录拒绝、图片状态/受控文件、dsh prompt fail-closed 适配与 Electron 工作区/图片薄层，四个子套件全部纳入统一 smoke。
+- 当前 v0.4.0 源码态 `npm run smoke`：**200 PASS / ALL PASS**；新增工作区事务/journal、受保护目录拒绝、Windows 路径别名身份、图片状态/受控文件、dsh prompt fail-closed 适配与 Electron 工作区/图片薄层，四个子套件全部纳入统一 smoke。
 - 首次 v0.3 main CI [31893823255](https://github.com/sgd-shine/whaledock/actions/runs/31893823255) 仅 Windows 因静态测试写死 LF、不兼容 CRLF 失败，功能套件已通过；第一轮修复后 [31893926627](https://github.com/sgd-shine/whaledock/actions/runs/31893926627) 三平台全绿。
 - 正式 Release run [31894036652](https://github.com/sgd-shine/whaledock/actions/runs/31894036652) 与 attempt 2 publish job [95035294975](https://github.com/sgd-shine/whaledock/actions/runs/31894036652/job/95035294975) 成功；公开 Release 的八项资产为 `SHA256SUMS-mac.txt` 372 B、`SHA256SUMS-win.txt` 189 B、arm64 zip 204,753,794 B、arm64 dmg 185,260,077 B、portable 161,260,244 B、x64 zip 207,735,735 B、x64 dmg 188,143,119 B、Setup 161,448,096 B。
 - `npm run compliance:verify`：SOURCES 与 THIRD_PARTY_NOTICES 确定性检查通过。
