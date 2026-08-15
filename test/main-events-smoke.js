@@ -482,8 +482,13 @@ async function run() {
     assert.match(source, /setAvailability\(state, detail, monitor\.serviceGeneration\)/);
     assert.match(source, /disconnect\(monitor\.serviceGeneration\)/);
     assert.match(source, /initialContiguousSeq/);
-    assert.match(source, /async function handleEventEffects\(value, monitor\) \{\n  if \(!eventLayerCurrent\(monitor\)\) return;/);
-    assert.match(source, /for \(const effect of effects\) \{\n    if \(!eventLayerCurrent\(monitor\)\) return;/);
+    const effectGuardPattern = /async function handleEventEffects\(value, monitor\) \{\r?\n  if \(!eventLayerCurrent\(monitor\)\) return;/;
+    const loopGuardPattern = /for \(const effect of effects\) \{\r?\n    if \(!eventLayerCurrent\(monitor\)\) return;/;
+    assert.match(source, effectGuardPattern);
+    assert.match(source, loopGuardPattern);
+    const windowsSource = source.replace(/\r?\n/g, '\r\n');
+    assert.match(windowsSource, effectGuardPattern);
+    assert.match(windowsSource, loopGuardPattern);
     assert.match(source, /const page = await monitor\.adapter\.readHistory[\s\S]+if \(!currentCheck\(\)\) return false;/);
   });
 
