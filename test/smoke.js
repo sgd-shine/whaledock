@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const { EventEmitter } = require('events');
 const { PassThrough } = require('stream');
+const { spawnSync } = require('child_process');
 
 const backend = require('../lib/backend');
 const config = require('../lib/config');
@@ -503,6 +504,24 @@ async function main() {
       && latest.version === 'latest'
       && empty.args[1] === '@deepseek-ai/dsh@0.1.0-rc.6',
     pinned.label);
+
+  // v0.3 分层直测必须由统一 smoke 真实执行，避免 CI 只跑旧用例而假绿。
+  for (const [file, label] of [
+    ['config-v03-smoke.js', '配置与安全静态窗口'],
+    ['events-smoke.js', '事件状态机与持久化'],
+    ['backend-events-smoke.js', 'dsh 只读事件适配器'],
+    ['main-events-smoke.js', 'Electron 主进程事件薄层']
+  ]) {
+    const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
+      cwd: path.join(__dirname, '..'),
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024
+    });
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    check(`v0.3: ${label}直测纳入统一 smoke`, result.status === 0,
+      result.status === 0 ? file : `${file} exit=${result.status}`);
+  }
 
   console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILED`);
   process.exit(failed === 0 ? 0 : 1);

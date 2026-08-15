@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <title>任务提醒 · 鲸坞 WhaleDock</title>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-width: 360px; min-height: 128px; margin: 0; overflow: hidden; background: transparent; color: #eef4ff; }
+    body { padding: 10px; }
+    .notice {
+      min-height: 108px; display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 13px;
+      padding: 15px 15px 15px 16px; border: 1px solid rgba(157,177,220,.22); border-radius: 16px;
+      background: linear-gradient(145deg, rgba(18,26,45,.98), rgba(9,13,23,.98));
+      box-shadow: 0 22px 58px rgba(0,0,0,.42); -webkit-app-region: drag;
+    }
+    .symbol {
+      width: 42px; height: 42px; display: grid; place-items: center; border-radius: 13px;
+      color: #fff; background: linear-gradient(145deg, #4f46e5, #22d3ee); font-size: 21px; font-weight: 800;
+    }
+    body[data-kind="waiting"] .symbol { background: linear-gradient(145deg, #d97706, #fbbf24); }
+    body[data-kind="failed"] .symbol { background: linear-gradient(145deg, #be123c, #fb7185); }
+    .copy { min-width: 0; }
+    h1 { margin: 0; font-size: 14px; line-height: 1.35; }
+    p { margin: 5px 0 0; color: #9aa9c4; font-size: 11px; line-height: 1.45; }
+    #notice-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .actions { display: grid; grid-template-columns: auto auto; gap: 6px; -webkit-app-region: no-drag; }
+    button {
+      min-height: 32px; padding: 0 11px; border: 1px solid rgba(157,177,220,.18); border-radius: 9px;
+      color: #eef4ff; background: rgba(255,255,255,.045); font: inherit; font-size: 11px; cursor: pointer;
+    }
+    button:hover { background: rgba(255,255,255,.09); }
+    button:focus-visible { outline: 2px solid #22d3ee; outline-offset: 2px; }
+    #notice-activate { border-color: transparent; background: #4f46e5; font-weight: 700; }
+  </style>
+  <script src="notice.js" defer></script>
+</head>
+<body data-kind="completed">
+  <aside class="notice" aria-live="polite" aria-atomic="true">
+    <div class="symbol" id="notice-symbol" aria-hidden="true">✓</div>
+    <div class="copy"><h1 id="notice-title">任务状态已更新</h1><p id="notice-detail">打开鲸坞查看最新状态。</p><p id="notice-task">匿名任务</p></div>
+    <div class="actions"><button id="notice-dismiss" type="button">稍后</button><button id="notice-activate" type="button">查看</button></div>
+  </aside>
+</body>
+</html>

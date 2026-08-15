@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <title>鲸坞任务战报</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "PingFang SC", "Microsoft YaHei UI", "Noto Sans CJK SC", -apple-system, sans-serif;
+      --bg: #0b0f19;
+      --glow: #16213e;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --subtle: #94a3b8;
+      --card: rgba(255,255,255,.05);
+      --line: rgba(255,255,255,.09);
+      --shadow: transparent;
+      --cyan: #22d3ee;
+      --cyan-soft: #7dd3fc;
+      --indigo: #a5b4fc;
+    }
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --glow: #eef2ff;
+      --text: #111827;
+      --muted: #6b7280;
+      --subtle: #6b7280;
+      --card: #ffffff;
+      --line: #e5e7eb;
+      --shadow: rgba(17,24,39,.06);
+      --cyan: #0891b2;
+      --cyan-soft: #4f46e5;
+      --indigo: #4f46e5;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 1080px; height: 1440px; margin: 0; overflow: hidden; }
+    body {
+      position: relative; display: flex; flex-direction: column; padding: 82px 82px 72px;
+      color: var(--text); background: radial-gradient(1400px 800px at 18% -8%, var(--glow) 0%, var(--bg) 58%);
+    }
+    .brand { display: flex; align-items: center; gap: 22px; }
+    .mark {
+      width: 76px; height: 76px; display: grid; place-items: center; border-radius: 22px;
+      background: linear-gradient(145deg, #1e2a5e, #4f46e5); color: #fff; font-size: 43px; font-weight: 900;
+      box-shadow: 0 18px 44px rgba(79,70,229,.18);
+    }
+    .brand-name { font-size: 40px; font-weight: 750; letter-spacing: 1px; }
+    .brand-en { margin-top: 4px; color: var(--muted); font-size: 24px; letter-spacing: 3px; }
+    .result { margin-top: 88px; display: flex; align-items: center; gap: 25px; }
+    .result-icon {
+      width: 76px; height: 76px; display: grid; place-items: center; border-radius: 50%;
+      background: linear-gradient(145deg, #22d3ee, #4f46e5); color: #fff; font-size: 44px; font-weight: 850;
+    }
+    .result-label { font-size: 54px; font-weight: 760; }
+    .task {
+      height: 190px; margin: 42px 0 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+      font-size: 67px; font-weight: 820; line-height: 1.27; letter-spacing: .5px; overflow: hidden;
+    }
+    .task-accent { color: var(--cyan-soft); }
+    .coverage {
+      align-self: flex-start; max-width: 100%; margin-top: 22px; padding: 10px 16px; border: 1px solid var(--line);
+      border-radius: 999px; color: var(--muted); background: var(--card); font-size: 21px; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .grid { margin-top: 56px; display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
+    .cell {
+      min-height: 166px; padding: 30px 34px; border: 1px solid var(--line); border-radius: 25px;
+      background: var(--card); box-shadow: 0 8px 28px var(--shadow);
+    }
+    .cell-key { color: var(--muted); font-size: 23px; font-weight: 650; letter-spacing: 1.6px; }
+    .cell-value { margin-top: 15px; font-size: 47px; font-weight: 820; line-height: 1.13; letter-spacing: -.6px; }
+    .cell-value.cyan { color: var(--cyan); }
+    .cell-value.indigo { color: var(--indigo); }
+    #report-model { overflow: hidden; font-size: 36px; text-overflow: ellipsis; white-space: nowrap; }
+    .cell-note { margin-top: 8px; color: var(--subtle); font-size: 18px; }
+    .breakdown {
+      margin-top: 25px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; border: 1px solid var(--line);
+      border-radius: 20px; overflow: hidden; background: var(--line);
+    }
+    .breakdown-item { padding: 22px 24px; background: var(--card); }
+    .breakdown-item span { display: block; color: var(--muted); font-size: 19px; }
+    .breakdown-item strong { display: block; margin-top: 9px; font-size: 28px; }
+    .wave { position: absolute; left: 0; right: 0; bottom: 170px; height: 128px; opacity: .48; overflow: hidden; pointer-events: none; }
+    .wave::before, .wave::after {
+      content: ""; position: absolute; left: -8%; width: 116%; height: 120px; border-radius: 50% 55% 0 0;
+      transform: rotate(-2deg); background: rgba(79,70,229,.15);
+    }
+    .wave::before { top: 28px; }
+    .wave::after { top: 55px; transform: rotate(2deg); background: rgba(34,211,238,.10); }
+    .footer { margin-top: auto; display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; position: relative; z-index: 1; }
+    .slogan { color: var(--muted); font-size: 26px; line-height: 1.55; }
+    .slogan strong { color: var(--text); font-weight: 680; }
+    .meta { color: var(--subtle); font-size: 21px; line-height: 1.65; text-align: right; }
+    .disclaimer { position: absolute; left: 82px; right: 82px; bottom: 29px; color: var(--subtle); font-size: 16px; text-align: center; letter-spacing: .2px; }
+  </style>
+  <script src="report-card.js" defer></script>
+</head>
+<body>
+  <header class="brand"><div class="mark" aria-hidden="true">≋</div><div><div class="brand-name">鲸坞</div><div class="brand-en">WHALEDOCK</div></div></header>
+  <section class="result"><div class="result-icon" id="report-symbol">✓</div><div class="result-label" id="report-status">AI 任务完成</div></section>
+  <h1 class="task" id="report-task">匿名任务已经靠岸。</h1>
+  <div class="coverage" id="report-coverage">已观测数据 · 覆盖状态未知</div>
+
+  <section class="grid" aria-label="任务摘要">
+    <article class="cell"><div class="cell-key">耗时</div><div class="cell-value" id="report-duration">—</div><div class="cell-note">从已观测任务开始到终态</div></article>
+    <article class="cell"><div class="cell-key">TOKEN 消耗</div><div class="cell-value cyan" id="report-total">—</div><div class="cell-note">顶层与子代理已观测聚合</div></article>
+    <article class="cell"><div class="cell-key">估算成本</div><div class="cell-value" id="report-cost">暂不可估算</div><div class="cell-note">本地价格设置，非供应商账单</div></article>
+    <article class="cell"><div class="cell-key">价格口径</div><div class="cell-value indigo" id="report-model">deepseek-v4-flash</div><div class="cell-note">价格可在鲸坞设置中修改</div></article>
+  </section>
+
+  <section class="breakdown" aria-label="token 分项">
+    <div class="breakdown-item"><span>输入</span><strong id="report-input">—</strong></div>
+    <div class="breakdown-item"><span>缓存命中输入</span><strong id="report-cache">—</strong></div>
+    <div class="breakdown-item"><span>输出</span><strong id="report-output">—</strong></div>
+  </section>
+
+  <div class="wave" aria-hidden="true"></div>
+  <footer class="footer"><div class="slogan"><strong>给鲸鱼一个靠岸的坞</strong><br>github.com/sgd-shine/whaledock</div><div class="meta"><span id="report-time">时间未记录</span><br><span id="report-version">鲸坞 WhaleDock</span></div></footer>
+  <div class="disclaimer">dsh 已观测用量，非账单 · 费用为本地价格估算，覆盖不完整时不显示伪精确总额</div>
+</body>
+</html>

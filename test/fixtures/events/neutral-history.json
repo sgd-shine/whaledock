@@ -1,0 +1,27 @@
+[
+  {
+    "kind": "message",
+    "sessionRef": "fixture-session",
+    "seq": 0,
+    "turn": 1,
+    "step": "answer",
+    "role": "assistant",
+    "messageRef": "fixture-message",
+    "usageMode": "final",
+    "usage": {
+      "inputTokens": 40,
+      "cacheReadTokens": 10,
+      "outputTokens": 50,
+      "reasoningTokens": 999
+    },
+    "at": "2026-08-19T12:00:00.000Z"
+  },
+  {
+    "kind": "turn-terminal",
+    "sessionRef": "fixture-session",
+    "seq": 1,
+    "turn": 1,
+    "reason": "completed",
+    "at": "2026-08-19T12:00:01.000Z"
+  }
+]

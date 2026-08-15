@@ -1,10 +1,10 @@
-# HANDOFF.md — WhaleDock v0.2 发布后交接
+# HANDOFF.md — WhaleDock v0.2 已发布 / v0.3 候选交接
 
-更新：2026-08-15 · v0.2.0 正式 Release 闭环
+更新：2026-08-15 · v0.2.0 正式 Release 闭环；v0.3.0 批次 11 实现完成、Release 待定
 
 ## 当前结论
 
-v0.2 工程、macOS 本地验收、G1 第三方材料与正式公开发布已经闭环。
+v0.2 工程、macOS 本地验收、G1 第三方材料与正式公开发布已经闭环。v0.3 的任务事件、用量/费用看板、通知、每日软预算与战报实现已完成，当前状态是 **implementation complete / release pending**。
 
 - PR [#1](https://github.com/sgd-shine/whaledock/pull/1) 已合并。
 - 批次 7 审计修复：`591f6c1`
@@ -14,6 +14,35 @@ v0.2 工程、macOS 本地验收、G1 第三方材料与正式公开发布已经
 - 本机 `/Applications/WhaleDock.app` 为 v0.2.0 arm64；Spotlight 只发现这一份正式安装。
 
 2026-08-15 SGD 的发布决定已覆盖旧的 beta-first 流程：不发 beta；Windows 真机验收不再阻断发布，改为“实验性支持（未真机验证）”；Intel 只保留 Rosetta 抽查边界；在没有 S1 冲突且 G1/成品材料闭环时，Codex 获预授权临时设置精确审批值、发布并立即删除变量。
+
+## v0.3 批次 11 交接
+
+### 已实现
+
+- `lib/backend.js` 的 rc.6 只读 adapter 只访问 loopback host.describe/session.list/session.history 与 events.mux，HTTP/WS 帧、数组、字符串、字节、超时与积压都有上限；WS 只 downlink，不 send。
+- `lib/events.js` 为纯 Node 中性状态机；使用 HMAC 匿名任务/会话/请求键，按 seq/generation 去重、补洞、持久 notification ledger、统计 token/估算费用并管理当日预算 latch。
+- 主进程按“先 WS 订阅、后 history 补洞”工作；backfill live buffer 为 10,000 条/4 MiB，普通 live 事件 200ms 串行批写，断线按 generation 重连。正常退出会 flush 最后批次及关闭 adapter/service，但抑制退出途中的通知/停机副作用。
+- live terminal 先 flush 前序事件，等约 350ms 并以 `sessionRef+seq` 回读 history 确认，然后才持久 ledger 并执行 effect。未确认只静默记录；每个 await/effect 迭代重检当前代，旧代不得通知或停 backend。
+- Electron Notification 可降级到 Dock badge/bounce、托盘待办和自有 banner。通知内容只有匿名状态；不向 Harness DOM 注入会话跳转。
+- 预算 crossing 的 `pausedDate` 先原子持久，再只停止同 generation、`spawnedByUs=true`、进程对象仍匹配的 managed backend。所有 managed 自动启动/恢复/重启入口都受 latch 阻断；外部 attach 只告警、继续监控，绝不 stop。
+- 看板、banner、战报是独立本地自有窗口，开启 context isolation/sandbox，精确校验 BrowserWindow sender + mainFrame + file URL，拒绝导航/window-open。主 Harness 窗口保持无 preload、无 Node、无 DOM 注入。
+- 战报只接受 taskKey/白名单主题/复制或保存动作；主进程从规范快照重读匿名数据，离屏渲染 1080×1440，capture/save/copy 后 `finally destroy`。
+
+### 当前自动与 GUI 证据
+
+- 当前源码版本 `0.3.0`；`npm run smoke` 已实际回读 **119 PASS / ALL PASS**：基础 34、config 13、events 24、backend adapter 20、main 24，加 4 项 wrapper 纳入检查。这是本地纯 Node 证据，不是 v0.3 CI、打包或 Release 证据。
+- macOS arm64 源码态已真实 attach 当前 dsh，看到 13 个会话并进入 live。因为是外部服务，只能证明 rc.6 host/list/history/WS 形状符合，**不能证明对方 npm 根包就是 `0.1.0-rc.6`**。
+- rc.6 历史兼容与单会话 50,000 条尾部基线仍会标记 `history-gap`；当前看板对此如实显示，不用局部数据伪造完整账单。
+- 匿名看板已真实显示。深色战报 `/Users/shine/Downloads/WhaleDock-v03-dark-test.png`：357,713 B，SHA-256 `163732dc25f4f5eea8b4acc650a3281e643b95c6d9ba9abb9af01e2fb6055600`；浅色战报 `/Users/shine/Downloads/WhaleDock-v03-light-test.png`：336,785 B，SHA-256 `dac1ebce2fef2572a5bb23211109c99c3287ec81615ee6e1785472986e9f9f40`。两张都由 GUI 保存并回读为 1080×1440。
+- 上述战报是**对比度修复前样张**；它们只证明 GUI 保存流程、PNG 字节与像素尺寸，不代表修复后最终色彩/对比度验收。
+
+### 必须保留的 v0.3 边界
+
+- 通知只能做尽力去重；当 dsh 尚未落盘、WhaleDock 强杀或系统断电时，仍有约 200–400ms hard-crash 窗口，不宣称 exactly-once。
+- 用量/费用固定是“dsh 已观测用量，非账单”；history gap 后费用 fail-closed，不显示伪精确总额。
+- 系统通知权限及 Notification→Dock/托盘/banner 可见降级、真实 managed backend 预算 stop/resume 仍未真机闭环。
+- Windows 仍是未签名、未真机的实验性支持；Intel x64 仍只有 Apple Silicon + Rosetta 抽查，不是 Intel 真机；macOS 仍未签名/公证。
+- v0.3 尚无 tag、远程 CI、打包产物或 GitHub Release，不得把本地 smoke/GUI 证据改写成已发布。
 
 ## G1 已完成
 
@@ -33,7 +62,7 @@ v0.2 工程、macOS 本地验收、G1 第三方材料与正式公开发布已经
 3. 在无 Release、变量为空的窗口回收失败候选 tag；正式注解 tag 对象 `9c9022eb…` 重建到已通过 main CI [31887550725](https://github.com/sgd-shine/whaledock/actions/runs/31887550725) 的提交 `d8a8a774…`。旧 tag SHA 与失败 run 仍保留在开发日志中。
 4. Release run 的 macOS/Windows build job 均成功；首次 publish 因审批变量为空被精确门阻止，没有提前公开 Release。
 5. 六个安装资产校验通过后，精确批准值只临时用于 attempt 2；publish job `95020360258` 成功后立即删除变量并回读为空。
-6. GitHub Release 为非 draft、非 prerelease；`releases/latest` 已返回 `v0.2.0`。安装版“检查更新 → 已是最新”仍单列为 GUI 人工回读，不用 API 结果冒充。
+6. GitHub Release 为非 draft、非 prerelease；`releases/latest` 已返回 `v0.2.0`。本机 v0.2.0 安装版设置窗已实际点击“立即检查”，并回读弹窗“当前已是最新版本（0.2.0）”；这项 GUI 证据与 API 回读分开记录。
 
 已发布八项资产：
 
@@ -52,6 +81,7 @@ v0.2 工程、macOS 本地验收、G1 第三方材料与正式公开发布已经
 - [x] 未签名登录项被系统拒绝时如实显示 actual=false；关闭后真实移除。
 - [x] x64 dmg 在 Apple Silicon + Rosetta 下完成装、跑、退；这不是 Intel 真机。
 - [x] 本地假 Release/fetch 走通 macOS“稍后/跳过”；这不是线上更新证据。
+- [x] 正式 v0.2.0 发布后，本机安装版已点击“立即检查”并回读“当前已是最新版本（0.2.0）”。
 - [x] 构建裸 App 归入 `.app-archives.noindex/*.app-bundle`；`staging=0 unexpected=0 visible=1`。
 - [x] 最终稳定材料树重新做隔离 x64 未签名成品回读，NOTICE/SOURCES/licenses 字节全部一致。
 
@@ -71,7 +101,6 @@ v0.2 工程、macOS 本地验收、G1 第三方材料与正式公开发布已经
 
 ## 仍待人工体验
 
-- 本机正式安装版点击“检查更新”，确认显示“已是最新”；当前只有 `releases/latest` API 回读，不能代替 GUI。
 - Windows 真机按上节清单补证；Windows 仍是实验性支持，任何失败先收集日志与进程证据。
 - Intel Mac 真机尚未覆盖；当前只有 Apple Silicon + Rosetta 抽查。
 - macOS/Windows 签名与 Apple 公证属于 S3，留待 SGD 后续决定，不在本次执行范围。

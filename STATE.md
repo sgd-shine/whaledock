@@ -1,10 +1,10 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-15（v0.2.0 正式 Release 已公开）
+更新：2026-08-15（v0.2.0 已发布；v0.3.0 实现完成、Release 待定）
 
 ## 阶段结论
 
-**v0.2.0 的工程实现、macOS 本地验收、公开再分发材料与正式 GitHub Release 已全部闭环。**
+**v0.2.0 的工程实现、macOS 本地验收、公开再分发材料与正式 GitHub Release 已全部闭环；v0.3.0 批次 11 已完成实现与本地候选验证，但尚未 tag、CI 或 Release。**
 
 - PR [#1](https://github.com/sgd-shine/whaledock/pull/1) 已合并；正式 tag 指向 main 提交 `d8a8a774…`。
 - 批次 7 审计修复：`591f6c1`
@@ -15,6 +15,32 @@
 - 2026-08-15 SGD 决定：不发 beta；Windows 以“实验性支持（未真机验证）”发布；Intel 仅保留 Rosetta 抽查边界；无 S1 且 G1/成品材料闭环后，由 Codex 执行正式发布并临时设置、随即清除精确审批变量。
 
 Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不阻断本次发布，但不得改写为已经通过。
+
+## v0.3 批次 11 已实现（release pending）
+
+### 事件、连续性与持久化
+
+- 事件层继续锁定 dsh `0.1.0-rc.6`；协议路径、host/list/history/WS 原始帧与超时/字节假设仍只在 backend/config 边界，中性 reducer 不 require Electron。
+- 主进程使用 WhaleDock `userData/events-state.json`，按 schema 1、0600、临时文件+原子 rename 落盘；会话/任务/请求引用只以本地 salt HMAC 形式保留，不保存正文、cwd、工具数据或原始 frame。
+- 每个 backend 连接代先订阅 WS，再 list/history 补洞；backfill 期间 live 事件在 10,000 条/4 MiB 双上限内缓冲，普通 live 事件 200ms 串行批写，断线按 generation 落盘并指数退避重连。
+- 首次超长 history 可从已取证的 50,000 条尾部建基线并继续 live，但仍诚实标记 `history-gap`；不会把 rc.6 历史保留限制写成完整覆盖。
+- live terminal 顺序为“排空前序批次 → 等约 350ms → history 以 `sessionRef+seq` 精确确认 → ledger 持久 → effect”；未确认终态只静默记录。换代/退出后旧 effect 在每个 await 边界都会失效。
+
+### 看板、通知、预算与战报
+
+- 任务看板只接收主进程 sanitize 后的可用性/覆盖、日周聚合、匿名任务、预算与价格快照，固定显示“dsh 已观测用量，非账单”。主 Harness 窗口仍无 preload、无 Node、无 DOM 注入。
+- 新增看板/banner/战报均是本地自有窗口，IPC 同时校验精确 BrowserWindow sender、mainFrame 和 file URL，并拒绝导航/新窗口；preload 只暴露固定通道。
+- 通知只在本地持久成功后执行，路径为 Electron Notification → Dock/托盘 → 自有 banner；通知文案不带会话 ID 或问题正文。
+- 每日软预算先持久 `pausedDate`，仅可停止同 generation、`spawnedByUs=true`、进程对象仍相同的 managed backend。外部 attach 只告警“服务仍在运行”，绝不 stop；当日 latch 会阻止 managed 自动启动/恢复，只在“今日继续”持久后显式放行。
+- 战报请求只接受 `taskKey`、`dark|light`、`copy|save`；主进程重读规范快照，在隐藏窗口渲染 1080×1440，capture/剪贴板/保存后无论成败都销毁窗口。
+- 设置运行时修改任务通知、预算、token 上限和三类单价时，config 与 event service 持久串行对账；任一失败会回滚/明确报错，不会伪称立即生效。
+
+### 批次 11 当前实证
+
+- 当前源码版本为 `0.3.0`；本地 `npm run smoke` 实际为 **119 PASS / ALL PASS**，分解为基础 34 + config 13 + events 24 + backend adapter 20 + main 24 + 4 项 wrapper。这是本地纯 Node 证据，不是 v0.3 CI/Release 证据。
+- macOS arm64 源码态已真实 attach 当前 dsh，探测 13 个会话并进入 live；只证明 rc.6 host/list/history/WS 合约形状，外部服务的 npm 根包版本未证明。
+- 匿名看板已在真实 GUI 显示。对比度修复前的深/浅流程样张已经 GUI 保存，尺寸均为 1080×1440：深色 357,713 B / `163732dc25f4f5eea8b4acc650a3281e643b95c6d9ba9abb9af01e2fb6055600`，浅色 336,785 B / `dac1ebce2fef2572a5bb23211109c99c3287ec81615ee6e1785472986e9f9f40`。它们只证明保存流程/像素尺寸，不代表修复后最终色彩。
+- 系统通知、真实 managed 预算 stop/resume、Windows 与 Intel 真机均未验证。约 200–400ms hard-crash 窗口仍是明确产品边界，不宣称 exactly-once。
 
 ## v0.2 已实现
 
@@ -49,7 +75,8 @@ Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不
 
 ## 自动与成品验证
 
-- 本地 `npm run smoke`：34/34，`ALL PASS`。
+- v0.2.0 正式 tag 当时的 `npm run smoke`：34/34，`ALL PASS`。
+- 当前 v0.3.0 源码态 `npm run smoke`：**119 PASS / ALL PASS**（基础 34 + config 13 + events 24 + backend adapter 20 + main 24 + wrapper 4）。这是本地纯 Node 结果；v0.3 tag、三平台 CI、打包与 Release 尚未执行。
 - `npm run compliance:verify`：SOURCES 与 THIRD_PARTY_NOTICES 确定性检查通过。
 - 当前 darwin/x64 runtime inventory 回读：526 包，closure `928f3fd6cf6a876eeeff8fedb0df8d2864265279da7e7cf6636c2a03d87afdde`。
 - 三目标 closure：arm64 `9f5613cb…`、x64 `928f3fd6…`、Windows `47ad1d95…`；runtime tree 分别 `4faee9c6…`、`6900f36a…`、`783388d0…`。Windows 值来自原生 Windows runner；它与 macOS 交叉安装的差异仅限 npm 根层平台胶水，525/525 包及全部原生二进制哈希一致。
@@ -66,7 +93,10 @@ Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不
 - 设置/快捷键/启动最小化已真机走查；未签名登录项被系统拒绝时如实回报，关闭后真实移除。
 - x64 dmg 在 Apple Silicon + Rosetta 下完成安装、冷启动、`SMOKE_OK` 与退出清理；**未做 Intel 真机**。
 - 本地假 Release/fetch 走通 macOS“稍后/跳过”；这不是线上 Release 证据。
+- 正式 v0.2.0 发布后，本机安装版已真实点击“立即检查”，并回读“当前已是最新版本（0.2.0）”。
 - Spotlight bundle-id 当前只返回 `/Applications/WhaleDock.app`；构建归档不是安装项。
+- v0.3 macOS arm64 源码态已 attach 当前外部 dsh；13 个会话进入 live，但因 rc.6 history 兼容/50,000 条尾部基线仍标记 `history-gap`，且外部 npm 根包版本未证明。
+- v0.3 匿名看板已真实显示；深/浅战报已通过 GUI 保存且尺寸回读为 1080×1440。两张现有文件是对比度修复前样张，只证明流程/尺寸，不代表最终色彩验收。
 
 ## 本地 v0.2 产物（历史候选证据）
 
@@ -81,9 +111,11 @@ Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不
 
 ## 尚未完成
 
-1. 本机安装版“检查更新 → 已是最新”的 GUI 人工回读；API `releases/latest` 已确认返回 `v0.2.0`，但两者不互相替代。
-2. Windows 全线真机与 Intel 真机均未做；Windows 按实验性支持发布，后续失败先取日志，不做猜测性大改。
-3. Windows Setup/portable、SmartScreen、无 Node 冷启动、自启、进程树与半自动更新仍待发布后人工体验补证。
-4. macOS/Windows 签名与 Apple 公证未做，属于 S3，本次明确不执行。
+1. v0.3 尚未创建 tag、运行三平台 CI/Release、打包或公开发布；路线图状态为 **implementation complete / release pending**。
+2. v0.3 Electron 系统通知权限、Notification→Dock/托盘/banner 可见降级链尚未真机；目前只有代码/纯 Node 与静态证据。
+3. v0.3 真实 managed backend 跨预算线后的进程树停止、App 重启 latch 不绕过、“今日继续”恢复尚未做 GUI+真进程闭环。外部 attach 已实现为只告警、不 stop，但仍需安装版补证。
+4. 现有深/浅战报为对比度修复前样张；修复后色彩、对比度、中文排版与剪贴板真实读回仍需最终人工验收。
+5. Windows 全线真机与 Intel 真机均未做；Intel 仍只有 Apple Silicon + Rosetta，Windows 仍是未签名、未真机的实验性支持。
+6. macOS/Windows 签名与 Apple 公证未做，属于 S3，本次明确不执行。
 
 详细发布证据与人工体验边界见 `HANDOFF.md`。

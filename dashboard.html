@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <title>用量看板 · 鲸坞 WhaleDock</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+      --bg: #090d17;
+      --panel: rgba(19, 27, 49, .88);
+      --panel-strong: #121a2d;
+      --line: rgba(160, 178, 219, .14);
+      --text: #edf3ff;
+      --muted: #91a0bd;
+      --cyan: #22d3ee;
+      --indigo: #818cf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --red: #fb7185;
+    }
+    * { box-sizing: border-box; }
+    html, body { min-width: 560px; min-height: 640px; margin: 0; background: var(--bg); color: var(--text); }
+    body {
+      background:
+        radial-gradient(780px 360px at 8% -5%, rgba(79, 70, 229, .22), transparent 64%),
+        radial-gradient(520px 300px at 96% 0%, rgba(34, 211, 238, .10), transparent 68%),
+        var(--bg);
+    }
+    button, select { font: inherit; }
+    button:focus-visible, select:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+    .titlebar {
+      min-height: 60px; padding: 15px 22px 12px; display: flex; align-items: center;
+      justify-content: space-between; border-bottom: 1px solid var(--line); -webkit-app-region: drag;
+    }
+    .brand { display: flex; align-items: center; gap: 11px; }
+    .mark {
+      width: 30px; height: 30px; display: grid; place-items: center; border-radius: 10px;
+      background: linear-gradient(145deg, #1e2a5e, #4f46e5); color: #fff; font-size: 17px;
+    }
+    .brand strong { font-size: 15px; letter-spacing: .02em; }
+    .brand span { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; letter-spacing: .08em; }
+    .title-actions { display: flex; gap: 8px; -webkit-app-region: no-drag; }
+    .ghost, .primary {
+      min-height: 34px; border-radius: 9px; padding: 0 13px; cursor: pointer;
+      border: 1px solid var(--line); color: var(--text); background: rgba(255,255,255,.035);
+    }
+    .ghost:hover { background: rgba(255,255,255,.075); }
+    .primary { border-color: transparent; background: linear-gradient(135deg, #4f46e5, #2563eb); font-weight: 650; }
+    .primary:hover { filter: brightness(1.08); }
+    main { width: min(920px, 100%); margin: 0 auto; padding: 22px; }
+    .status-row { display: grid; grid-template-columns: minmax(180px, .72fr) minmax(300px, 1.28fr); gap: 12px; }
+    .status-card, .metric, .section {
+      border: 1px solid var(--line); border-radius: 15px; background: var(--panel); box-shadow: 0 18px 46px rgba(0,0,0,.16);
+    }
+    .status-card { min-height: 86px; padding: 16px 17px; }
+    .eyebrow { margin: 0 0 8px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .status-line { display: flex; align-items: center; gap: 9px; }
+    .dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 999px; background: var(--muted); box-shadow: 0 0 0 4px rgba(145,160,189,.08); }
+    #availability { font-size: 14px; font-weight: 700; }
+    #availability[data-state="available"] + .dot, .dot.good { background: var(--green); }
+    #availability[data-state="degraded"] + .dot, .dot.warn { background: var(--amber); }
+    .coverage-copy { color: var(--text); font-size: 13px; line-height: 1.55; }
+    #coverage[data-state="gap"] { color: var(--amber); }
+    #coverage[data-state="unavailable"] { color: var(--red); }
+    .metrics { margin-top: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .metric { padding: 17px; }
+    .metric-value { min-height: 36px; font-size: 27px; font-weight: 760; letter-spacing: -.025em; }
+    .metric-value.accent { color: var(--cyan); }
+    .metric-note { margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+    .columns { margin-top: 12px; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(260px, .9fr); gap: 12px; align-items: start; }
+    .section { padding: 17px; }
+    .section + .section { margin-top: 12px; }
+    .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .section-head h2 { margin: 0; font-size: 14px; letter-spacing: .01em; }
+    .section-head span { color: var(--muted); font-size: 11px; }
+    .usage-split { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+    .usage-item { padding: 12px; border-radius: 11px; background: rgba(255,255,255,.035); }
+    .usage-item span { display: block; color: var(--muted); font-size: 11px; }
+    .usage-item strong { display: block; margin-top: 7px; font-size: 18px; }
+    .task-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+    .task-empty { color: var(--muted); font-size: 12px; padding: 16px 4px; text-align: center; }
+    .task-button {
+      width: 100%; padding: 10px 11px; display: grid; grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px; border: 1px solid transparent; border-radius: 10px; text-align: left;
+      color: var(--text); background: rgba(255,255,255,.028); cursor: pointer;
+    }
+    .task-button:hover { background: rgba(255,255,255,.06); }
+    .task-button.selected { border-color: rgba(34,211,238,.42); background: rgba(34,211,238,.065); }
+    .task-title { display: block; font-size: 12px; font-weight: 700; }
+    .task-meta { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+    .task-result { align-self: center; color: var(--muted); font-size: 11px; }
+    .budget-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    #budget-state { font-size: 14px; font-weight: 720; }
+    #budget-detail { margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+    progress { width: 100%; height: 8px; margin: 15px 0 7px; border: 0; border-radius: 99px; overflow: hidden; background: rgba(255,255,255,.07); }
+    progress::-webkit-progress-bar { background: rgba(255,255,255,.07); border-radius: 99px; }
+    progress::-webkit-progress-value { background: linear-gradient(90deg, var(--cyan), var(--indigo)); border-radius: 99px; }
+    #budget-percent { color: var(--muted); font-size: 10px; }
+    #resume-budget { width: 100%; margin-top: 13px; }
+    .boundary {
+      margin-top: 12px; padding: 12px 13px; border: 1px solid rgba(251,191,36,.16); border-radius: 11px;
+      color: #c8b77e; background: rgba(251,191,36,.045); font-size: 11px; line-height: 1.55;
+    }
+    .report-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .report-controls select { grid-column: 1 / -1; min-height: 34px; border: 1px solid var(--line); border-radius: 9px; padding: 0 10px; color: var(--text); background: var(--panel-strong); }
+    #action-status { min-height: 16px; margin: 10px 0 0; color: var(--muted); font-size: 10px; }
+    .footnote { margin: 15px 2px 4px; color: #71809d; font-size: 10px; line-height: 1.5; text-align: center; }
+    [hidden] { display: none !important; }
+    @media (max-width: 700px) {
+      .status-row, .columns { grid-template-columns: 1fr; }
+      .metrics { grid-template-columns: 1fr 1fr; }
+      .metrics .metric:last-child { grid-column: 1 / -1; }
+    }
+  </style>
+  <script src="dashboard.js" defer></script>
+</head>
+<body>
+  <header class="titlebar">
+    <div class="brand"><div class="mark" aria-hidden="true">≋</div><div><strong>用量看板</strong><span>鲸坞 WHALEDOCK</span></div></div>
+    <div class="title-actions"><button class="ghost" id="show-main" type="button">返回主窗口</button></div>
+  </header>
+  <main>
+    <section class="status-row" aria-label="事件状态">
+      <article class="status-card">
+        <p class="eyebrow">事件能力</p>
+        <div class="status-line"><span class="dot" id="availability-dot" aria-hidden="true"></span><span id="availability" data-state="loading">正在读取</span></div>
+      </article>
+      <article class="status-card">
+        <p class="eyebrow">数据覆盖</p>
+        <div id="coverage" class="coverage-copy" data-state="loading" role="status" aria-live="polite">等待 dsh 事件快照。</div>
+      </article>
+    </section>
+
+    <section class="metrics" aria-label="用量摘要">
+      <article class="metric"><p class="eyebrow">今日 TOKEN</p><div class="metric-value" id="today-tokens">—</div><div class="metric-note">按本机自然日</div></article>
+      <article class="metric"><p class="eyebrow">本周 TOKEN</p><div class="metric-value" id="week-tokens">—</div><div class="metric-note">周一起算</div></article>
+      <article class="metric"><p class="eyebrow">今日估算费用</p><div class="metric-value accent" id="today-cost">暂不可估算</div><div class="metric-note">以本地价格设置试算</div></article>
+    </section>
+
+    <div class="columns">
+      <div>
+        <section class="section">
+          <div class="section-head"><h2>今日委派结构</h2><span>避免遗漏子代理成本</span></div>
+          <div class="usage-split">
+            <div class="usage-item"><span>顶层任务</span><strong id="top-level-tokens">—</strong></div>
+            <div class="usage-item"><span>子代理</span><strong id="subagent-tokens">—</strong></div>
+          </div>
+        </section>
+        <section class="section">
+          <div class="section-head"><h2>匿名最近任务</h2><span id="task-count">0 条</span></div>
+          <ol class="task-list" id="recent-tasks"><li class="task-empty">暂无可用任务摘要</li></ol>
+        </section>
+      </div>
+
+      <div>
+        <section class="section">
+          <div class="section-head"><h2>每日软预算</h2><span>本机时区</span></div>
+          <div class="budget-top"><div><div id="budget-state">未开启</div><div id="budget-detail">只统计，不停止后端。</div></div></div>
+          <progress id="budget-progress" max="100" value="0" aria-label="今日预算使用比例"></progress>
+          <div id="budget-percent">0%</div>
+          <button class="primary" id="resume-budget" type="button" hidden>今日继续运行</button>
+          <div class="boundary">事后熔断无法追回已花 token；外部 attach 服务只提醒，鲸坞不会自动停止。</div>
+        </section>
+        <section class="section">
+          <div class="section-head"><h2>任务战报</h2><span>1080 × 1440</span></div>
+          <div class="report-controls">
+            <select id="report-theme" aria-label="战报主题"><option value="dark">鲸坞深色</option><option value="light">浅色简洁</option></select>
+            <button class="ghost" id="copy-report" type="button">复制图片</button>
+            <button class="primary" id="export-report" type="button">保存图片</button>
+          </div>
+          <p id="action-status" role="status" aria-live="polite"></p>
+        </section>
+      </div>
+    </div>
+    <p class="footnote">dsh 已观测用量，非账单 · 覆盖不完整时不显示伪精确费用</p>
+  </main>
+</body>
+</html>

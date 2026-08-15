@@ -19,6 +19,25 @@
 
 后端默认锁定 `@deepseek-ai/dsh@0.1.0-rc.6`。上游仍处于 rc 阶段，因此升级锁定版本前需要重新验证；鲸坞不会写入或清理 `~/.dsh`。
 
+## v0.3 当前进度：实现完成，待发布
+
+v0.3 的源码实现与本地候选验收已完成，但还没有创建 v0.3 tag、CI/Release 或新的安装资产；Releases 页当前稳定版仍是 v0.2.0。
+
+- **任务与用量看板**：独立本地窗口显示今日/本周已观测 token、估算费用、顶层/子代理聚合和最近匿名任务。固定口径是“**dsh 已观测用量，非账单**”。
+- **任务通知**：完成、失败与等待人工事件在本地持久成功后才进入 Electron Notification，并可降级到 Dock、托盘与鲸坞自有 banner。
+- **每日软预算**：预算锁存先落盘，再停止鲸坞当次自己拉起且仍能确认归属的后端。接入外部 dsh 时只告警，**绝不停止外部服务**。
+- **1080×1440 任务战报**：主进程从规范快照重读匿名数据，在隐藏的本地窗口生成深/浅两种 PNG，可复制或保存。
+- **不侵入 Harness**：主 Harness 窗口仍无 preload、无 Node、无 DOM/脚本注入；看板、banner 和战报是鲸坞自己持有的本地窗口。
+
+终态通知会等待约 350ms 并回读 history 尾部，再按“history 确认 → 本地 ledger 持久 → 通知”执行。这会缩小但不消除约 200–400ms 的 hard-crash 窗口；系统断电、进程强杀或上游尚未落盘时仍可能漏一次，本项目不宣称 exactly-once。
+
+### v0.3 当前本地实证
+
+- macOS arm64 源码态已实际接入当前端口上的 dsh，看到 13 个会话并进入 live；该服务是外部 attach，只完成 rc.6 host/list/history/WS 形状探测，**没有证明对方 npm 根包版本**。
+- rc.6 history 兼容与单会话 50,000 条尾部基线仍会如实标记 `history-gap`；看板不把局部数据写成完整账单。
+- 匿名看板已真实显示，深/浅战报均已通过 GUI 保存并回读为 1080×1440。这两张是对比度修复前的流程/尺寸样张，不代表最终色彩验收。
+- 系统通知、真实 managed 预算停止/恢复、Windows 与 Intel Mac 仍未做真机验收。
+
 ## 下载与安装
 
 从 [GitHub Releases](https://github.com/sgd-shine/whaledock/releases) 按电脑选择产物：
@@ -127,7 +146,7 @@ npm run dist:win         # Windows x64 Setup + portable（建议在 Windows runn
 node scripts/macos-build-visibility.js --out-dir=release --check
 ```
 
-`npm run smoke` 是不依赖图形界面的纯 Node 测试集；GitHub Actions 会在 Ubuntu、Windows 与 macOS 上运行同一套测试。
+`npm run smoke` 是不依赖图形界面的纯 Node 测试集。当前 v0.3 源码态本地回读为 **119 PASS / ALL PASS**：基础 34 项、config 13 项、events 24 项、backend adapter 20 项、main 24 项，加 4 项统一纳入检查。未创建 v0.3 tag 或 CI，不能把本地 smoke 写成远程发布证据。
 
 ## 常见问题
 
@@ -137,6 +156,8 @@ node scripts/macos-build-visibility.js --out-dir=release --check
 
 **我已经在终端启动了 dsh** — 鲸坞会识别并接入已有 Harness；退出鲸坞时不会关闭这个外部服务。
 
+**外部 dsh 达到每日预算会怎样** — v0.3 只标记超限并提醒“外部服务仍在运行”，不会停止不属于鲸坞的进程。只有鲸坞当次自己拉起且 generation/进程身份仍匹配的 managed backend 才可停止。
+
 **Windows 退出后还有 node/dsh 进程** — 先从托盘选择「退出」，再查看设置页/日志。Windows 版用 `taskkill /T` 清理托管的进程树；若真机验收失败，第一步应复制日志定位，不要猜测性改命令。
 
 **想跟随最新 dsh** — 可把后端版本改为 `latest`，但上游仍是 rc，可能出现破坏性变化，而且与包内锁定版本不一致时不会走内置引擎。稳定使用建议保留默认 `0.1.0-rc.6`。
@@ -145,8 +166,14 @@ node scripts/macos-build-visibility.js --out-dir=release --check
 
 - [操作手册](docs/操作手册.md)
 - [v0.2 开发方案](docs/开发方案-v0.2-2026-08-15.md)
+- [v0.3 开发方案](docs/开发方案-v0.3-2026-08-15.md)
 - [产品审计与路线图](docs/产品审计与路线图-2026-08-14.md)
 - [AI 编码代理工程约定](AGENTS.md)
+
+## 版本路线图
+
+- **v0.2.0**：已发布，是当前稳定下载版。
+- **v0.3.0**：批次 11 实现完成，本地候选验证已有部分 GUI 证据；**release pending**，尚无 tag、v0.3 CI 或 Release 资产。
 
 ## License
 

@@ -2,10 +2,12 @@
 // 鲸坞 WhaleDock — 非官方 DeepSeek Harness 桌面客户端（原名 Harness Desktop）
 // 职责：自动拉起本地 dsh 服务 → 原生窗口承载 Web UI → 托盘 / 全局快捷键 / 菜单
 
+const MAIN_HELPER_TEST = process.env.WHALEDOCK_MAIN_HELPER_TEST === '1' && require.main !== module;
+const electron = MAIN_HELPER_TEST ? {} : require('electron');
 const {
   app, BrowserWindow, Tray, Menu, globalShortcut,
   shell, ipcMain, dialog, clipboard, nativeImage, Notification
-} = require('electron');
+} = electron;
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -13,10 +15,14 @@ const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 const config = require('./lib/config');
 const backend = require('./lib/backend');
+const events = require('./lib/events');
 const log = require('./lib/log');
 const update = require('./lib/update');
 
-app.setName('WhaleDock');
+if (!MAIN_HELPER_TEST) {
+  app.setName('WhaleDock');
+  if (process.platform === 'win32') app.setAppUserModelId('com.sgd.whaledock');
+}
 
 const isMac = process.platform === 'darwin';
 const SMOKE = !!process.env.HARNESS_SMOKE; // 无头自测模式（CI/沙箱用）
@@ -26,10 +32,357 @@ const BACKEND_RECOVERY_DELAYS_MS = [1000, 2000, 4000];
 const BACKEND_RECOVERY_TIMEOUT_MS = 30 * 1000;
 const UPDATE_START_DELAY_MS = 15 * 1000;
 const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const EVENT_BATCH_DELAY_MS = 200;
+const EVENT_LIVE_MAX_EVENTS = 10000;
+const EVENT_LIVE_MAX_BYTES = 4 * 1024 * 1024;
+const MAX_RENDER_TOKEN_VALUE = 1_000_000_000_000;
+const MAX_RENDER_BUDGET_VALUE = 1_000_000_000;
+const MAX_RENDER_PRICE_VALUE = 1_000_000;
+const MAX_RENDER_COST_VALUE = 1_000_000_000_000;
+const MAX_RENDER_DURATION_MS = 366 * 24 * 60 * 60 * 1000;
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+    && Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function boundedFinite(value, maximum) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= maximum
+    ? value : null;
+}
+
+function boundedInteger(value, maximum) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= maximum ? value : null;
+}
+
+function safeTokenGroup(value) {
+  const source = isPlainObject(value) ? value : {};
+  return {
+    input: boundedInteger(source.input, MAX_RENDER_TOKEN_VALUE) || 0,
+    cacheRead: boundedInteger(source.cacheRead, MAX_RENDER_TOKEN_VALUE) || 0,
+    output: boundedInteger(source.output, MAX_RENDER_TOKEN_VALUE) || 0,
+    total: boundedInteger(source.total, MAX_RENDER_TOKEN_VALUE) || 0
+  };
+}
+
+function safeText(value, fallback, maximum = 120) {
+  if (typeof value !== 'string') return fallback;
+  const clean = value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+  return clean ? clean.slice(0, maximum) : fallback;
+}
+
+// Renderer 只得到匿名聚合；不透传 event service 未来可能增加的字段。
+function dashboardSnapshot(snapshot, runtime = {}) {
+  const source = isPlainObject(snapshot) ? snapshot : {};
+  const externalService = isPlainObject(runtime) && runtime.externalService === true;
+  const rawAvailability = isPlainObject(source.availability) ? source.availability : {};
+  const availabilityMap = {
+    live: 'available', probing: 'loading', backfilling: 'loading',
+    disconnected: 'degraded', unavailable: 'unavailable'
+  };
+  const availabilityStatus = availabilityMap[rawAvailability.state] || 'unavailable';
+  const availabilityLabels = {
+    available: '事件能力可用', loading: '正在校验事件能力',
+    degraded: '事件连接已断开，正在重连', unavailable: '事件能力不可用'
+  };
+  const rawCoverage = isPlainObject(source.coverage) ? source.coverage : {};
+  const coverageStatus = ['complete', 'partial', 'gap', 'unavailable'].includes(rawCoverage.status)
+    ? rawCoverage.status : 'unavailable';
+  const coverageMessages = {
+    complete: '覆盖完整：可显示已观测 token 与估算费用。',
+    partial: '覆盖有限：仅统计已观测样本。',
+    gap: '存在覆盖缺口：费用不显示伪精确总额。',
+    unavailable: '尚无可用覆盖数据，主 Harness 体验不受影响。'
+  };
+  const today = isPlainObject(source.today) ? source.today : {};
+  const week = isPlainObject(source.week) ? source.week : {};
+  const todayTokens = safeTokenGroup(today.tokens);
+  const weekTokens = safeTokenGroup(week.tokens);
+  const todayOrigins = isPlainObject(today.origins) ? today.origins : {};
+  const budget = isPlainObject(source.budget) ? source.budget : {};
+  const pricing = isPlainObject(source.pricing) ? source.pricing : {};
+  const complete = coverageStatus === 'complete';
+  const taskKeyPattern = /^[A-Za-z0-9_-]{16,128}$/;
+  const recentTasks = (Array.isArray(source.recentTasks) ? source.recentTasks : [])
+    .filter(isPlainObject)
+    .slice(0, 100)
+    .map((task, index) => {
+      const key = typeof task.taskKey === 'string' && taskKeyPattern.test(task.taskKey)
+        ? task.taskKey : '';
+      const tokens = safeTokenGroup(task.tokens);
+      return {
+        taskKey: key,
+        ordinal: Number.isSafeInteger(task.ordinal) && task.ordinal > 0 ? task.ordinal : index + 1,
+        label: safeText(task.label, `任务 ${String(index + 1).padStart(2, '0')}`, 32),
+        result: ({
+          completed: 'completed', error: 'failed', blocked: 'failed', 'max-tokens': 'failed',
+          incomplete: 'failed', unknown: 'failed', cancelled: 'cancelled',
+          aborted: 'cancelled', interrupted: 'cancelled'
+        })[task.result] || 'failed',
+        origin: task.origin === 'subagent' ? 'subagent' : 'user',
+        completedAt: typeof task.completedAt === 'string' ? task.completedAt.slice(0, 64) : null,
+        durationMs: boundedInteger(task.durationMs, MAX_RENDER_DURATION_MS),
+        tokens: tokens.total,
+        tokenDetails: tokens,
+        estimatedCost: complete ? boundedFinite(task.estimatedCost, MAX_RENDER_COST_VALUE) : null
+      };
+    })
+    .filter((task) => task.taskKey);
+  return {
+    availability: {
+      status: availabilityStatus,
+      label: externalService && availabilityStatus === 'available'
+        ? '外部服务合约已探测（根包版本未证明）'
+        : availabilityLabels[availabilityStatus]
+    },
+    coverage: {
+      status: coverageStatus,
+      message: coverageMessages[coverageStatus],
+      sessions: boundedInteger(rawCoverage.sessions, 1_000_000) || 0,
+      gapSessions: boundedInteger(rawCoverage.gapSessions, 1_000_000) || 0
+    },
+    disclaimer: safeText(source.disclaimer, 'dsh 已观测用量，非账单', 80),
+    costAvailable: complete,
+    today: {
+      date: typeof today.date === 'string' ? today.date.slice(0, 16) : null,
+      tokens: todayTokens.total,
+      tokenDetails: todayTokens,
+      topLevelTokens: boundedInteger(todayOrigins.user, MAX_RENDER_TOKEN_VALUE) || 0,
+      subagentTokens: boundedInteger(todayOrigins.subagent, MAX_RENDER_TOKEN_VALUE) || 0,
+      estimatedCost: complete ? boundedFinite(today.estimatedCost, MAX_RENDER_COST_VALUE) : null
+    },
+    week: {
+      startDate: typeof week.startDate === 'string' ? week.startDate.slice(0, 16) : null,
+      endDate: typeof week.endDate === 'string' ? week.endDate.slice(0, 16) : null,
+      tokens: weekTokens.total,
+      tokenDetails: weekTokens,
+      estimatedCost: complete ? boundedFinite(week.estimatedCost, MAX_RENDER_COST_VALUE) : null
+    },
+    waiting: {
+      approvals: Number.isSafeInteger(source.waiting && source.waiting.approvals)
+        ? source.waiting.approvals : 0,
+      questions: Number.isSafeInteger(source.waiting && source.waiting.questions)
+        ? source.waiting.questions : 0
+    },
+    budget: {
+      enabled: budget.enabled === true,
+      used: boundedInteger(budget.observedTokens, MAX_RENDER_TOKEN_VALUE) || 0,
+      limit: boundedInteger(budget.limitTokens, MAX_RENDER_BUDGET_VALUE),
+      paused: budget.paused === true && !externalService,
+      // 外部 attach 不冒充已停止，但仍要允许用户清除持久预算 latch，
+      // 否则外部服务退出后，当天的托管后端会被永久挡住且 UI 无恢复入口。
+      resumeAvailable: budget.paused === true,
+      resumed: budget.resumed === true,
+      enforcement: budget.paused === true
+        ? (externalService ? 'external-warning' : 'managed-paused') : 'none'
+    },
+    pricing: {
+      model: 'deepseek-v4-flash',
+      inputPerMillion: boundedFinite(pricing.inputPerMillion, MAX_RENDER_PRICE_VALUE),
+      cacheReadPerMillion: boundedFinite(pricing.cacheReadPerMillion, MAX_RENDER_PRICE_VALUE),
+      outputPerMillion: boundedFinite(pricing.outputPerMillion, MAX_RENDER_PRICE_VALUE)
+    },
+    recentTasks
+  };
+}
+
+function reportRequest(value) {
+  if (!isPlainObject(value)) throw new Error('战报请求必须是 plain object');
+  const allowedKeys = new Set(['taskKey', 'theme', 'action']);
+  if (Object.keys(value).some((key) => !allowedKeys.has(key))) throw new Error('战报请求含未批准字段');
+  if (typeof value.taskKey !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(value.taskKey)) {
+    throw new Error('战报 taskKey 无效');
+  }
+  if (!['dark', 'light'].includes(value.theme)) throw new Error('战报主题无效');
+  if (!['copy', 'save'].includes(value.action)) throw new Error('战报动作无效');
+  return { taskKey: value.taskKey, theme: value.theme, action: value.action };
+}
+
+function reportPayload(snapshot, request, appVersion) {
+  const safeRequest = reportRequest(request);
+  const source = isPlainObject(snapshot) ? snapshot : {};
+  const task = (Array.isArray(source.recentTasks) ? source.recentTasks : [])
+    .find((candidate) => isPlainObject(candidate) && candidate.taskKey === safeRequest.taskKey);
+  if (!task) throw new Error('战报对应的匿名任务不存在');
+  const coverage = isPlainObject(source.coverage) ? source.coverage.status : 'unavailable';
+  const tokens = safeTokenGroup(task.tokens);
+  const resultMap = {
+    completed: 'completed', error: 'failed', blocked: 'failed', 'max-tokens': 'failed',
+    incomplete: 'failed', unknown: 'failed', cancelled: 'cancelled',
+    aborted: 'cancelled', interrupted: 'cancelled'
+  };
+  return {
+    theme: safeRequest.theme,
+    taskLabel: safeText(task.label, '匿名任务已经靠岸。', 86),
+    result: resultMap[task.result] || 'failed',
+    coverage: ['complete', 'partial', 'gap', 'unavailable'].includes(coverage) ? coverage : 'unavailable',
+    durationMs: boundedInteger(task.durationMs, MAX_RENDER_DURATION_MS),
+    totalTokens: tokens.total,
+    inputTokens: tokens.input,
+    cacheReadTokens: tokens.cacheRead,
+    outputTokens: tokens.output,
+    estimatedCost: coverage === 'complete'
+      ? boundedFinite(task.estimatedCost, MAX_RENDER_COST_VALUE) : null,
+    costAvailable: coverage === 'complete',
+    priceModel: 'deepseek-v4-flash',
+    completedAt: typeof task.completedAt === 'string' ? task.completedAt.slice(0, 64) : null,
+    appVersion: `WhaleDock ${safeText(appVersion, '', 32)}`.trim()
+  };
+}
+
+function trustedLocalEvent(event, win, expectedUrl) {
+  if (!win || typeof win.isDestroyed !== 'function' || win.isDestroyed()) return false;
+  if (!event || event.sender !== win.webContents) return false;
+  if (!event.senderFrame || event.senderFrame !== event.sender.mainFrame) return false;
+  return event.senderFrame.url === expectedUrl;
+}
+
+function createBoundedEventQueue(options = {}) {
+  const maxEvents = Number.isSafeInteger(options.maxEvents) ? options.maxEvents : EVENT_LIVE_MAX_EVENTS;
+  const maxBytes = Number.isSafeInteger(options.maxBytes) ? options.maxBytes : EVENT_LIVE_MAX_BYTES;
+  if (maxEvents < 1 || maxBytes < 1) throw new Error('事件队列上限无效');
+  let values = [];
+  let bytes = 0;
+  return {
+    push(value) {
+      const size = Buffer.byteLength(JSON.stringify(value), 'utf8');
+      if (values.length >= maxEvents || bytes + size > maxBytes) {
+        const error = new Error('实时事件队列超过安全上限');
+        error.code = 'ERR_EVENT_LIVE_BACKLOG';
+        throw error;
+      }
+      values.push(value);
+      bytes += size;
+    },
+    drain() {
+      const result = values;
+      values = [];
+      bytes = 0;
+      return result;
+    },
+    get length() { return values.length; },
+    get bytes() { return bytes; }
+  };
+}
+
+function createPersistedEventBatcher(options) {
+  if (!isPlainObject(options) || !options.service || typeof options.service.ingestMany !== 'function') {
+    throw new Error('事件批处理器缺少 service.ingestMany');
+  }
+  const delayMs = options.delayMs === undefined ? EVENT_BATCH_DELAY_MS : options.delayMs;
+  if (!Number.isInteger(delayMs) || delayMs < 1 || delayMs > 1000) throw new Error('批处理延迟无效');
+  const setTimer = options.setTimer || setTimeout;
+  const clearTimer = options.clearTimer || clearTimeout;
+  const onEffects = typeof options.onEffects === 'function' ? options.onEffects : async () => {};
+  const onFailure = typeof options.onFailure === 'function' ? options.onFailure : async () => {};
+  const queue = createBoundedEventQueue({
+    maxEvents: options.maxEvents || EVENT_LIVE_MAX_EVENTS,
+    maxBytes: options.maxBytes || EVENT_LIVE_MAX_BYTES
+  });
+  let timer = null;
+  let serial = Promise.resolve();
+  let closed = false;
+
+  const schedule = () => {
+    if (closed || timer || queue.length === 0) return;
+    timer = setTimer(() => {
+      timer = null;
+      void flush().catch(() => { /* onFailure 已记录，定时器不制造 unhandledRejection */ });
+    }, delayMs);
+    if (timer && typeof timer.unref === 'function') timer.unref();
+  };
+
+  const flush = () => {
+    if (timer) {
+      clearTimer(timer);
+      timer = null;
+    }
+    const batch = queue.drain();
+    if (!batch.length) return serial;
+    const work = serial.then(async () => {
+      try {
+        const result = await options.service.ingestMany(batch, { generation: options.generation });
+        if (!Array.isArray(result)) throw new Error('事件服务返回了无效 effects');
+        // ingestMany 返回时事件状态已原子持久，此前绝不执行 Electron 副作用。
+        await onEffects(result);
+        return result;
+      } catch (error) {
+        await onFailure(error);
+        throw error;
+      } finally {
+        schedule();
+      }
+    });
+    serial = work.catch(() => {});
+    return work;
+  };
+
+  return {
+    push(value) { if (closed) throw new Error('事件批处理器已关闭'); queue.push(value); schedule(); },
+    flush,
+    async close({ flush: shouldFlush = true } = {}) {
+      closed = true;
+      if (timer) { clearTimer(timer); timer = null; }
+      if (shouldFlush && queue.length) await flush();
+      else queue.drain();
+      await serial;
+    },
+    get length() { return queue.length; }
+  };
+}
+
+// live terminal 不走 200ms 普通批次：先排空前序事件，再确认 dsh history，
+// 然后才让 event service 持久通知 ledger 并交付 effect。
+async function ingestLiveEvent(monitor, event, dependencies = {}) {
+  const isCurrent = typeof dependencies.isCurrent === 'function'
+    ? dependencies.isCurrent : () => eventLayerCurrent(monitor);
+  if (!isCurrent()) return false;
+  if (!event || event.kind !== 'turn-terminal') {
+    monitor.batcher.push(event);
+    return true;
+  }
+
+  await monitor.batcher.flush();
+  if (!isCurrent()) return false;
+  const confirmTerminal = typeof dependencies.confirmTerminal === 'function'
+    ? dependencies.confirmTerminal : (value) => terminalConfirmedInHistory(value, monitor, isCurrent);
+  const confirmed = await confirmTerminal(event);
+  if (!isCurrent()) return false;
+
+  const service = dependencies.service || eventService;
+  if (!service || typeof service.ingest !== 'function') throw new Error('事件服务缺少 ingest');
+  const ingestOptions = {
+    generation: monitor.serviceGeneration,
+    ...(!confirmed ? { suppressNotifications: true } : {})
+  };
+  const effects = effectsArray(await service.ingest(event, ingestOptions), 'live terminal ingest');
+  if (!isCurrent()) return false;
+  if (confirmed) {
+    const onEffects = typeof dependencies.onEffects === 'function'
+      ? dependencies.onEffects : (value) => handleEventEffects(value, monitor);
+    await onEffects(effects);
+  }
+  return confirmed;
+}
+
+function canStopForBudget(identity, current) {
+  return Boolean(identity && current
+    && identity.spawnedByUs === true && current.spawnedByUs === true
+    && identity.state && identity.state === current.state
+    && !identity.state.exited && current.backendReady === true
+    && Number.isSafeInteger(identity.generation)
+    && identity.generation === current.generation);
+}
+
+function backendStartAllowed(paused, explicitResume = false) {
+  return paused !== true || explicitResume === true;
+}
 
 let mainWindow = null;
 let splash = null;
 let settingsWindow = null;
+let dashboardWindow = null;
+let noticeWindow = null;
 let tray = null;
 let backendState = null;
 let spawnedByUs = false;
@@ -46,16 +399,27 @@ let updateStartTimer = null;
 let updateIntervalTimer = null;
 let updateCheckPromise = null;
 const pendingBackendStops = new Set();
+let eventService = null;
+let eventServiceError = null;
+let eventMonitor = null;
+let eventBackendGeneration = 0;
+let eventReconnectAttempt = 0;
+let attentionCount = 0;
+let lastNoticePayload = null;
+let eventShutdownPromise = null;
+let eventShutdownComplete = false;
 
 // ---------- 单实例 ----------
-if (!app.requestSingleInstanceLock()) {
-  app.quit();
-} else {
-  app.on('second-instance', () => showApp());
-  app.whenReady().then(onReady).catch((e) => {
-    log.line('app', 'fatal: ' + (e && e.stack || e));
-    if (SMOKE) { console.log('SMOKE_FAIL: ' + e); app.exit(1); }
-  });
+if (!MAIN_HELPER_TEST) {
+  if (!app.requestSingleInstanceLock()) {
+    app.quit();
+  } else {
+    app.on('second-instance', () => showApp());
+    app.whenReady().then(onReady).catch((e) => {
+      log.line('app', 'fatal: ' + (e && e.stack || e));
+      if (SMOKE) { console.log('SMOKE_FAIL: ' + e); app.exit(1); }
+    });
+  }
 }
 
 // 从旧名 "Harness Desktop" 迁移配置（v0.1.1 改名鲸坞 WhaleDock，见 DECISIONS D10）
@@ -93,6 +457,551 @@ function status(phase, text, detail) {
   }
 }
 
+// ---------- v0.3 事件服务与连续性编排 ----------
+function eventConfigSnapshot(value = config.get()) {
+  const current = value;
+  return {
+    taskNotifications: current.taskNotifications,
+    budgetEnabled: current.budgetEnabled,
+    dailyTokenBudget: current.dailyTokenBudget,
+    priceInputPerMillion: current.priceInputPerMillion,
+    priceCacheReadPerMillion: current.priceCacheReadPerMillion,
+    priceOutputPerMillion: current.priceOutputPerMillion,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+  };
+}
+
+function initEventService() {
+  try {
+    eventService = events.createEventService({
+      stateFile: path.join(app.getPath('userData'), 'events-state.json'),
+      config: eventConfigSnapshot(),
+      onChanged: () => pushDashboardState()
+    });
+    eventServiceError = null;
+  } catch (error) {
+    eventService = null;
+    eventServiceError = error && error.code === 'ERR_EVENT_STATE_SCHEMA'
+      ? 'state-version' : 'state-unavailable';
+    log.line('events', `事件状态服务不可用：${eventServiceError}`);
+  }
+}
+
+function canonicalEventSnapshot() {
+  if (!eventService) return null;
+  try { return eventService.snapshot(); } catch (_error) { return null; }
+}
+
+function currentDashboardSnapshot() {
+  const snapshot = canonicalEventSnapshot();
+  if (snapshot) return dashboardSnapshot(snapshot, {
+    externalService: backendReady && !spawnedByUs && backendState === null
+  });
+  return dashboardSnapshot({
+    availability: { state: 'unavailable', detail: eventServiceError },
+    coverage: { status: 'unavailable', sessions: 0, gapSessions: 0 },
+    recentTasks: []
+  });
+}
+
+function pushDashboardState() {
+  if (!dashboardWindow || dashboardWindow.isDestroyed()) return;
+  dashboardWindow.webContents.send('dashboard:state', currentDashboardSnapshot());
+}
+
+function budgetIsPaused() {
+  const snapshot = canonicalEventSnapshot();
+  return Boolean(snapshot && snapshot.budget && snapshot.budget.paused === true);
+}
+
+function eventLayerCurrent(monitor) {
+  return Boolean(monitor && !monitor.closed && eventMonitor === monitor
+    && monitor.generation === eventBackendGeneration && !quitting);
+}
+
+async function setEventAvailability(monitor, state, detail = null) {
+  if (!eventService || !eventLayerCurrent(monitor)) return false;
+  try {
+    await eventService.setAvailability(state, detail, monitor.serviceGeneration);
+    return true;
+  } catch (error) {
+    log.line('events', `更新可用性被拒绝：${error && error.code || 'unknown'}`);
+    return false;
+  }
+}
+
+function effectsArray(value, operation) {
+  if (!Array.isArray(value)) throw new Error(`${operation} 未返回 effects 数组`);
+  return value;
+}
+
+function identityStillCurrent(identity) {
+  if (!identity || !backendReady) return false;
+  if (identity.spawnedByUs) {
+    return spawnedByUs && identity.state && backendState === identity.state && !identity.state.exited;
+  }
+  return !spawnedByUs && backendState === null;
+}
+
+function retryableEventError(error) {
+  return Boolean(error && ['ERR_DSH_EVENTS_TRANSPORT', 'ERR_DSH_EVENTS_TIMEOUT'].includes(error.code));
+}
+
+async function closeEventTransport(monitor, options = {}) {
+  if (!monitor || monitor.transportClosed) return;
+  monitor.transportClosed = true;
+  if (monitor.reconnectTimer) clearTimeout(monitor.reconnectTimer);
+  monitor.reconnectTimer = null;
+  if (monitor.subscription) {
+    try { monitor.subscription.close(); } catch (_error) { /* 关闭是尽力而为 */ }
+  }
+  if (monitor.batcher) {
+    try { await monitor.batcher.close({ flush: options.flushBatch === true }); }
+    catch (_error) { /* 关闭失败不允许旧代继续副作用 */ }
+  }
+  if (monitor.adapter) {
+    try { await monitor.adapter.close(); } catch (_error) { /* 关闭不影响主窗口 */ }
+  }
+}
+
+async function stopEventLayer(reason, options = {}) {
+  const monitor = eventMonitor;
+  if (!monitor) return;
+  eventMonitor = null;
+  eventBackendGeneration += 1;
+  monitor.closed = true;
+  if (monitor.reconnectTimer) clearTimeout(monitor.reconnectTimer);
+  monitor.reconnectTimer = null;
+  if (reason) log.line('events', `停止事件层：${safeText(reason, '未知原因', 80)}`);
+  await closeEventTransport(monitor, { flushBatch: options.flushBatch === true });
+  if (options.disconnect !== false && eventService) {
+    try {
+      effectsArray(await eventService.disconnect(monitor.serviceGeneration), 'disconnect');
+    } catch (error) {
+      if (error && error.code !== 'ERR_EVENT_GENERATION') {
+        log.line('events', `事件层断开落盘失败：${error && error.code || 'unknown'}`);
+      }
+    }
+  }
+}
+
+function beginEventShutdown() {
+  if (eventShutdownPromise) return eventShutdownPromise;
+  eventShutdownPromise = (async () => {
+    await stopEventLayer('App 正在退出', { disconnect: true, flushBatch: true });
+    if (eventService) await eventService.close();
+  })();
+  void eventShutdownPromise.then(
+    () => { eventShutdownComplete = true; },
+    () => { eventShutdownComplete = true; }
+  );
+  return eventShutdownPromise;
+}
+
+async function backfillSession(monitor, row) {
+  const cursor = eventService.getCursor(row.sessionRef);
+  const firstBaseline = cursor.notificationFloorSeq === null;
+  const floor = cursor.notificationFloorSeq === null
+    ? (monitor.notificationFloors.has(row.sessionRef)
+      ? monitor.notificationFloors.get(row.sessionRef) : row.lastSeq)
+    : undefined;
+  const registrationEffects = effectsArray(await eventService.registerSession(row.sessionRef, {
+    origin: row.origin,
+    ...(row.parentRef ? { parentRef: row.parentRef } : {}),
+    ...(floor !== undefined ? { notificationFloorSeq: floor } : {})
+  }), 'registerSession');
+  await handleEventEffects(registrationEffects, monitor);
+  if (!eventLayerCurrent(monitor) || row.lastSeq < 0 || row.lastSeq <= cursor.lastContiguousSeq) {
+    return false;
+  }
+
+  const targetSeq = cursor.lastContiguousSeq + 1;
+  const collected = [];
+  let beforeSeq;
+  let covered = false;
+  let pageCount = 0;
+  while (eventLayerCurrent(monitor) && pageCount < 1000 && monitor.historyPages < 1000) {
+    const page = await monitor.adapter.readHistory(row.sessionRef, {
+      ...(beforeSeq === undefined ? {} : { beforeSeq }),
+      maxMessages: 1
+    });
+    pageCount += 1;
+    monitor.historyPages += 1;
+    if (!page || !Array.isArray(page.events)) throw new Error('history 适配器返回异常');
+    if (collected.length + page.events.length > 50000) break;
+    collected.push(...page.events);
+    if (page.minSeq !== null && page.minSeq <= targetSeq) {
+      covered = true;
+      break;
+    }
+    if (!page.hasMore) break;
+    if (!Number.isSafeInteger(page.nextBeforeSeq)) throw new Error('history 缺少可推进游标');
+    beforeSeq = page.nextBeforeSeq;
+  }
+  collected.sort((left, right) => (left.seq || 0) - (right.seq || 0));
+  // 首次基线只导入订阅 floor 之前的旧事件；其后的 live 事件留给
+  // ingestLiveEvent 按 history→ledger→effect 顺序处理，避免被历史 suppress 误杀。
+  const eligible = firstBaseline
+    ? collected.filter((event) => Number.isSafeInteger(event.seq) && event.seq <= floor)
+    : collected;
+  if (firstBaseline && !covered) {
+    // 超长旧会话可能在 50k 安全上限内取不到 seq=0。以实际读到的
+    // 最早尾部事件前一位建立一次性基线，既不伪造完整覆盖，也避免把
+    // 数万条合法尾部误当 gap 塞爆内存；availability 仍返回 history-gap。
+    const initialContiguousSeq = eligible.length ? eligible[0].seq - 1 : floor;
+    const baselineEffects = effectsArray(await eventService.registerSession(row.sessionRef, {
+      initialContiguousSeq
+    }), 'registerSession initial baseline');
+    await handleEventEffects(baselineEffects, monitor);
+  }
+  if (eligible.length) {
+    const effects = effectsArray(await eventService.ingestMany(eligible, {
+      ...(firstBaseline ? { suppressNotifications: true } : {}),
+      generation: monitor.serviceGeneration
+    }), 'history ingestMany');
+    await handleEventEffects(effects, monitor);
+  }
+  return !covered;
+}
+
+async function bootstrapEventLayer(monitor) {
+  // 先打开 WS 并有界缓冲，再读 list/history，避免两者之间永久丢事件。
+  monitor.subscription = monitor.adapter.subscribe({
+    onEvent: async (event) => {
+      if (!eventLayerCurrent(monitor)) return;
+      if (event && event.kind === 'subscribed' && typeof event.sessionRef === 'string'
+          && Number.isSafeInteger(event.lastSeq)) {
+        monitor.notificationFloors.set(event.sessionRef, event.lastSeq);
+      }
+      if (monitor.backfilling) monitor.liveQueue.push(event);
+      else await ingestLiveEvent(monitor, event);
+    },
+    onStatus: (value) => {
+      if (!eventLayerCurrent(monitor) || !value || typeof value.kind !== 'string') return;
+      if (['remote-error', 'unknown-method'].includes(value.kind)) {
+        log.line('events', `事件传输状态：${value.kind}`);
+      }
+    }
+  });
+  void monitor.subscription.closed.then(
+    () => handleEventTransportClosed(monitor, null),
+    (error) => handleEventTransportClosed(monitor, error)
+  );
+  await monitor.subscription.opened;
+  if (!eventLayerCurrent(monitor)) return;
+  await monitor.adapter.describe();
+  if (!eventLayerCurrent(monitor)) return;
+  await setEventAvailability(monitor, 'backfilling', null);
+  const sessions = await monitor.adapter.listSessions();
+  if (!Array.isArray(sessions)) throw new Error('session list 适配器返回异常');
+  let hadGap = false;
+  for (const row of sessions) {
+    if (!eventLayerCurrent(monitor)) return;
+    if (await backfillSession(monitor, row)) hadGap = true;
+  }
+  if (!eventLayerCurrent(monitor)) return;
+
+  // 历史已先落盘；此时把 WS 重叠区交给 200ms 串行批处理，由 reducer 去重。
+  while (monitor.liveQueue.length && eventLayerCurrent(monitor)) {
+    for (const event of monitor.liveQueue.drain()) {
+      if (!eventLayerCurrent(monitor)) return;
+      await ingestLiveEvent(monitor, event);
+    }
+  }
+  monitor.backfilling = false;
+  await setEventAvailability(monitor, 'live', hadGap ? 'history-gap' : 'ready');
+  eventReconnectAttempt = 0;
+  log.line('events', `事件层已就绪：${sessions.length} 个会话${hadGap ? '，存在历史缺口' : ''}`);
+}
+
+async function activateEventLayerForBackend(identity, options = {}) {
+  await stopEventLayer('切换后端连接代', { disconnect: true });
+  if (!eventService || quitting || !backendReady) return;
+  const generation = ++eventBackendGeneration;
+  const serviceGeneration = await eventService.beginConnection(generation);
+  if (generation !== eventBackendGeneration || quitting || !backendReady) {
+    try { await eventService.disconnect(serviceGeneration); } catch (_error) { /* 新代已接管 */ }
+    return;
+  }
+  const monitor = {
+    generation,
+    serviceGeneration,
+    identity: {
+      generation,
+      state: identity && identity.state || null,
+      spawnedByUs: Boolean(identity && identity.spawnedByUs)
+    },
+    adapter: null,
+    subscription: null,
+    batcher: null,
+    liveQueue: createBoundedEventQueue(),
+    notificationFloors: new Map(),
+    historyPages: 0,
+    backfilling: true,
+    established: false,
+    closed: false,
+    transportClosed: false,
+    disconnectScheduled: false,
+    reconnectTimer: null,
+    retryAttempt: Number.isSafeInteger(options.retryAttempt) ? options.retryAttempt : 0
+  };
+  eventMonitor = monitor;
+
+  if (monitor.identity.spawnedByUs
+      && (!monitor.identity.state
+        || monitor.identity.state.version !== config.DSH_CONTRACT.packageVersion)) {
+    await setEventAvailability(monitor, 'unavailable', 'contract-mismatch');
+    log.line('events', '托管后端根包版本无法证明为锁定版，事件层 fail-closed');
+    monitor.closed = true;
+    return;
+  }
+
+  try {
+    monitor.adapter = backend.createDshEventsAdapter({
+      port: config.get('port'),
+      expectedHostVersion: config.DSH_CONTRACT.hostVersion,
+      sessionSalt: eventService.getSalt()
+    });
+    monitor.batcher = createPersistedEventBatcher({
+      service: eventService,
+      generation: monitor.serviceGeneration,
+      delayMs: EVENT_BATCH_DELAY_MS,
+      onEffects: (effects) => handleEventEffects(effects, monitor),
+      onFailure: async (error) => {
+        if (!eventLayerCurrent(monitor)) return;
+        await setEventAvailability(monitor, 'unavailable', 'consumer-error');
+        log.line('events', `事件批落盘失败：${error && error.code || 'unknown'}`);
+      }
+    });
+    await bootstrapEventLayer(monitor);
+    monitor.established = eventLayerCurrent(monitor);
+  } catch (error) {
+    if (!eventLayerCurrent(monitor)) return;
+    if (retryableEventError(error)) {
+      await handleEventTransportClosed(monitor, error);
+    } else {
+      await setEventAvailability(monitor, 'unavailable',
+        error && error.code === 'ERR_DSH_EVENTS_CONTRACT' ? 'contract-mismatch' : 'consumer-error');
+      log.line('events', `事件合约探测停止：${error && error.code || 'unknown'}`);
+      monitor.closed = true;
+      await closeEventTransport(monitor);
+    }
+  }
+}
+
+function launchEventLayer(identity, options = {}) {
+  void activateEventLayerForBackend(identity, options).catch((error) => {
+    log.line('events', `事件层启动异常，主 Harness 继续可用：${error && error.code || 'unknown'}`);
+  });
+}
+
+async function handleEventTransportClosed(monitor, error) {
+  if (!eventLayerCurrent(monitor) || monitor.disconnectScheduled) return;
+  monitor.disconnectScheduled = true;
+  if (error && !retryableEventError(error)) {
+    await setEventAvailability(monitor, 'unavailable',
+      error.code === 'ERR_DSH_EVENTS_CONTRACT' ? 'contract-mismatch' : 'consumer-error');
+    monitor.closed = true;
+    await closeEventTransport(monitor);
+    log.line('events', `事件连接 fail-closed：${error.code || 'unknown'}`);
+    return;
+  }
+  try {
+    effectsArray(await eventService.disconnect(monitor.serviceGeneration), 'disconnect');
+  } catch (disconnectError) {
+    if (!disconnectError || disconnectError.code !== 'ERR_EVENT_GENERATION') {
+      log.line('events', `断线状态落盘失败：${disconnectError && disconnectError.code || 'unknown'}`);
+    }
+  }
+  await closeEventTransport(monitor);
+  if (!eventLayerCurrent(monitor)) return;
+  const retryAttempt = Math.min(monitor.retryAttempt + 1, 10);
+  const delayMs = Math.min(30000, 1000 * (2 ** Math.min(retryAttempt - 1, 5)));
+  eventReconnectAttempt = retryAttempt;
+  log.line('events', `事件连接断开，${delayMs}ms 后重连：${error && error.code || 'closed'}`);
+  monitor.reconnectTimer = setTimeout(() => {
+    monitor.reconnectTimer = null;
+    if (!eventLayerCurrent(monitor) || !identityStillCurrent(monitor.identity)
+        || (monitor.identity.spawnedByUs && budgetIsPaused())) return;
+    launchEventLayer({
+      state: monitor.identity.state,
+      spawnedByUs: monitor.identity.spawnedByUs
+    }, { retryAttempt });
+  }, delayMs);
+  if (typeof monitor.reconnectTimer.unref === 'function') monitor.reconnectTimer.unref();
+}
+
+function refreshAttentionSurface() {
+  if (tray && !tray.isDestroyed()) {
+    tray.setToolTip(attentionCount > 0
+      ? `鲸坞 WhaleDock · ${attentionCount} 个任务待查看`
+      : `鲸坞 WhaleDock · 今日 ${currentDashboardSnapshot().today.tokens.toLocaleString('zh-CN')} tokens`);
+    refreshTrayMenu();
+  }
+  if (isMac && app.dock) {
+    try { app.dock.setBadge(attentionCount > 0 ? String(Math.min(attentionCount, 99)) : ''); }
+    catch (_error) { /* Dock 降级不影响事件落盘 */ }
+  }
+}
+
+function clearTaskAttention() {
+  attentionCount = 0;
+  lastNoticePayload = null;
+  refreshAttentionSurface();
+  if (noticeWindow && !noticeWindow.isDestroyed()) noticeWindow.hide();
+}
+
+function markTaskAttention(payload) {
+  attentionCount = Math.min(99, attentionCount + 1);
+  lastNoticePayload = payload;
+  refreshAttentionSurface();
+}
+
+function showNotificationFallback(payload) {
+  if (isMac && app.dock) {
+    try { app.dock.bounce('informational'); } catch (_error) { /* 继续托盘/banner */ }
+  }
+  showNoticeWindow(payload);
+}
+
+function deliverTaskNotification(payload) {
+  markTaskAttention(payload);
+  const title = safeText(payload && payload.title, '鲸坞 WhaleDock', 48);
+  const body = safeText(payload && payload.detail, '有一个任务状态已更新。', 100);
+  let supported = false;
+  try { supported = Notification.isSupported(); } catch (_error) { supported = false; }
+  if (!supported) {
+    showNotificationFallback(payload);
+    return;
+  }
+  try {
+    const notice = new Notification({ title, body });
+    let failed = false;
+    notice.on('click', () => showApp());
+    notice.on('failed', () => {
+      if (failed) return;
+      failed = true;
+      showNotificationFallback(payload);
+    });
+    notice.show();
+  } catch (_error) {
+    showNotificationFallback(payload);
+  }
+}
+
+function terminalNoticePayload(effect) {
+  const result = effect && effect.result;
+  // aborted/interrupted 在本版没有中性 banner 视觉；选择不发，不误标为红色失败。
+  if (result === 'cancelled' || result === 'interrupted') return null;
+  const copies = {
+    completed: { kind: 'completed', title: '一个任务已完成', detail: '鲸坞已记录该任务的匿名摘要。' },
+    error: { kind: 'failed', title: '一个任务未完成', detail: '任务返回错误，请打开鲸坞查看当前状态。' },
+    blocked: { kind: 'failed', title: '一个任务已阻塞', detail: '该终态不等同于等待人工输入。' },
+    'max-tokens': { kind: 'failed', title: '任务已达输出上限', detail: '任务可能未完整，请打开鲸坞查看。' },
+    interrupted: { kind: 'failed', title: '一个任务已中断', detail: '鲸坞已记录该终态。' }
+  };
+  return { ...(copies[result] || copies.error), anonymousLabel: '匿名任务' };
+}
+
+async function terminalConfirmedInHistory(effect, monitor, currentCheck = () => eventLayerCurrent(monitor)) {
+  if (!effect || typeof effect.sessionRef !== 'string' || !effect.sessionRef
+      || !Number.isSafeInteger(effect.seq) || effect.seq < 0) return false;
+  await new Promise((resolve) => {
+    setTimeout(resolve, 350);
+  });
+  if (!currentCheck() || !monitor.adapter) return false;
+  try {
+    const page = await monitor.adapter.readHistory(effect.sessionRef, { maxMessages: 1 });
+    if (!currentCheck()) return false;
+    return Boolean(page && Array.isArray(page.events) && page.events.some((event) => (
+      event && event.kind === 'turn-terminal' && event.sessionRef === effect.sessionRef
+        && event.seq === effect.seq
+    )));
+  } catch (error) {
+    log.line('events', `终态 history tail 确认失败：${error && error.code || 'unknown'}`);
+    return false;
+  }
+}
+
+function invalidateMonitorFromPersistedEffect(monitor) {
+  if (!eventLayerCurrent(monitor)) return;
+  eventMonitor = null;
+  eventBackendGeneration += 1;
+  monitor.closed = true;
+  if (monitor.reconnectTimer) clearTimeout(monitor.reconnectTimer);
+  monitor.reconnectTimer = null;
+  if (monitor.subscription) {
+    try { monitor.subscription.close(); } catch (_error) { /* ignore */ }
+  }
+  if (monitor.adapter) void monitor.adapter.close().catch(() => {});
+  // 当前 effect 位于 batcher 自己的 serial 中；异步关闭避免等待自身。
+  setTimeout(() => {
+    if (monitor.batcher) void monitor.batcher.close({ flush: false }).catch(() => {});
+  }, 0);
+}
+
+async function applyBudgetCrossed(effect, monitor) {
+  if (!eventLayerCurrent(monitor)) return;
+  const current = {
+    generation: eventBackendGeneration,
+    state: backendState,
+    spawnedByUs,
+    backendReady
+  };
+  if (!canStopForBudget(monitor && monitor.identity, current)) {
+    deliverTaskNotification({
+      kind: 'waiting',
+      title: '已达到日预算',
+      detail: '当前服务不是鲸坞本次拉起，未自动停止。',
+      anonymousLabel: '每日软预算'
+    });
+    return;
+  }
+
+  // budget latch 已在 ingestMany 返回前持久。再取消恢复、失效连接代和移交进程所有权。
+  cancelBackendRecovery('今日预算已暂停');
+  cancelForegroundStartup('今日预算已暂停');
+  const ownedState = backendState;
+  backendState = null;
+  spawnedByUs = false;
+  backendReady = false;
+  invalidateMonitorFromPersistedEffect(monitor);
+  await stopManagedBackend(ownedState);
+  log.line('events', `日预算已暂停托管后端：${effect.observedTokens}/${effect.limitTokens} tokens`);
+  deliverTaskNotification({
+    kind: 'waiting',
+    title: '已达到日预算',
+    detail: '鲸坞已停止本次自己拉起的后端。可在看板确认今日继续。',
+    anonymousLabel: '每日软预算'
+  });
+}
+
+async function handleEventEffects(value, monitor) {
+  if (!eventLayerCurrent(monitor)) return;
+  const effects = effectsArray(value, 'event effects');
+  for (const effect of effects) {
+    if (!eventLayerCurrent(monitor)) return;
+    if (!isPlainObject(effect) || typeof effect.type !== 'string') {
+      throw new Error('事件服务产生了无效 effect');
+    }
+    if (effect.type === 'task-terminal') {
+      const payload = terminalNoticePayload(effect);
+      if (payload && eventLayerCurrent(monitor)) deliverTaskNotification(payload);
+    } else if (effect.type === 'waiting-human') {
+      deliverTaskNotification({
+        kind: 'waiting',
+        title: '有任务等待你确认',
+        detail: effect.requestKind === 'question'
+          ? '有一个问题等待你回答。' : '有一个操作等待你批准。',
+        anonymousLabel: '匿名任务'
+      });
+    } else if (effect.type === 'budget-crossed') {
+      if (!eventLayerCurrent(monitor)) return;
+      await applyBudgetCrossed(effect, monitor);
+    }
+  }
+}
+
 // ---------- 启动 ----------
 async function onReady() {
   migrateLegacyConfig();
@@ -102,6 +1011,7 @@ async function onReady() {
   });
   config.init(app.getPath('userData'));
   log.init(path.join(app.getPath('userData'), 'logs'));
+  initEventService();
   log.line('app', `鲸坞 WhaleDock v${app.getVersion()} 启动 (${process.platform}/${process.arch})`);
   initialStartMinimized = config.get('startMinimized') && !SMOKE;
 
@@ -109,6 +1019,7 @@ async function onReady() {
 
   ipcMain.on('splash-action', onSplashAction);
   registerSettingsIpc();
+  registerEventIpc();
   reconcileLoginItem();
   if (!initialStartMinimized) createSplash();
   else log.line('app', '启动最小化已启用：后台启动期间不创建启动页或主窗口');
@@ -120,6 +1031,11 @@ async function onReady() {
 }
 
 function startManagedBackend() {
+  if (!backendStartAllowed(budgetIsPaused())) {
+    const error = new Error('今日预算暂停中，拒绝自动拉起后端');
+    error.code = 'BUDGET_PAUSED';
+    throw error;
+  }
   let state = null;
   state = backend.start(config.get(), {
     onLine: (line) => { log.line('dsh', line); sendSplash('log', line); },
@@ -208,9 +1124,16 @@ async function ensureBackendAndShowOnce(generation, showWindow) {
       }
       status('attach', `检测到端口 ${port} 已有服务，直接接入`);
       backendReady = true;
+      launchEventLayer({ state: backendState, spawnedByUs });
       if (showWindow) return openMainWindow();
       closeSplash();
       log.line('app', '服务已就绪，保持最小化到托盘');
+      return;
+    }
+
+    if (!backendStartAllowed(budgetIsPaused())) {
+      status('warning', '已达到今日预算，鲸坞未自动启动后端',
+        '请打开任务看板，明确确认“今日继续运行”');
       return;
     }
 
@@ -271,6 +1194,7 @@ async function ensureBackendAndShowOnce(generation, showWindow) {
     }
 
     backendReady = true;
+    launchEventLayer({ state: startedState, spawnedByUs: true });
     if (showWindow) {
       status('ready', '服务已就绪，正在打开窗口…');
       openMainWindow();
@@ -361,8 +1285,14 @@ async function recoverBackendInBackground() {
         if (!ownProcessAlive) backendState = null;
         recoveringBackend = false;
         backendReady = true;
+        launchEventLayer({ state: backendState, spawnedByUs });
         log.line('app', `后台恢复：第 ${attempt}/${total} 次成功，端口已有服务`);
         reloadMainWindowAfterRecovery();
+        return;
+      }
+
+      if (!backendStartAllowed(budgetIsPaused())) {
+        log.line('app', '后台恢复：今日预算暂停中，不自动拉起后端');
         return;
       }
 
@@ -390,6 +1320,7 @@ async function recoverBackendInBackground() {
         if (readyAndOwned) {
           recoveringBackend = false;
           backendReady = true;
+          launchEventLayer({ state: attemptState, spawnedByUs: true });
           log.line('app', `后台恢复：第 ${attempt}/${total} 次成功`);
           reloadMainWindowAfterRecovery();
           return;
@@ -436,6 +1367,9 @@ function onBackendExit(state, code) {
   backendState = null;
   spawnedByUs = false;
   backendReady = false;
+  void stopEventLayer('后端进程已退出', { disconnect: true }).catch((error) => {
+    log.line('events', `后端退出时关闭事件层失败：${error && error.code || 'unknown'}`);
+  });
   if (quitting || !wasSpawnedByUs) return;
   if (startupPromise) {
     log.line('app', '后端在前台启动流程中退出，交由启动页处理');
@@ -486,7 +1420,7 @@ function createSplash() {
   splash.on('closed', () => {
     splash = null;
     // 主窗口还没出来就关掉启动页 = 用户想退出
-    if (!mainWindow && !settingsWindow && !quitting) {
+    if (!mainWindow && !settingsWindow && !dashboardWindow && !quitting) {
       quitting = true;
       app.quit();
     }
@@ -594,6 +1528,7 @@ function openMainWindow() {
 }
 
 function showApp() {
+  clearTaskAttention();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
     mainWindow.focus();
@@ -616,6 +1551,213 @@ function toggleWindow() {
   } else {
     showApp();
   }
+}
+
+function secureLocalWindow(win, expectedUrl) {
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (event, url) => {
+    if (url !== expectedUrl) event.preventDefault();
+  });
+}
+
+function openDashboardWindow() {
+  clearTaskAttention();
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.show();
+    dashboardWindow.focus();
+    pushDashboardState();
+    return;
+  }
+  const expectedUrl = pathToFileURL(path.join(__dirname, 'dashboard.html')).href;
+  const win = new BrowserWindow({
+    width: 760,
+    height: 780,
+    minWidth: 680,
+    minHeight: 660,
+    show: false,
+    title: '鲸坞任务看板',
+    backgroundColor: '#090e17',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-dashboard.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  dashboardWindow = win;
+  secureLocalWindow(win, expectedUrl);
+  win.webContents.on('did-finish-load', () => pushDashboardState());
+  win.once('ready-to-show', () => {
+    if (!win.isDestroyed()) { win.show(); win.focus(); }
+  });
+  win.on('closed', () => { if (dashboardWindow === win) dashboardWindow = null; });
+  void win.loadFile('dashboard.html');
+}
+
+function showNoticeWindow(payload) {
+  lastNoticePayload = payload;
+  if (noticeWindow && !noticeWindow.isDestroyed()) {
+    noticeWindow.webContents.send('notice:show', payload);
+    noticeWindow.showInactive();
+    return;
+  }
+  const expectedUrl = pathToFileURL(path.join(__dirname, 'notice.html')).href;
+  const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+  const win = new BrowserWindow({
+    width: 420,
+    height: 132,
+    useContentSize: true,
+    show: false,
+    frame: false,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    ...(parent ? { parent } : {}),
+    backgroundColor: '#101722',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-notice.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  noticeWindow = win;
+  secureLocalWindow(win, expectedUrl);
+  win.webContents.on('did-finish-load', () => {
+    if (!win.isDestroyed() && lastNoticePayload) {
+      win.webContents.send('notice:show', lastNoticePayload);
+      win.showInactive();
+    }
+  });
+  win.on('closed', () => { if (noticeWindow === win) noticeWindow = null; });
+  void win.loadFile('notice.html');
+}
+
+async function renderOffscreenReport(value) {
+  const request = reportRequest(value);
+  const canonical = canonicalEventSnapshot();
+  if (!canonical) throw new Error('事件规范快照不可用');
+  const payload = reportPayload(canonical, request, app.getVersion());
+  const expectedUrl = pathToFileURL(path.join(__dirname, 'report-card.html')).href;
+  let win = null;
+  let readyListener = null;
+  let readyTimer = null;
+  try {
+    win = new BrowserWindow({
+      width: 1080,
+      height: 1440,
+      useContentSize: true,
+      show: false,
+      frame: false,
+      resizable: false,
+      backgroundColor: request.theme === 'light' ? '#f3f1ea' : '#07111d',
+      webPreferences: {
+        preload: path.join(__dirname, 'preload-report.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        backgroundThrottling: false
+      }
+    });
+    secureLocalWindow(win, expectedUrl);
+    const currentWin = win;
+    const rendered = new Promise((resolve, reject) => {
+      readyListener = (event, receipt) => {
+        if (!trustedLocalEvent(event, currentWin, expectedUrl)) return;
+        if (!isPlainObject(receipt) || receipt.ok !== true || receipt.theme !== request.theme) {
+          reject(new Error('战报 renderer 回执无效'));
+          return;
+        }
+        resolve();
+      };
+      ipcMain.on('report:ready', readyListener);
+      readyTimer = setTimeout(() => reject(new Error('战报 renderer 渲染超时')), 15000);
+    });
+    await win.loadFile('report-card.html');
+    win.webContents.send('report:render', payload);
+    await rendered;
+    let image = await win.webContents.capturePage({ x: 0, y: 0, width: 1080, height: 1440 });
+    const size = image.getSize();
+    if (size.width !== 1080 || size.height !== 1440) {
+      image = image.resize({ width: 1080, height: 1440, quality: 'best' });
+    }
+    const finalSize = image.getSize();
+    if (finalSize.width !== 1080 || finalSize.height !== 1440) {
+      throw new Error('战报 PNG 尺寸不是 1080×1440');
+    }
+    if (request.action === 'copy') {
+      clipboard.writeImage(image);
+      return { ok: true, message: '已复制 1080×1440 战报图片。' };
+    }
+    const saveOptions = {
+      title: '保存鲸坞任务战报',
+      defaultPath: `WhaleDock-report-${new Date().toISOString().slice(0, 10)}.png`,
+      filters: [{ name: 'PNG 图片', extensions: ['png'] }]
+    };
+    const result = dashboardWindow && !dashboardWindow.isDestroyed()
+      ? await dialog.showSaveDialog(dashboardWindow, saveOptions)
+      : await dialog.showSaveDialog(saveOptions);
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true, message: '已取消保存。' };
+    await fs.promises.writeFile(result.filePath, image.toPNG(), { flag: 'w' });
+    return { ok: true, message: '战报图片已保存。' };
+  } finally {
+    if (readyTimer) clearTimeout(readyTimer);
+    if (readyListener) ipcMain.removeListener('report:ready', readyListener);
+    if (win && !win.isDestroyed()) win.destroy();
+  }
+}
+
+function trustedDashboardHandler(handler) {
+  const expectedUrl = pathToFileURL(path.join(__dirname, 'dashboard.html')).href;
+  return async (event, ...args) => {
+    if (!trustedLocalEvent(event, dashboardWindow, expectedUrl)) {
+      throw new Error('拒绝非看板主帧的 IPC 请求');
+    }
+    return handler(...args);
+  };
+}
+
+function trustedNoticeHandler(handler) {
+  const expectedUrl = pathToFileURL(path.join(__dirname, 'notice.html')).href;
+  return async (event, ...args) => {
+    if (!trustedLocalEvent(event, noticeWindow, expectedUrl)) {
+      throw new Error('拒绝非提示窗主帧的 IPC 请求');
+    }
+    return handler(...args);
+  };
+}
+
+function registerEventIpc() {
+  const channels = [
+    'dashboard:get', 'dashboard:export-report', 'dashboard:resume-budget',
+    'dashboard:show-main', 'notice:activate', 'notice:dismiss'
+  ];
+  for (const channel of channels) ipcMain.removeHandler(channel);
+  ipcMain.handle('dashboard:get', trustedDashboardHandler(async () => currentDashboardSnapshot()));
+  ipcMain.handle('dashboard:show-main', trustedDashboardHandler(async () => {
+    showApp();
+    return { ok: true };
+  }));
+  ipcMain.handle('dashboard:export-report', trustedDashboardHandler(async (request) => {
+    return renderOffscreenReport(request);
+  }));
+  ipcMain.handle('dashboard:resume-budget', trustedDashboardHandler(async () => {
+    if (!eventService) throw new Error('事件服务不可用');
+    const effects = effectsArray(await eventService.resumeBudget(), 'resumeBudget');
+    const resumed = effects.some((effect) => effect && effect.type === 'budget-resumed');
+    if (!resumed) return { ok: true, resumed: false, message: '今日预算未处于暂停状态。' };
+    clearTaskAttention();
+    if (!backendReady) await restartBackend({ allowBudgetResume: true });
+    return { ok: true, resumed: true, message: '已确认今日继续运行。' };
+  }));
+  ipcMain.handle('notice:activate', trustedNoticeHandler(async () => {
+    showApp();
+    return { ok: true };
+  }));
+  ipcMain.handle('notice:dismiss', trustedNoticeHandler(async () => {
+    if (noticeWindow && !noticeWindow.isDestroyed()) noticeWindow.hide();
+    return { ok: true };
+  }));
 }
 
 // ---------- 设置窗 / 登录项 ----------
@@ -756,6 +1898,13 @@ function registerSettingsIpc() {
       && normalized.openAtLogin !== before.openAtLogin;
     let login = loginItemStatus();
     let loginError = '';
+    let configWritten = false;
+    let eventEffects = [];
+    const eventFields = new Set([
+      'taskNotifications', 'budgetEnabled', 'dailyTokenBudget',
+      'priceInputPerMillion', 'priceCacheReadPerMillion', 'priceOutputPerMillion'
+    ]);
+    const eventConfigChanged = Object.keys(normalized).some((key) => eventFields.has(key));
 
     if (hotkeyChanged) switchHotkey(before.hotkey, normalized.hotkey);
     if (loginChanged) {
@@ -766,7 +1915,21 @@ function registerSettingsIpc() {
 
     try {
       config.set(normalized);
+      configWritten = true;
+      if (eventService && eventConfigChanged) {
+        eventEffects = effectsArray(await eventService.configure(eventConfigSnapshot({
+          ...before,
+          ...normalized
+        })), 'configure');
+      }
     } catch (error) {
+      if (configWritten) {
+        const rollbackPatch = {};
+        for (const key of Object.keys(normalized)) rollbackPatch[key] = before[key];
+        try { config.set(rollbackPatch); } catch (rollbackError) {
+          log.line('app', `事件配置失败后 config 回滚也失败：${rollbackError.message}`);
+        }
+      }
       if (hotkeyChanged) {
         try { switchHotkey(normalized.hotkey, before.hotkey); } catch (rollbackError) {
           log.line('app', `配置写入失败后快捷键回滚也失败：${rollbackError.message}`);
@@ -776,6 +1939,7 @@ function registerSettingsIpc() {
       throw error;
     }
 
+    if (eventEffects.length) await handleEventEffects(eventEffects, eventMonitor);
     if (loginChanged) login = loginItemStatus(loginError);
     if (Object.prototype.hasOwnProperty.call(normalized, 'checkUpdates')) configureUpdateSchedule();
     log.line('app', `设置已保存${needsRestart ? '（后端需重启）' : ''}`);
@@ -797,8 +1961,10 @@ function registerSettingsIpc() {
   }));
 
   ipcMain.handle('settings:restart-backend', trustedSettingsHandler(async () => {
-    await restartBackend();
-    return { ok: true, message: '后端已重启' };
+    const restarted = await restartBackend();
+    return restarted
+      ? { ok: true, message: '后端已重启' }
+      : { ok: false, message: '今日预算暂停中，请在任务看板确认继续' };
   }));
 
   ipcMain.handle('settings:check-update', trustedSettingsHandler(async () => {
@@ -886,7 +2052,7 @@ function updateFixtureFetch() {
 }
 
 function activeDialogParent() {
-  for (const win of [settingsWindow, mainWindow, splash]) {
+  for (const win of [settingsWindow, dashboardWindow, mainWindow, splash]) {
     if (win && !win.isDestroyed()) return win;
   }
   return null;
@@ -1092,6 +2258,28 @@ function runUpdateCheck(manual) {
 }
 
 // ---------- 托盘 / 菜单 / 快捷键 ----------
+function trayMenuTemplate() {
+  return [
+    ...(attentionCount > 0 ? [{ label: `${attentionCount} 个任务待查看`, enabled: false }] : []),
+    { label: '显示 / 隐藏窗口', click: () => toggleWindow() },
+    { label: '任务与用量看板…', click: () => openDashboardWindow() },
+    { label: '设置…', click: () => openSettingsWindow() },
+    { label: '在浏览器中打开', click: () => shell.openExternal(baseUrl()) },
+    { label: '检查更新…', click: () => { void runUpdateCheck(true); } },
+    { type: 'separator' },
+    { label: '重启后端', click: () => { void restartBackend(); } },
+    { label: '打开日志文件夹', click: () => shell.openPath(log.dirPath()) },
+    { label: '打开配置文件', click: () => shell.openPath(config.filePath()) },
+    { type: 'separator' },
+    { label: '退出鲸坞', click: () => { quitting = true; app.quit(); } }
+  ];
+}
+
+function refreshTrayMenu() {
+  if (!tray || tray.isDestroyed()) return;
+  tray.setContextMenu(Menu.buildFromTemplate(trayMenuTemplate()));
+}
+
 function createTray() {
   try {
     const iconName = isMac ? 'trayTemplate.png' : 'trayColor.png';
@@ -1100,18 +2288,7 @@ function createTray() {
     img.setTemplateImage(isMac);
     tray = new Tray(img);
     tray.setToolTip('鲸坞 WhaleDock');
-    tray.setContextMenu(Menu.buildFromTemplate([
-      { label: '显示 / 隐藏窗口', click: () => toggleWindow() },
-      { label: '设置…', click: () => openSettingsWindow() },
-      { label: '在浏览器中打开', click: () => shell.openExternal(baseUrl()) },
-      { label: '检查更新…', click: () => { void runUpdateCheck(true); } },
-      { type: 'separator' },
-      { label: '重启后端', click: () => restartBackend() },
-      { label: '打开日志文件夹', click: () => shell.openPath(log.dirPath()) },
-      { label: '打开配置文件', click: () => shell.openPath(config.filePath()) },
-      { type: 'separator' },
-      { label: '退出鲸坞', click: () => { quitting = true; app.quit(); } }
-    ]));
+    refreshTrayMenu();
     if (!isMac) tray.on('click', () => toggleWindow());
   } catch (e) {
     log.line('app', 'tray 创建失败: ' + e.message);
@@ -1125,6 +2302,7 @@ function createAppMenu() {
       submenu: [
         { role: 'about', label: '关于鲸坞 WhaleDock' },
         { type: 'separator' },
+        { label: '任务与用量看板…', click: () => openDashboardWindow() },
         { label: '设置…', accelerator: 'Command+,', click: () => openSettingsWindow() },
         { type: 'separator' },
         { role: 'hide', label: '隐藏' },
@@ -1136,6 +2314,7 @@ function createAppMenu() {
     }] : [{
       label: '文件',
       submenu: [
+        { label: '任务与用量看板…', click: () => openDashboardWindow() },
         { label: '设置…', click: () => openSettingsWindow() },
         { type: 'separator' },
         { label: '退出鲸坞', click: () => { quitting = true; app.quit(); } }
@@ -1201,8 +2380,15 @@ function registerHotkey() {
   }
 }
 
-async function restartBackend() {
+async function restartBackend(options = {}) {
+  const externalAttach = backendReady && !spawnedByUs && backendState === null;
+  if (!backendStartAllowed(budgetIsPaused(), options.allowBudgetResume === true) && !externalAttach) {
+    log.line('app', '今日预算暂停中，拒绝重新拉起托管后端');
+    openDashboardWindow();
+    return false;
+  }
   log.line('app', '重启后端…');
+  await stopEventLayer('重启后端', { disconnect: true });
   backendReady = false;
   cancelBackendRecovery('用户手动重启后端');
   cancelForegroundStartup('用户手动重启后端');
@@ -1232,6 +2418,7 @@ async function restartBackend() {
   if (!splash || splash.isDestroyed()) createSplash();
   else splash.show();
   await ensureBackendAndShow();
+  return true;
 }
 
 async function retryBackendFromSplash() {
@@ -1262,30 +2449,52 @@ function onSplashAction(_e, name) {
 }
 
 // ---------- 生命周期 ----------
-app.on('activate', () => showApp()); // 点 Dock 图标
+if (!MAIN_HELPER_TEST) {
+  app.on('activate', () => showApp()); // 点 Dock 图标
 
-app.on('window-all-closed', () => {
-  // 常驻托盘，不因窗口关闭而退出
-});
+  app.on('window-all-closed', () => {
+    // 常驻托盘，不因窗口关闭而退出
+  });
 
-app.on('before-quit', () => {
-  quitting = true;
-  clearUpdateSchedule();
-  cancelBackendRecovery('App 正在退出');
-  cancelForegroundStartup('App 正在退出');
-});
+  app.on('before-quit', () => {
+    quitting = true;
+    clearUpdateSchedule();
+    cancelBackendRecovery('App 正在退出');
+    cancelForegroundStartup('App 正在退出');
+    void beginEventShutdown().catch((error) => {
+      log.line('events', `事件层退出清理失败：${error && error.code || 'unknown'}`);
+    });
+  });
 
-app.on('will-quit', (e) => {
-  globalShortcut.unregisterAll();
-  if (backendState && spawnedByUs && !backendState.exited) {
-    const st = backendState;
-    backendState = null;
-    spawnedByUs = false;
-    void stopManagedBackend(st);
-  }
-  const pending = [...pendingBackendStops];
-  if (pending.length) {
-    e.preventDefault();
-    void Promise.allSettled(pending).then(() => app.quit());
-  }
-});
+  app.on('will-quit', (e) => {
+    globalShortcut.unregisterAll();
+    if (backendState && spawnedByUs && !backendState.exited) {
+      const st = backendState;
+      backendState = null;
+      spawnedByUs = false;
+      void stopManagedBackend(st);
+    }
+    const pending = [
+      ...pendingBackendStops,
+      ...(!eventShutdownComplete && eventShutdownPromise ? [eventShutdownPromise] : [])
+    ];
+    if (pending.length) {
+      e.preventDefault();
+      void Promise.allSettled(pending).then(() => app.quit());
+    }
+  });
+}
+
+if (MAIN_HELPER_TEST) {
+  module.exports = {
+    dashboardSnapshot,
+    reportRequest,
+    reportPayload,
+    trustedLocalEvent,
+    createBoundedEventQueue,
+    createPersistedEventBatcher,
+    ingestLiveEvent,
+    canStopForBudget,
+    backendStartAllowed
+  };
+}

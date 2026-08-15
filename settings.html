@@ -276,6 +276,34 @@
 
   .help-actions { display: flex; gap: 8px; padding: 13px 14px; border-top: 1px solid var(--line); }
 
+  .price-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 10px;
+  }
+  .price-field {
+    min-width: 0;
+    padding: 11px;
+    border: 1px solid rgba(38, 53, 72, .82);
+    border-radius: 8px;
+    background: rgba(12, 20, 32, .72);
+  }
+  .price-field label { display: block; color: var(--muted); font-size: 11px; }
+  .price-field input { width: 100%; margin-top: 7px; }
+  .unit { margin-left: 6px; color: var(--faint); font-size: 11px; white-space: nowrap; }
+  .boundary-note {
+    margin-top: 10px;
+    padding: 11px 12px;
+    border-left: 3px solid var(--warning);
+    border-radius: 4px 8px 8px 4px;
+    background: rgba(106, 76, 24, .16);
+    color: #d8c59d;
+    font-size: 11px;
+    line-height: 1.55;
+  }
+  .boundary-note strong { color: #f7d99c; }
+
   .faq details { border-top: 1px solid var(--line); }
   .faq details:first-child { border-top: 0; }
   .faq summary {
@@ -348,6 +376,10 @@
     main { padding-top: 12px; }
     .footer { min-height: 56px; padding-top: 9px; padding-bottom: 9px; }
   }
+
+  @media (max-width: 620px) {
+    .price-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body data-loading="true">
@@ -370,6 +402,7 @@
   <nav class="tabs" role="tablist" aria-label="设置分类">
     <button id="tab-general" role="tab" aria-selected="true" aria-controls="panel-general" tabindex="0">通用</button>
     <button id="tab-backend" role="tab" aria-selected="false" aria-controls="panel-backend" tabindex="-1">后端</button>
+    <button id="tab-usage" role="tab" aria-selected="false" aria-controls="panel-usage" tabindex="-1">用量与预算</button>
     <button id="tab-help" role="tab" aria-selected="false" aria-controls="panel-help" tabindex="-1">帮助</button>
   </nav>
 
@@ -490,6 +523,76 @@
       </div>
     </section>
 
+    <section id="panel-usage" role="tabpanel" aria-labelledby="tab-usage" hidden>
+      <div class="section">
+        <h2 class="section-title">任务提醒</h2>
+        <div class="card">
+          <div class="row">
+            <div>
+              <div class="row-label">任务完成通知</div>
+              <div class="row-note">任务完成、出错或等待你拍板时提醒；同一任务终态只提醒一次</div>
+            </div>
+            <label class="switch" aria-label="任务完成通知">
+              <input id="taskNotifications" type="checkbox">
+              <span class="track"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">每日预算</h2>
+        <div class="card">
+          <div class="row">
+            <div>
+              <div class="row-label">启用每日 Token 预算</div>
+              <div class="row-note">按本机日期计算；关闭时只统计，不自动停止托管后端</div>
+            </div>
+            <label class="switch" aria-label="启用每日 Token 预算">
+              <input id="budgetEnabled" type="checkbox">
+              <span class="track"></span>
+            </label>
+          </div>
+          <div class="row">
+            <div>
+              <label class="row-label" for="dailyTokenBudget">每日 Token 预算</label>
+              <div class="row-note">1–1,000,000,000；可在关闭预算时先保存额度</div>
+            </div>
+            <div class="field-line">
+              <input id="dailyTokenBudget" class="version" type="number" min="1" max="1000000000" step="1" inputmode="numeric">
+              <span class="unit">tokens</span>
+            </div>
+          </div>
+        </div>
+        <div class="boundary-note"><strong>预算是事后熔断。</strong>鲸坞只能在收到 dsh 用量后停止自己托管的后端；超限时已经产生的消耗无法追回，外部 attach 服务也不会被鲸坞强行停止。</div>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">费用估算</h2>
+        <div class="card">
+          <div class="row stack">
+            <div class="row-label">deepseek-v4-flash 静态单价</div>
+            <div class="row-note">2026-08-15 官网默认价，可修改；单位为人民币 / 百万 tokens，鲸坞运行时不会联网刷新价格。</div>
+            <div class="price-grid">
+              <div class="price-field">
+                <label for="priceInputPerMillion">输入（未命中缓存）</label>
+                <div class="field-line"><input id="priceInputPerMillion" type="number" min="0" max="1000000" step="0.01" inputmode="decimal"><span class="unit">¥ / M</span></div>
+              </div>
+              <div class="price-field">
+                <label for="priceCacheReadPerMillion">输入（缓存命中）</label>
+                <div class="field-line"><input id="priceCacheReadPerMillion" type="number" min="0" max="1000000" step="0.01" inputmode="decimal"><span class="unit">¥ / M</span></div>
+              </div>
+              <div class="price-field">
+                <label for="priceOutputPerMillion">输出</label>
+                <div class="field-line"><input id="priceOutputPerMillion" type="number" min="0" max="1000000" step="0.01" inputmode="decimal"><span class="unit">¥ / M</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="boundary-note"><strong>dsh 已观测用量，非账单。</strong>标题生成等旁路消耗可能无法观测；reasoning 已包含在输出 token 中，不会重复计算。</div>
+      </div>
+    </section>
+
     <section id="panel-help" role="tabpanel" aria-labelledby="tab-help" hidden>
       <div class="section">
         <h2 class="section-title">关于</h2>
@@ -541,9 +644,18 @@
   const api = window.whaleSettings;
   const fieldNames = [
     'openAtLogin', 'startMinimized', 'hotkey', 'checkUpdates',
-    'port', 'workdir', 'dshVersion', 'preferBundled', 'command'
+    'port', 'workdir', 'dshVersion', 'preferBundled', 'command',
+    'taskNotifications', 'budgetEnabled', 'dailyTokenBudget',
+    'priceInputPerMillion', 'priceCacheReadPerMillion', 'priceOutputPerMillion'
   ];
-  const booleanFields = new Set(['openAtLogin', 'startMinimized', 'checkUpdates', 'preferBundled']);
+  const booleanFields = new Set([
+    'openAtLogin', 'startMinimized', 'checkUpdates', 'preferBundled',
+    'taskNotifications', 'budgetEnabled'
+  ]);
+  const numberFields = new Set([
+    'port', 'dailyTokenBudget', 'priceInputPerMillion',
+    'priceCacheReadPerMillion', 'priceOutputPerMillion'
+  ]);
   const backendFields = new Set(['port', 'workdir', 'dshVersion', 'preferBundled', 'command']);
   const els = Object.fromEntries(fieldNames.map((name) => [name, document.getElementById(name)]));
   const saveButton = document.getElementById('save');
@@ -576,13 +688,27 @@
       workdir: (source && source.workdir) || null,
       dshVersion: String((source && source.dshVersion) || ''),
       preferBundled: Boolean(source && source.preferBundled),
-      command: (source && source.command) || null
+      command: (source && source.command) || null,
+      taskNotifications: source && source.taskNotifications !== undefined
+        ? Boolean(source.taskNotifications) : true,
+      budgetEnabled: Boolean(source && source.budgetEnabled),
+      dailyTokenBudget: Number(source && source.dailyTokenBudget !== undefined
+        ? source.dailyTokenBudget : 1000000),
+      priceInputPerMillion: Number(source && source.priceInputPerMillion !== undefined
+        ? source.priceInputPerMillion : 1),
+      priceCacheReadPerMillion: Number(source && source.priceCacheReadPerMillion !== undefined
+        ? source.priceCacheReadPerMillion : 0.02),
+      priceOutputPerMillion: Number(source && source.priceOutputPerMillion !== undefined
+        ? source.priceOutputPerMillion : 2)
     };
   }
 
   function valueOf(name) {
     if (booleanFields.has(name)) return els[name].checked;
-    if (name === 'port') return Number(els[name].value);
+    if (numberFields.has(name)) {
+      const raw = els[name].value.trim();
+      return raw === '' ? NaN : Number(raw);
+    }
     const value = els[name].value.trim();
     if (name === 'workdir' || name === 'command') return value || null;
     return value;

@@ -1,0 +1,10 @@
+[
+  { "reason": "completed", "assistant": true, "result": "completed", "notify": true },
+  { "reason": "completed", "assistant": false, "result": "incomplete", "notify": false },
+  { "reason": "error", "assistant": false, "result": "error", "notify": true },
+  { "reason": "aborted", "assistant": false, "result": "cancelled", "notify": true },
+  { "reason": "blocked", "assistant": false, "result": "blocked", "notify": true },
+  { "reason": "max-tokens", "assistant": false, "result": "max-tokens", "notify": true },
+  { "reason": "interrupted", "assistant": false, "result": "interrupted", "notify": true },
+  { "reason": "future-value", "assistant": true, "result": "unknown", "notify": false }
+]
