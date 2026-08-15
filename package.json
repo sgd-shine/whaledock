@@ -11,6 +11,9 @@
     "start": "electron .",
     "smoke": "node test/smoke.js",
     "bundle:dsh": "node scripts/bundle-dsh.js",
+    "compliance:sources": "node scripts/third-party-inventory.js sources --inventories=compliance --sources=compliance/SOURCES.json --output=compliance/SOURCES.md",
+    "compliance:notices": "node scripts/third-party-inventory.js notices --inventories=compliance --output=THIRD_PARTY_NOTICES.md",
+    "compliance:verify": "node scripts/third-party-inventory.js sources --check --inventories=compliance --sources=compliance/SOURCES.json --output=compliance/SOURCES.md && node scripts/third-party-inventory.js notices --check --inventories=compliance --sources=compliance/SOURCES.json --output=THIRD_PARTY_NOTICES.md",
     "dist": "npm run dist:mac:arm64",
     "dist:mac": "npm run dist:mac:arm64 && npm run dist:mac:x64",
     "predist:mac:arm64": "npm run bundle:dsh -- --platform=darwin --arch=arm64",
@@ -27,6 +30,8 @@
   "build": {
     "appId": "com.sgd.whaledock",
     "productName": "WhaleDock",
+    "beforePack": "scripts/macos-build-visibility.js",
+    "afterAllArtifactBuild": "scripts/macos-build-visibility.js",
     "directories": {
       "output": "release"
     },
@@ -50,6 +55,23 @@
       {
         "from": "vendor/dsh-runtime/node_modules",
         "to": "dsh-runtime/node_modules",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "compliance/THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "from": "compliance/SOURCES.md",
+        "to": "compliance/SOURCES.md"
+      },
+      {
+        "from": "compliance/SOURCES.json",
+        "to": "compliance/SOURCES.json"
+      },
+      {
+        "from": "licenses",
+        "to": "compliance/licenses",
         "filter": ["**/*"]
       }
     ],

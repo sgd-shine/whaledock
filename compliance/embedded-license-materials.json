@@ -1,0 +1,1640 @@
+{
+  "schemaVersion": 1,
+  "auditedAt": "2026-08-15",
+  "scope": "WhaleDock bundled dsh runtime: declared embedded sharp/libvips components for darwin/arm64, darwin/x64, win32/x64 and the shared wasm32 fallback",
+  "evidenceBasis": {
+    "inventories": [
+      {
+        "path": "compliance/inventory-darwin-arm64.json",
+        "sha256": "b6f936d57a8ebe327fd52c67503f8bde386717672c53a4a2994aa0a4cd83f652"
+      },
+      {
+        "path": "compliance/inventory-darwin-x64.json",
+        "sha256": "f998c1092c7e1bf380549b789cbbd88039235399250a29b22f2b61ee5103bf11"
+      },
+      {
+        "path": "compliance/inventory-win32-x64.json",
+        "sha256": "b81deaee3f5668d260c3afb81249f8bb3d915086894cd7033862f5b5e7685e48"
+      }
+    ],
+    "declarations": [
+      {
+        "materialId": "sharp-libvips-third-party-notices",
+        "scope": "Darwin and Windows native component names/licenses"
+      },
+      {
+        "materialId": "wasm-vips-third-party-notices",
+        "scope": "wasm component names/licenses"
+      },
+      {
+        "scope": "Exact published README.md and versions.json bytes",
+        "targets": [
+          "native-darwin-arm64",
+          "native-darwin-x64",
+          "native-win32-x64",
+          "wasm32-all-runtime-targets"
+        ]
+      }
+    ]
+  },
+  "coverage": {
+    "targetCounts": {
+      "native-darwin-arm64": 29,
+      "native-darwin-x64": 29,
+      "native-win32-x64": 29,
+      "wasm32-all-runtime-targets": 20
+    },
+    "componentOccurrences": 107,
+    "uniqueComponentRecords": 41,
+    "materialFilesReferenced": 36,
+    "exactVersionOrCommitRecords": 40,
+    "exactVendoredButIndependentVersionUnknown": [
+      "libnsgif@vendored-libvips-8.18.3"
+    ],
+    "confirmedAttributionDiscrepancies": [
+      "cairo@1.18.4"
+    ],
+    "status": "complete for every component explicitly declared by the pinned package README/versions vectors; libnsgif is pinned as exact vendored bytes without inventing an independent upstream version"
+  },
+  "targets": [
+    {
+      "id": "native-darwin-arm64",
+      "package": "@img/sharp-libvips-darwin-arm64@1.3.2",
+      "packageUrl": "https://registry.npmjs.org/@img/sharp-libvips-darwin-arm64/-/sharp-libvips-darwin-arm64-1.3.2.tgz",
+      "packageSha256": "529c803101fd8b3b9f7b0056c87ba3e3c97b3b9aac8730db34f555b677dd8ca1",
+      "versionsJsonSha256": "71e22ad5154a3891e09291e2f316b3d9b0d0f405459144a94897a203580df055",
+      "readmeSha256": "47083f1ae7e990f74a56f576bcb8434051cb84ed1982fa57932720869e5147fe",
+      "componentIds": [
+        "aom@3.14.1",
+        "libarchive@3.8.8",
+        "cairo@1.18.4",
+        "cgif@0.5.3",
+        "libexif@0.6.26",
+        "expat@2.8.2",
+        "libffi@3.6.0",
+        "fontconfig@2.18.1",
+        "freetype@2.14.3",
+        "fribidi@1.0.16",
+        "glib@2.89.1",
+        "harfbuzz@14.2.1",
+        "libheif@1.23.1",
+        "highway@1.4.0",
+        "libimagequant@2.4.1",
+        "little-cms@2.19.1",
+        "mozjpeg@08265790774cd0714832c9e675522acbe5581437",
+        "pango@1.58.0",
+        "pixman@0.46.4",
+        "libpng@1.6.58",
+        "proxy-libintl@0.5",
+        "librsvg@2.62.90",
+        "libtiff@d01a94be176f5f6a87f7ee1c0b32e65416aa2b4d",
+        "libultrahdr@1acdbed8c712e6923ebf9de4e7c8d8dda06509e9",
+        "libvips@8.18.3",
+        "libnsgif@vendored-libvips-8.18.3",
+        "libwebp@1.6.0",
+        "libxml2@2.15.3",
+        "zlib-ng@2.3.3"
+      ]
+    },
+    {
+      "id": "native-darwin-x64",
+      "package": "@img/sharp-libvips-darwin-x64@1.3.2",
+      "packageUrl": "https://registry.npmjs.org/@img/sharp-libvips-darwin-x64/-/sharp-libvips-darwin-x64-1.3.2.tgz",
+      "packageSha256": "5756aba421c88cdd45af13bf1cbf7ff39a074d4d014cac29bbd11387dc566692",
+      "versionsJsonSha256": "71e22ad5154a3891e09291e2f316b3d9b0d0f405459144a94897a203580df055",
+      "readmeSha256": "bbb84e1fa86b44508e893afe1a84a640cd452c0e671f001256959352bfacb7e5",
+      "componentIds": [
+        "aom@3.14.1",
+        "libarchive@3.8.8",
+        "cairo@1.18.4",
+        "cgif@0.5.3",
+        "libexif@0.6.26",
+        "expat@2.8.2",
+        "libffi@3.6.0",
+        "fontconfig@2.18.1",
+        "freetype@2.14.3",
+        "fribidi@1.0.16",
+        "glib@2.89.1",
+        "harfbuzz@14.2.1",
+        "libheif@1.23.1",
+        "highway@1.4.0",
+        "libimagequant@2.4.1",
+        "little-cms@2.19.1",
+        "mozjpeg@08265790774cd0714832c9e675522acbe5581437",
+        "pango@1.58.0",
+        "pixman@0.46.4",
+        "libpng@1.6.58",
+        "proxy-libintl@0.5",
+        "librsvg@2.62.90",
+        "libtiff@d01a94be176f5f6a87f7ee1c0b32e65416aa2b4d",
+        "libultrahdr@1acdbed8c712e6923ebf9de4e7c8d8dda06509e9",
+        "libvips@8.18.3",
+        "libnsgif@vendored-libvips-8.18.3",
+        "libwebp@1.6.0",
+        "libxml2@2.15.3",
+        "zlib-ng@2.3.3"
+      ]
+    },
+    {
+      "id": "native-win32-x64",
+      "package": "@img/sharp-win32-x64@0.35.3",
+      "packageUrl": "https://registry.npmjs.org/@img/sharp-win32-x64/-/sharp-win32-x64-0.35.3.tgz",
+      "packageSha256": "f0f81118ad4557cceb6c4f90adaf252926e7cd3f6cd3d7040053d4bba088e940",
+      "versionsJsonSha256": "5155cd67e4f2e5df99e26d2919458a21dbb8236eca2ca632d896dd49ba9c42fc",
+      "readmeSha256": "280e7d164420cfc1a1b192a582bf53e3dba97b86a5c3575f878b674ad1d41e13",
+      "componentIds": [
+        "aom@3.14.1",
+        "libarchive@3.8.7",
+        "cairo@1.18.4",
+        "cgif@0.5.3",
+        "libexif@0.6.26",
+        "expat@2.8.1",
+        "libffi@3.5.2",
+        "fontconfig@2.18.1",
+        "freetype@2.14.3",
+        "fribidi@1.0.16",
+        "glib@2.89.0",
+        "harfbuzz@14.2.1",
+        "libheif@1.23.0",
+        "highway@1.4.0",
+        "libimagequant@2.4.1",
+        "little-cms@2.19.1",
+        "mozjpeg@08265790774cd0714832c9e675522acbe5581437",
+        "pango@1.57.1",
+        "pixman@0.46.4",
+        "libpng@1.6.58",
+        "proxy-libintl@0.5",
+        "librsvg@2.62.3",
+        "libtiff@732665c2c8785cec3e1f46ba9908575f0f3a8059",
+        "libultrahdr@13a058f452d846e43d4691f6885eeeaa8b0ea8d0",
+        "libvips@8.18.3",
+        "libnsgif@vendored-libvips-8.18.3",
+        "libwebp@1.6.0",
+        "libxml2@2.15.3",
+        "zlib-ng@2.3.3"
+      ]
+    },
+    {
+      "id": "wasm32-all-runtime-targets",
+      "package": "@img/sharp-wasm32@0.35.3",
+      "packageUrl": "https://registry.npmjs.org/@img/sharp-wasm32/-/sharp-wasm32-0.35.3.tgz",
+      "packageSha256": "fcab5cbbbf24ce63840c273e2da0214147f68e478bfa899b1a06db6d65eb86e0",
+      "versionsJsonSha256": "f676300df66f0d50913281a5b11aa62e30377e2a8d1985f479ce51a69fb649c1",
+      "readmeSha256": "9d7a84ade91e8e50f5dfc303fb53e580e806f6f89bde804e84a01c1b8853fff5",
+      "componentIds": [
+        "aom@3.14.1",
+        "cgif@0.5.3",
+        "libexif@0.6.26",
+        "expat@2.8.2",
+        "libffi@3.6.0",
+        "glib@2.89.1",
+        "libheif@1.23.1",
+        "highway@1.4.0",
+        "libimagequant@2.4.1",
+        "little-cms@2.19.1",
+        "mozjpeg@08265790774cd0714832c9e675522acbe5581437",
+        "libpng@1.6.58",
+        "libtiff@4.7.2rc2",
+        "libultrahdr@1acdbed8c712e6923ebf9de4e7c8d8dda06509e9",
+        "libvips@8.18.3",
+        "libnsgif@vendored-libvips-8.18.3",
+        "libwebp@1.6.0",
+        "zlib-ng@2.3.3",
+        "emscripten@6.0.1",
+        "resvg@0.47.0"
+      ],
+      "excludedConditionalBuildInputs": [
+        {
+          "name": "brotli",
+          "reason": "absent from published versions.json; DISABLE_JXL build path"
+        },
+        {
+          "name": "jxl",
+          "reason": "absent from published versions.json; DISABLE_JXL build path"
+        }
+      ]
+    }
+  ],
+  "components": [
+    {
+      "id": "aom@3.14.1",
+      "displayName": "aom",
+      "versionEvidence": {
+        "versionsJsonValue": "3.14.1"
+      },
+      "licenseExpression": "BSD-2-Clause AND LicenseRef-AOM-Patent-1.0",
+      "sourceRepository": "https://aomedia.googlesource.com/aom",
+      "sourceRef": "v3.14.1",
+      "materialIds": [
+        "aom-license",
+        "aom-patents"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64",
+        "wasm32-all-runtime-targets"
+      ]
+    },
+    {
+      "id": "libarchive@3.8.8",
+      "displayName": "libarchive",
+      "versionEvidence": {
+        "versionsJsonKey": "archive",
+        "versionsJsonValue": "3.8.8"
+      },
+      "licenseExpression": "BSD-2-Clause with file-level exceptions described in COPYING",
+      "sourceRepository": "https://github.com/libarchive/libarchive",
+      "sourceRef": "v3.8.8",
+      "materialIds": [
+        "libarchive-copying"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64"
+      ]
+    },
+    {
+      "id": "libarchive@3.8.7",
+      "displayName": "libarchive",
+      "versionEvidence": {
+        "versionsJsonKey": "archive",
+        "versionsJsonValue": "3.8.7"
+      },
+      "licenseExpression": "BSD-2-Clause with file-level exceptions described in COPYING",
+      "sourceRepository": "https://github.com/libarchive/libarchive",
+      "sourceRef": "v3.8.7",
+      "materialIds": [
+        "libarchive-copying"
+      ],
+      "targets": [
+        "native-win32-x64"
+      ]
+    },
+    {
+      "id": "cairo@1.18.4",
+      "displayName": "cairo",
+      "versionEvidence": {
+        "versionsJsonValue": "1.18.4"
+      },
+      "licenseExpression": "LGPL-2.1-only OR MPL-1.1",
+      "sourceRepository": "https://gitlab.freedesktop.org/cairo/cairo",
+      "sourceRef": "1.18.4",
+      "materialIds": [
+        "cairo-copying",
+        "cairo-lgpl-2.1",
+        "cairo-mpl-1.1"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64"
+      ],
+      "declarationDiscrepancy": {
+        "declaredBySharpLibvips": "MPL-2.0",
+        "officialCairoCopying": "LGPL-2.1-only OR MPL-1.1",
+        "status": "confirmed-upstream-attribution-mismatch",
+        "action": "ship and use Cairo's exact official COPYING terms"
+      }
+    },
+    {
+      "id": "cgif@0.5.3",
+      "displayName": "cgif",
+      "versionEvidence": {
+        "versionsJsonValue": "0.5.3"
+      },
+      "licenseExpression": "MIT",
+      "sourceRepository": "https://github.com/dloebl/cgif",
+      "sourceRef": "v0.5.3",
+      "materialIds": [
+        "cgif-license"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64",
+        "wasm32-all-runtime-targets"
+      ]
+    },
+    {
+      "id": "libexif@0.6.26",
+      "displayName": "libexif",
+      "versionEvidence": {
+        "versionsJsonKey": "exif",
+        "versionsJsonValue": "0.6.26"
+      },
+      "licenseExpression": "LGPL-2.1-or-later",
+      "sourceRepository": "https://github.com/libexif/libexif",
+      "sourceRef": "v0.6.26",
+      "materialIds": [
+        "libexif-copying"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64",
+        "wasm32-all-runtime-targets"
+      ]
+    },
+    {
+      "id": "expat@2.8.2",
+      "displayName": "expat",
+      "versionEvidence": {
+        "versionsJsonValue": "2.8.2"
+      },
+      "licenseExpression": "MIT",
+      "sourceRepository": "https://github.com/libexpat/libexpat",
+      "sourceRef": "R_2_8_2",
+      "materialIds": [
+        "expat-copying"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "wasm32-all-runtime-targets"
+      ]
+    },
+    {
+      "id": "expat@2.8.1",
+      "displayName": "expat",
+      "versionEvidence": {
+        "versionsJsonValue": "2.8.1"
+      },
+      "licenseExpression": "MIT",
+      "sourceRepository": "https://github.com/libexpat/libexpat",
+      "sourceRef": "R_2_8_1",
+      "materialIds": [
+        "expat-copying"
+      ],
+      "targets": [
+        "native-win32-x64"
+      ]
+    },
+    {
+      "id": "libffi@3.6.0",
+      "displayName": "libffi",
+      "versionEvidence": {
+        "versionsJsonKey": "ffi",
+        "versionsJsonValue": "3.6.0"
+      },
+      "licenseExpression": "MIT",
+      "sourceRepository": "https://github.com/libffi/libffi",
+      "sourceRef": "v3.6.0",
+      "materialIds": [
+        "libffi-license"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "wasm32-all-runtime-targets"
+      ]
+    },
+    {
+      "id": "libffi@3.5.2",
+      "displayName": "libffi",
+      "versionEvidence": {
+        "versionsJsonKey": "ffi",
+        "versionsJsonValue": "3.5.2"
+      },
+      "licenseExpression": "MIT",
+      "sourceRepository": "https://github.com/libffi/libffi",
+      "sourceRef": "v3.5.2",
+      "materialIds": [
+        "libffi-license"
+      ],
+      "targets": [
+        "native-win32-x64"
+      ]
+    },
+    {
+      "id": "fontconfig@2.18.1",
+      "displayName": "fontconfig",
+      "versionEvidence": {
+        "versionsJsonValue": "2.18.1"
+      },
+      "licenseExpression": "LicenseRef-fontconfig",
+      "sourceRepository": "https://gitlab.freedesktop.org/fontconfig/fontconfig",
+      "sourceRef": "d87ec67db56518e9e9c36ff38f151dfc9b728b2e",
+      "materialIds": [
+        "fontconfig-copying"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64"
+      ]
+    },
+    {
+      "id": "freetype@2.14.3",
+      "displayName": "freetype",
+      "versionEvidence": {
+        "versionsJsonValue": "2.14.3"
+      },
+      "licenseExpression": "FTL",
+      "sourceRepository": "https://github.com/freetype/freetype",
+      "sourceRef": "VER-2-14-3",
+      "materialIds": [
+        "freetype-ftl"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64"
+      ]
+    },
+    {
+      "id": "fribidi@1.0.16",
+      "displayName": "fribidi",
+      "versionEvidence": {
+        "versionsJsonValue": "1.0.16"
+      },
+      "licenseExpression": "LGPL-2.1-or-later",
+      "sourceRepository": "https://github.com/fribidi/fribidi",
+      "sourceRef": "v1.0.16",
+      "materialIds": [
+        "fribidi-copying"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64"
+      ]
+    },
+    {
+      "id": "glib@2.89.1",
+      "displayName": "glib",
+      "versionEvidence": {
+        "versionsJsonValue": "2.89.1"
+      },
+      "licenseExpression": "LGPL-2.1-or-later",
+      "sourceRepository": "https://gitlab.gnome.org/GNOME/glib",
+      "sourceRef": "2.89.1",
+      "materialIds": [
+        "glib-copying-pointer",
+        "glib-lgpl-2.1-or-later"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "wasm32-all-runtime-targets"
+      ]
+    },
+    {
+      "id": "glib@2.89.0",
+      "displayName": "glib",
+      "versionEvidence": {
+        "versionsJsonValue": "2.89.0"
+      },
+      "licenseExpression": "LGPL-2.1-or-later",
+      "sourceRepository": "https://gitlab.gnome.org/GNOME/glib",
+      "sourceRef": "2.89.0",
+      "materialIds": [
+        "glib-copying-pointer",
+        "glib-lgpl-2.1-or-later"
+      ],
+      "targets": [
+        "native-win32-x64"
+      ]
+    },
+    {
+      "id": "harfbuzz@14.2.1",
+      "displayName": "harfbuzz",
+      "versionEvidence": {
+        "versionsJsonValue": "14.2.1"
+      },
+      "licenseExpression": "MIT",
+      "sourceRepository": "https://github.com/harfbuzz/harfbuzz",
+      "sourceRef": "14.2.1",
+      "materialIds": [
+        "harfbuzz-copying"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64"
+      ]
+    },
+    {
+      "id": "libheif@1.23.1",
+      "displayName": "libheif",
+      "versionEvidence": {
+        "versionsJsonKey": "heif",
+        "versionsJsonValue": "1.23.1"
+      },
+      "licenseExpression": "LGPL-3.0-only for library",
+      "sourceRepository": "https://github.com/strukturag/libheif",
+      "sourceRef": "v1.23.1",
+      "materialIds": [
+        "libheif-copying"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "wasm32-all-runtime-targets"
+      ]
+    },
+    {
+      "id": "libheif@1.23.0",
+      "displayName": "libheif",
+      "versionEvidence": {
+        "versionsJsonKey": "heif",
+        "versionsJsonValue": "1.23.0"
+      },
+      "licenseExpression": "LGPL-3.0-only for library",
+      "sourceRepository": "https://github.com/strukturag/libheif",
+      "sourceRef": "v1.23.0",
+      "materialIds": [
+        "libheif-copying"
+      ],
+      "targets": [
+        "native-win32-x64"
+      ]
+    },
+    {
+      "id": "highway@1.4.0",
+      "displayName": "highway",
+      "versionEvidence": {
+        "versionsJsonValue": "1.4.0"
+      },
+      "licenseExpression": "(Apache-2.0 OR BSD-3-Clause) with CC0-1.0 exception",
+      "sourceRepository": "https://github.com/google/highway",
+      "sourceRef": "1.4.0",
+      "materialIds": [
+        "highway-license"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64",
+        "wasm32-all-runtime-targets"
+      ],
+      "licenseSelectedByContainer": "BSD-3-Clause"
+    },
+    {
+      "id": "libimagequant@2.4.1",
+      "displayName": "libimagequant",
+      "versionEvidence": {
+        "versionsJsonKey": "imagequant",
+        "versionsJsonValue": "2.4.1"
+      },
+      "licenseExpression": "BSD-2-Clause",
+      "sourceRepository": "https://github.com/lovell/libimagequant",
+      "sourceRef": "v2.4.1",
+      "materialIds": [
+        "libimagequant-copyright"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64",
+        "wasm32-all-runtime-targets"
+      ]
+    },
+    {
+      "id": "little-cms@2.19.1",
+      "displayName": "lcms",
+      "versionEvidence": {
+        "versionsJsonKey": "lcms",
+        "versionsJsonValue": "2.19.1"
+      },
+      "licenseExpression": "MIT",
+      "sourceRepository": "https://github.com/mm2/Little-CMS",
+      "sourceRef": "lcms2.19.1",
+      "materialIds": [
+        "little-cms-license"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64",
+        "wasm32-all-runtime-targets"
+      ]
+    },
+    {
+      "id": "mozjpeg@08265790774cd0714832c9e675522acbe5581437",
+      "displayName": "mozjpeg",
+      "versionEvidence": {
+        "versionsJsonValue": "0826579",
+        "resolvedCommit": "08265790774cd0714832c9e675522acbe5581437"
+      },
+      "licenseExpression": "Zlib AND IJG AND BSD-3-Clause",
+      "sourceRepository": "https://github.com/mozilla/mozjpeg",
+      "sourceRef": "08265790774cd0714832c9e675522acbe5581437",
+      "materialIds": [
+        "mozjpeg-license"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64",
+        "wasm32-all-runtime-targets"
+      ]
+    },
+    {
+      "id": "pango@1.58.0",
+      "displayName": "pango",
+      "versionEvidence": {
+        "versionsJsonValue": "1.58.0"
+      },
+      "licenseExpression": "LGPL-2.0-or-later",
+      "sourceRepository": "https://gitlab.gnome.org/GNOME/pango",
+      "sourceRef": "1.58.0",
+      "materialIds": [
+        "pango-proxy-libintl-copying"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64"
+      ]
+    },
+    {
+      "id": "pango@1.57.1",
+      "displayName": "pango",
+      "versionEvidence": {
+        "versionsJsonValue": "1.57.1"
+      },
+      "licenseExpression": "LGPL-2.0-or-later",
+      "sourceRepository": "https://gitlab.gnome.org/GNOME/pango",
+      "sourceRef": "1.57.1",
+      "materialIds": [
+        "pango-proxy-libintl-copying"
+      ],
+      "targets": [
+        "native-win32-x64"
+      ]
+    },
+    {
+      "id": "pixman@0.46.4",
+      "displayName": "pixman",
+      "versionEvidence": {
+        "versionsJsonValue": "0.46.4"
+      },
+      "licenseExpression": "MIT",
+      "sourceRepository": "https://gitlab.freedesktop.org/pixman/pixman",
+      "sourceRef": "pixman-0.46.4",
+      "materialIds": [
+        "pixman-copying"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64"
+      ]
+    },
+    {
+      "id": "libpng@1.6.58",
+      "displayName": "libpng",
+      "versionEvidence": {
+        "versionsJsonKey": "png",
+        "versionsJsonValue": "1.6.58"
+      },
+      "licenseExpression": "Libpng",
+      "sourceRepository": "https://github.com/pnggroup/libpng",
+      "sourceRef": "v1.6.58",
+      "materialIds": [
+        "libpng-license"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64",
+        "wasm32-all-runtime-targets"
+      ]
+    },
+    {
+      "id": "proxy-libintl@0.5",
+      "displayName": "proxy-libintl",
+      "versionEvidence": {
+        "versionsJsonValue": "0.5",
+        "resolvedCommit": "33934de09af6a6627eb44e310a8079df009abdbb"
+      },
+      "licenseExpression": "LGPL-2.0-or-later",
+      "sourceRepository": "https://github.com/frida/proxy-libintl",
+      "sourceRef": "33934de09af6a6627eb44e310a8079df009abdbb",
+      "materialIds": [
+        "pango-proxy-libintl-copying"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64"
+      ]
+    },
+    {
+      "id": "librsvg@2.62.90",
+      "displayName": "librsvg",
+      "versionEvidence": {
+        "versionsJsonKey": "rsvg",
+        "versionsJsonValue": "2.62.90"
+      },
+      "licenseExpression": "LGPL-2.1-or-later",
+      "sourceRepository": "https://gitlab.gnome.org/GNOME/librsvg",
+      "sourceRef": "2.62.90",
+      "materialIds": [
+        "librsvg-libvips-lgpl-2.1"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64"
+      ]
+    },
+    {
+      "id": "librsvg@2.62.3",
+      "displayName": "librsvg",
+      "versionEvidence": {
+        "versionsJsonKey": "rsvg",
+        "versionsJsonValue": "2.62.3"
+      },
+      "licenseExpression": "LGPL-2.1-or-later",
+      "sourceRepository": "https://gitlab.gnome.org/GNOME/librsvg",
+      "sourceRef": "2.62.3",
+      "materialIds": [
+        "librsvg-libvips-lgpl-2.1"
+      ],
+      "targets": [
+        "native-win32-x64"
+      ]
+    },
+    {
+      "id": "libtiff@d01a94be176f5f6a87f7ee1c0b32e65416aa2b4d",
+      "displayName": "libtiff",
+      "versionEvidence": {
+        "versionsJsonValue": "d01a94b",
+        "resolvedCommit": "d01a94be176f5f6a87f7ee1c0b32e65416aa2b4d"
+      },
+      "licenseExpression": "LicenseRef-libtiff",
+      "sourceRepository": "https://gitlab.com/libtiff/libtiff",
+      "sourceRef": "d01a94be176f5f6a87f7ee1c0b32e65416aa2b4d",
+      "materialIds": [
+        "libtiff-license"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64"
+      ]
+    },
+    {
+      "id": "libtiff@732665c2c8785cec3e1f46ba9908575f0f3a8059",
+      "displayName": "libtiff",
+      "versionEvidence": {
+        "versionsJsonValue": "732665c",
+        "resolvedCommit": "732665c2c8785cec3e1f46ba9908575f0f3a8059"
+      },
+      "licenseExpression": "LicenseRef-libtiff",
+      "sourceRepository": "https://gitlab.com/libtiff/libtiff",
+      "sourceRef": "732665c2c8785cec3e1f46ba9908575f0f3a8059",
+      "materialIds": [
+        "libtiff-license"
+      ],
+      "targets": [
+        "native-win32-x64"
+      ]
+    },
+    {
+      "id": "libtiff@4.7.2rc2",
+      "displayName": "libtiff",
+      "versionEvidence": {
+        "versionsJsonValue": "4.7.2rc2"
+      },
+      "licenseExpression": "LicenseRef-libtiff",
+      "sourceRepository": "https://gitlab.com/libtiff/libtiff",
+      "sourceRef": "v4.7.2rc2",
+      "materialIds": [
+        "libtiff-license"
+      ],
+      "targets": [
+        "wasm32-all-runtime-targets"
+      ]
+    },
+    {
+      "id": "libultrahdr@1acdbed8c712e6923ebf9de4e7c8d8dda06509e9",
+      "displayName": "libultrahdr",
+      "versionEvidence": {
+        "versionsJsonKey": "uhdr",
+        "versionsJsonValue": "1acdbed",
+        "resolvedCommit": "1acdbed8c712e6923ebf9de4e7c8d8dda06509e9"
+      },
+      "licenseExpression": "MIT OR Apache-2.0",
+      "sourceRepository": "https://github.com/google/libultrahdr",
+      "sourceRef": "1acdbed8c712e6923ebf9de4e7c8d8dda06509e9",
+      "materialIds": [
+        "libultrahdr-license"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "wasm32-all-runtime-targets"
+      ],
+      "licenseSelectedByContainer": "MIT"
+    },
+    {
+      "id": "libultrahdr@13a058f452d846e43d4691f6885eeeaa8b0ea8d0",
+      "displayName": "libultrahdr",
+      "versionEvidence": {
+        "versionsJsonKey": "uhdr",
+        "versionsJsonValue": "13a058f",
+        "resolvedCommit": "13a058f452d846e43d4691f6885eeeaa8b0ea8d0"
+      },
+      "licenseExpression": "MIT OR Apache-2.0",
+      "sourceRepository": "https://github.com/google/libultrahdr",
+      "sourceRef": "13a058f452d846e43d4691f6885eeeaa8b0ea8d0",
+      "materialIds": [
+        "libultrahdr-license"
+      ],
+      "targets": [
+        "native-win32-x64"
+      ],
+      "licenseSelectedByContainer": "MIT"
+    },
+    {
+      "id": "libvips@8.18.3",
+      "displayName": "libvips",
+      "versionEvidence": {
+        "versionsJsonKey": "vips",
+        "versionsJsonValue": "8.18.3"
+      },
+      "licenseExpression": "LGPL-2.1-or-later",
+      "sourceRepository": "https://github.com/libvips/libvips",
+      "sourceRef": "v8.18.3",
+      "materialIds": [
+        "librsvg-libvips-lgpl-2.1"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64",
+        "wasm32-all-runtime-targets"
+      ]
+    },
+    {
+      "id": "libnsgif@vendored-libvips-8.18.3",
+      "displayName": "libnsgif",
+      "versionEvidence": {
+        "versionsJsonValue": null,
+        "vendoredBy": "libvips@8.18.3",
+        "lastUpdatedByVendor": "2023-01-22",
+        "independentUpstreamVersion": "unknown-not-recorded"
+      },
+      "licenseExpression": "MIT",
+      "sourceRepository": "https://github.com/libvips/libvips",
+      "sourceRef": "v8.18.3",
+      "materialIds": [
+        "libnsgif-vendored-copying"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64",
+        "wasm32-all-runtime-targets"
+      ],
+      "exactness": "Exact vendored source and COPYING bytes are pinned by libvips v8.18.3; no independent upstream commit/version is asserted."
+    },
+    {
+      "id": "libwebp@1.6.0",
+      "displayName": "libwebp",
+      "versionEvidence": {
+        "versionsJsonKey": "webp",
+        "versionsJsonValue": "1.6.0"
+      },
+      "licenseExpression": "BSD-3-Clause",
+      "sourceRepository": "https://github.com/webmproject/libwebp",
+      "sourceRef": "v1.6.0",
+      "materialIds": [
+        "libwebp-copying"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64",
+        "wasm32-all-runtime-targets"
+      ]
+    },
+    {
+      "id": "libxml2@2.15.3",
+      "displayName": "libxml2",
+      "versionEvidence": {
+        "versionsJsonKey": "xml2",
+        "versionsJsonValue": "2.15.3"
+      },
+      "licenseExpression": "MIT",
+      "sourceRepository": "https://gitlab.gnome.org/GNOME/libxml2",
+      "sourceRef": "v2.15.3",
+      "materialIds": [
+        "libxml2-copyright"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64"
+      ]
+    },
+    {
+      "id": "zlib-ng@2.3.3",
+      "displayName": "zlib-ng",
+      "versionEvidence": {
+        "versionsJsonValue": "2.3.3"
+      },
+      "licenseExpression": "Zlib",
+      "sourceRepository": "https://github.com/zlib-ng/zlib-ng",
+      "sourceRef": "2.3.3",
+      "materialIds": [
+        "zlib-ng-license"
+      ],
+      "targets": [
+        "native-darwin-arm64",
+        "native-darwin-x64",
+        "native-win32-x64",
+        "wasm32-all-runtime-targets"
+      ]
+    },
+    {
+      "id": "emscripten@6.0.1",
+      "displayName": "emscripten",
+      "versionEvidence": {
+        "versionsJsonValue": "6.0.1"
+      },
+      "licenseExpression": "MIT OR NCSA",
+      "sourceRepository": "https://github.com/emscripten-core/emscripten",
+      "sourceRef": "6.0.1",
+      "materialIds": [
+        "emscripten-license"
+      ],
+      "targets": [
+        "wasm32-all-runtime-targets"
+      ],
+      "licenseSelectedByContainer": "MIT"
+    },
+    {
+      "id": "resvg@0.47.0",
+      "displayName": "resvg",
+      "versionEvidence": {
+        "versionsJsonValue": "0.47.0"
+      },
+      "licenseExpression": "MIT OR Apache-2.0",
+      "sourceRepository": "https://github.com/linebender/resvg",
+      "sourceRef": "v0.47.0",
+      "materialIds": [
+        "resvg-license-mit",
+        "resvg-license-apache"
+      ],
+      "targets": [
+        "wasm32-all-runtime-targets"
+      ],
+      "licenseSelectedByContainer": "MIT"
+    }
+  ],
+  "materials": [
+    {
+      "id": "aom-license",
+      "repositoryPath": "licenses/embedded/AOM-LICENSE.txt",
+      "repositorySha256": "4764a286d8b2faeaf42f4418e7d7a28d58fc8fd4d00a3d0a7f44b0a4099de7f2",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "aom@3.14.1"
+          ],
+          "upstreamUrl": "https://storage.googleapis.com/aom-releases/libaom-3.14.1.tar.gz",
+          "upstreamByteSha256": "4764a286d8b2faeaf42f4418e7d7a28d58fc8fd4d00a3d0a7f44b0a4099de7f2",
+          "sourceRef": "v3.14.1",
+          "archiveMember": "libaom-3.14.1/LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "aom-patents",
+      "repositoryPath": "licenses/embedded/AOM-PATENTS.txt",
+      "repositorySha256": "661fb8e504744e95587b556b94a58343448300606a41bea8c7a9b97125696e61",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "aom@3.14.1"
+          ],
+          "upstreamUrl": "https://storage.googleapis.com/aom-releases/libaom-3.14.1.tar.gz",
+          "upstreamByteSha256": "661fb8e504744e95587b556b94a58343448300606a41bea8c7a9b97125696e61",
+          "sourceRef": "v3.14.1",
+          "archiveMember": "libaom-3.14.1/PATENTS"
+        }
+      ]
+    },
+    {
+      "id": "libarchive-copying",
+      "repositoryPath": "licenses/embedded-components/libarchive-COPYING.txt",
+      "repositorySha256": "30e556b3959e3985d66efefec5eaac51d4995053caa1d3cffe6eb916f146f229",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "libarchive@3.8.8"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/libarchive/libarchive/v3.8.8/COPYING",
+          "upstreamByteSha256": "30e556b3959e3985d66efefec5eaac51d4995053caa1d3cffe6eb916f146f229",
+          "sourceRef": "v3.8.8"
+        },
+        {
+          "componentIds": [
+            "libarchive@3.8.7"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/libarchive/libarchive/v3.8.7/COPYING",
+          "upstreamByteSha256": "30e556b3959e3985d66efefec5eaac51d4995053caa1d3cffe6eb916f146f229",
+          "sourceRef": "v3.8.7"
+        }
+      ]
+    },
+    {
+      "id": "cairo-copying",
+      "repositoryPath": "licenses/embedded-components/cairo-COPYING.txt",
+      "repositorySha256": "67228a9f7c5f9b67c58f556f1be178f62da4d9e2e6285318d8c74d567255abdf",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "cairo@1.18.4"
+          ],
+          "upstreamUrl": "https://gitlab.freedesktop.org/cairo/cairo/-/raw/1.18.4/COPYING",
+          "upstreamByteSha256": "67228a9f7c5f9b67c58f556f1be178f62da4d9e2e6285318d8c74d567255abdf",
+          "sourceRef": "1.18.4"
+        }
+      ]
+    },
+    {
+      "id": "cairo-lgpl-2.1",
+      "repositoryPath": "licenses/embedded-components/cairo-COPYING-LGPL-2.1.txt",
+      "repositorySha256": "9e9e8608c4cdda51a78cc3a385f4ec9a2e4c96d5ecad74ac8bca5fca3e563b7d",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "cairo@1.18.4"
+          ],
+          "upstreamUrl": "https://gitlab.freedesktop.org/cairo/cairo/-/raw/1.18.4/COPYING-LGPL-2.1",
+          "upstreamByteSha256": "9e9e8608c4cdda51a78cc3a385f4ec9a2e4c96d5ecad74ac8bca5fca3e563b7d",
+          "sourceRef": "1.18.4"
+        }
+      ]
+    },
+    {
+      "id": "cairo-mpl-1.1",
+      "repositoryPath": "licenses/embedded-components/cairo-COPYING-MPL-1.1.txt",
+      "repositorySha256": "53692a2ed6c6a2c6ec9b32dd0b820dfae91e0a1fcdf625ca9ed0bdf8705fcc4f",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "cairo@1.18.4"
+          ],
+          "upstreamUrl": "https://gitlab.freedesktop.org/cairo/cairo/-/raw/1.18.4/COPYING-MPL-1.1",
+          "upstreamByteSha256": "53692a2ed6c6a2c6ec9b32dd0b820dfae91e0a1fcdf625ca9ed0bdf8705fcc4f",
+          "sourceRef": "1.18.4"
+        }
+      ]
+    },
+    {
+      "id": "cgif-license",
+      "repositoryPath": "licenses/embedded-components/cgif-LICENSE.txt",
+      "repositorySha256": "7264dede477abab4ac3fe8236beb8153845c04ccd33b18f281085087e219fc6d",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "cgif@0.5.3"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/dloebl/cgif/v0.5.3/LICENSE",
+          "upstreamByteSha256": "7264dede477abab4ac3fe8236beb8153845c04ccd33b18f281085087e219fc6d",
+          "sourceRef": "v0.5.3"
+        }
+      ]
+    },
+    {
+      "id": "libexif-copying",
+      "repositoryPath": "licenses/embedded-components/libexif-COPYING.txt",
+      "repositorySha256": "36b6d3fa47916943fd5fec313c584784946047ec1337a78b440e5992cb595f89",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "libexif@0.6.26"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/libexif/libexif/v0.6.26/COPYING",
+          "upstreamByteSha256": "36b6d3fa47916943fd5fec313c584784946047ec1337a78b440e5992cb595f89",
+          "sourceRef": "v0.6.26"
+        }
+      ]
+    },
+    {
+      "id": "expat-copying",
+      "repositoryPath": "licenses/embedded-components/expat-COPYING.txt",
+      "repositorySha256": "73cc92f80889ab23c7287b1a11dd50fdec190c3f26ebe5938c579043817d651e",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "expat@2.8.2"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/libexpat/libexpat/R_2_8_2/COPYING",
+          "upstreamByteSha256": "73cc92f80889ab23c7287b1a11dd50fdec190c3f26ebe5938c579043817d651e",
+          "sourceRef": "R_2_8_2"
+        },
+        {
+          "componentIds": [
+            "expat@2.8.1"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/libexpat/libexpat/R_2_8_1/COPYING",
+          "upstreamByteSha256": "73cc92f80889ab23c7287b1a11dd50fdec190c3f26ebe5938c579043817d651e",
+          "sourceRef": "R_2_8_1"
+        }
+      ]
+    },
+    {
+      "id": "libffi-license",
+      "repositoryPath": "licenses/embedded-components/libffi-LICENSE.txt",
+      "repositorySha256": "d5699fa516968e3a1550e6c902b7441c78856f2603d61bedd0b0662a26655366",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "libffi@3.6.0"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/libffi/libffi/v3.6.0/LICENSE",
+          "upstreamByteSha256": "d5699fa516968e3a1550e6c902b7441c78856f2603d61bedd0b0662a26655366",
+          "sourceRef": "v3.6.0"
+        },
+        {
+          "componentIds": [
+            "libffi@3.5.2"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/libffi/libffi/v3.5.2/LICENSE",
+          "upstreamByteSha256": "d5699fa516968e3a1550e6c902b7441c78856f2603d61bedd0b0662a26655366",
+          "sourceRef": "v3.5.2"
+        }
+      ]
+    },
+    {
+      "id": "fontconfig-copying",
+      "repositoryPath": "licenses/embedded/fontconfig-COPYING.txt",
+      "repositorySha256": "51a51aa9823704fd90bccc616cdd17ebabb5b2b3e9cbde886ca02c7002288067",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "fontconfig@2.18.1"
+          ],
+          "upstreamUrl": "https://gitlab.freedesktop.org/fontconfig/fontconfig/-/raw/d87ec67db56518e9e9c36ff38f151dfc9b728b2e/COPYING",
+          "upstreamByteSha256": "51a51aa9823704fd90bccc616cdd17ebabb5b2b3e9cbde886ca02c7002288067",
+          "sourceRef": "d87ec67db56518e9e9c36ff38f151dfc9b728b2e"
+        }
+      ]
+    },
+    {
+      "id": "freetype-ftl",
+      "repositoryPath": "licenses/embedded-components/freetype-FTL.txt",
+      "repositorySha256": "5a5ee54c5001bbad1cdc1a57cc3dd4c42199b2da09d39c7ee41fab002d02967f",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "freetype@2.14.3"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/freetype/freetype/VER-2-14-3/docs/FTL.TXT",
+          "upstreamByteSha256": "5a5ee54c5001bbad1cdc1a57cc3dd4c42199b2da09d39c7ee41fab002d02967f",
+          "sourceRef": "VER-2-14-3"
+        }
+      ]
+    },
+    {
+      "id": "fribidi-copying",
+      "repositoryPath": "licenses/embedded-components/fribidi-COPYING.txt",
+      "repositorySha256": "32434afcc8666ba060e111d715bfdb6c2d5dd8a35fa4d3ab8ad67d8f850d2f2b",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "fribidi@1.0.16"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/fribidi/fribidi/v1.0.16/COPYING",
+          "upstreamByteSha256": "32434afcc8666ba060e111d715bfdb6c2d5dd8a35fa4d3ab8ad67d8f850d2f2b",
+          "sourceRef": "v1.0.16"
+        }
+      ]
+    },
+    {
+      "id": "glib-copying-pointer",
+      "repositoryPath": "licenses/embedded-components/glib-COPYING.pointer.txt",
+      "repositorySha256": "878aa58313266f0400b7c26560b472e5a5f334a8a574a4e0b6e0c33002a2f7ac",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "glib@2.89.1"
+          ],
+          "upstreamUrl": "https://gitlab.gnome.org/GNOME/glib/-/raw/2.89.1/COPYING",
+          "upstreamByteSha256": "65986a89240f59896ce42a3779bbe5ed486a0bca7df636a8eef030fd2e1a0984",
+          "sourceRef": "2.89.1"
+        },
+        {
+          "componentIds": [
+            "glib@2.89.0"
+          ],
+          "upstreamUrl": "https://gitlab.gnome.org/GNOME/glib/-/raw/2.89.0/COPYING",
+          "upstreamByteSha256": "65986a89240f59896ce42a3779bbe5ed486a0bca7df636a8eef030fd2e1a0984",
+          "sourceRef": "2.89.0"
+        }
+      ],
+      "note": "上游 30 字节指针文件没有末尾换行；apply_patch 写入仓库时补了一个 LF，所以两个 SHA 按要求分别记录。"
+    },
+    {
+      "id": "glib-lgpl-2.1-or-later",
+      "repositoryPath": "licenses/embedded-components/glib-LGPL-2.1-or-later.txt",
+      "repositorySha256": "fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "glib@2.89.1"
+          ],
+          "upstreamUrl": "https://gitlab.gnome.org/GNOME/glib/-/raw/2.89.1/LICENSES/LGPL-2.1-or-later.txt",
+          "upstreamByteSha256": "fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb",
+          "sourceRef": "2.89.1"
+        },
+        {
+          "componentIds": [
+            "glib@2.89.0"
+          ],
+          "upstreamUrl": "https://gitlab.gnome.org/GNOME/glib/-/raw/2.89.0/LICENSES/LGPL-2.1-or-later.txt",
+          "upstreamByteSha256": "fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb",
+          "sourceRef": "2.89.0"
+        }
+      ]
+    },
+    {
+      "id": "harfbuzz-copying",
+      "repositoryPath": "licenses/embedded-components/harfbuzz-COPYING.txt",
+      "repositorySha256": "ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "harfbuzz@14.2.1"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/harfbuzz/harfbuzz/14.2.1/COPYING",
+          "upstreamByteSha256": "ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64",
+          "sourceRef": "14.2.1"
+        }
+      ]
+    },
+    {
+      "id": "libheif-copying",
+      "repositoryPath": "licenses/embedded-components/libheif-COPYING.txt",
+      "repositorySha256": "fa81ce652315b013359d6e8e4744335f31a50c7c192907176d3632f78a3b4596",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "libheif@1.23.1"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/strukturag/libheif/v1.23.1/COPYING",
+          "upstreamByteSha256": "fa81ce652315b013359d6e8e4744335f31a50c7c192907176d3632f78a3b4596",
+          "sourceRef": "v1.23.1"
+        },
+        {
+          "componentIds": [
+            "libheif@1.23.0"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/strukturag/libheif/v1.23.0/COPYING",
+          "upstreamByteSha256": "fa81ce652315b013359d6e8e4744335f31a50c7c192907176d3632f78a3b4596",
+          "sourceRef": "v1.23.0"
+        }
+      ]
+    },
+    {
+      "id": "highway-license",
+      "repositoryPath": "licenses/embedded-components/highway-LICENSE.txt",
+      "repositorySha256": "b8b1fae5894cfbe213b47f1378bb2269cf82de18b34447e871c0225ace0d3ad7",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "highway@1.4.0"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/google/highway/1.4.0/LICENSE",
+          "upstreamByteSha256": "e340270d4f64384569a91d546acb5b094d69ce47f0c015db77abb74dc6f815af",
+          "sourceRef": "1.4.0"
+        }
+      ],
+      "note": "上游 LICENSE 没有末尾换行；apply_patch 写入仓库时补了一个 LF，所以两个 SHA 按要求分别记录。"
+    },
+    {
+      "id": "libimagequant-copyright",
+      "repositoryPath": "licenses/embedded-components/libimagequant-COPYRIGHT.txt",
+      "repositorySha256": "7391bfbcde4404cefb9849553362c3ab436f929f5cc1abb57071ec045590ee99",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "libimagequant@2.4.1"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/lovell/libimagequant/v2.4.1/COPYRIGHT",
+          "upstreamByteSha256": "7391bfbcde4404cefb9849553362c3ab436f929f5cc1abb57071ec045590ee99",
+          "sourceRef": "v2.4.1"
+        }
+      ]
+    },
+    {
+      "id": "little-cms-license",
+      "repositoryPath": "licenses/embedded-components/little-cms-LICENSE.txt",
+      "repositorySha256": "6dbd60437f8ef91d8de1f08ad75882547fd4931bfcc3566a0735f28db1484d31",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "little-cms@2.19.1"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/mm2/Little-CMS/lcms2.19.1/LICENSE",
+          "upstreamByteSha256": "6dbd60437f8ef91d8de1f08ad75882547fd4931bfcc3566a0735f28db1484d31",
+          "sourceRef": "lcms2.19.1"
+        }
+      ]
+    },
+    {
+      "id": "mozjpeg-license",
+      "repositoryPath": "licenses/embedded-components/mozjpeg-LICENSE.md",
+      "repositorySha256": "96f5b328adbb78eeaaec6980d73fd558cb1e4d62560ed615646bc3cf5e532430",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "mozjpeg@08265790774cd0714832c9e675522acbe5581437"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/mozilla/mozjpeg/08265790774cd0714832c9e675522acbe5581437/LICENSE.md",
+          "upstreamByteSha256": "96f5b328adbb78eeaaec6980d73fd558cb1e4d62560ed615646bc3cf5e532430",
+          "sourceRef": "08265790774cd0714832c9e675522acbe5581437"
+        }
+      ]
+    },
+    {
+      "id": "pango-proxy-libintl-copying",
+      "repositoryPath": "licenses/embedded-components/pango-proxy-libintl-COPYING.txt",
+      "repositorySha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "pango@1.58.0"
+          ],
+          "upstreamUrl": "https://gitlab.gnome.org/GNOME/pango/-/raw/1.58.0/COPYING",
+          "upstreamByteSha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
+          "sourceRef": "1.58.0"
+        },
+        {
+          "componentIds": [
+            "pango@1.57.1"
+          ],
+          "upstreamUrl": "https://gitlab.gnome.org/GNOME/pango/-/raw/1.57.1/COPYING",
+          "upstreamByteSha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
+          "sourceRef": "1.57.1"
+        },
+        {
+          "componentIds": [
+            "proxy-libintl@0.5"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/frida/proxy-libintl/33934de09af6a6627eb44e310a8079df009abdbb/COPYING",
+          "upstreamByteSha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
+          "sourceRef": "33934de09af6a6627eb44e310a8079df009abdbb"
+        }
+      ]
+    },
+    {
+      "id": "pixman-copying",
+      "repositoryPath": "licenses/embedded-components/pixman-COPYING.txt",
+      "repositorySha256": "fac9270f0987b96ff4533fca3548c633e02083cbba4a0172a3b149b2e4019793",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "pixman@0.46.4"
+          ],
+          "upstreamUrl": "https://gitlab.freedesktop.org/pixman/pixman/-/raw/pixman-0.46.4/COPYING",
+          "upstreamByteSha256": "fac9270f0987b96ff4533fca3548c633e02083cbba4a0172a3b149b2e4019793",
+          "sourceRef": "pixman-0.46.4"
+        }
+      ]
+    },
+    {
+      "id": "libpng-license",
+      "repositoryPath": "licenses/embedded-components/libpng-LICENSE.txt",
+      "repositorySha256": "bdb0a645ea18c60507d0368379b1ac5474b92255fcc2d115e07486a7672ba526",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "libpng@1.6.58"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/pnggroup/libpng/v1.6.58/LICENSE",
+          "upstreamByteSha256": "bdb0a645ea18c60507d0368379b1ac5474b92255fcc2d115e07486a7672ba526",
+          "sourceRef": "v1.6.58"
+        }
+      ]
+    },
+    {
+      "id": "librsvg-libvips-lgpl-2.1",
+      "repositoryPath": "licenses/embedded-components/librsvg-libvips-LGPL-2.1.txt",
+      "repositorySha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "librsvg@2.62.90"
+          ],
+          "upstreamUrl": "https://gitlab.gnome.org/GNOME/librsvg/-/raw/2.62.90/COPYING.LIB",
+          "upstreamByteSha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+          "sourceRef": "2.62.90"
+        },
+        {
+          "componentIds": [
+            "librsvg@2.62.3"
+          ],
+          "upstreamUrl": "https://gitlab.gnome.org/GNOME/librsvg/-/raw/2.62.3/COPYING.LIB",
+          "upstreamByteSha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+          "sourceRef": "2.62.3"
+        },
+        {
+          "componentIds": [
+            "libvips@8.18.3"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/libvips/libvips/v8.18.3/LICENSE",
+          "upstreamByteSha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+          "sourceRef": "v8.18.3"
+        }
+      ]
+    },
+    {
+      "id": "libtiff-license",
+      "repositoryPath": "licenses/embedded-components/libtiff-LICENSE.md",
+      "repositorySha256": "0e27c2382d7b8147972bbb746e04059a1152c8d0fda9d03ef1399d1a433c4ade",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "libtiff@d01a94be176f5f6a87f7ee1c0b32e65416aa2b4d"
+          ],
+          "upstreamUrl": "https://gitlab.com/libtiff/libtiff/-/raw/d01a94be176f5f6a87f7ee1c0b32e65416aa2b4d/LICENSE.md",
+          "upstreamByteSha256": "0e27c2382d7b8147972bbb746e04059a1152c8d0fda9d03ef1399d1a433c4ade",
+          "sourceRef": "d01a94be176f5f6a87f7ee1c0b32e65416aa2b4d"
+        },
+        {
+          "componentIds": [
+            "libtiff@732665c2c8785cec3e1f46ba9908575f0f3a8059"
+          ],
+          "upstreamUrl": "https://gitlab.com/libtiff/libtiff/-/raw/732665c2c8785cec3e1f46ba9908575f0f3a8059/LICENSE.md",
+          "upstreamByteSha256": "0e27c2382d7b8147972bbb746e04059a1152c8d0fda9d03ef1399d1a433c4ade",
+          "sourceRef": "732665c2c8785cec3e1f46ba9908575f0f3a8059"
+        },
+        {
+          "componentIds": [
+            "libtiff@4.7.2rc2"
+          ],
+          "upstreamUrl": "https://gitlab.com/libtiff/libtiff/-/raw/v4.7.2rc2/LICENSE.md",
+          "upstreamByteSha256": "0e27c2382d7b8147972bbb746e04059a1152c8d0fda9d03ef1399d1a433c4ade",
+          "sourceRef": "v4.7.2rc2"
+        }
+      ]
+    },
+    {
+      "id": "libultrahdr-license",
+      "repositoryPath": "licenses/embedded-components/libultrahdr-LICENSE.txt",
+      "repositorySha256": "c9247b5cb07866938643cc238292434e6f2af8642e1fce10771c0e4cc7909316",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "libultrahdr@1acdbed8c712e6923ebf9de4e7c8d8dda06509e9"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/google/libultrahdr/1acdbed8c712e6923ebf9de4e7c8d8dda06509e9/LICENSE",
+          "upstreamByteSha256": "c9247b5cb07866938643cc238292434e6f2af8642e1fce10771c0e4cc7909316",
+          "sourceRef": "1acdbed8c712e6923ebf9de4e7c8d8dda06509e9"
+        },
+        {
+          "componentIds": [
+            "libultrahdr@13a058f452d846e43d4691f6885eeeaa8b0ea8d0"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/google/libultrahdr/13a058f452d846e43d4691f6885eeeaa8b0ea8d0/LICENSE",
+          "upstreamByteSha256": "c9247b5cb07866938643cc238292434e6f2af8642e1fce10771c0e4cc7909316",
+          "sourceRef": "13a058f452d846e43d4691f6885eeeaa8b0ea8d0"
+        }
+      ]
+    },
+    {
+      "id": "libnsgif-vendored-copying",
+      "repositoryPath": "licenses/embedded-components/libnsgif-vendored-COPYING.txt",
+      "repositorySha256": "1469b759cf18e43c6e1b4ff892307d3962cbbb337ac497620d6690a219fad10c",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "libnsgif@vendored-libvips-8.18.3"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/libvips/libvips/v8.18.3/libvips/foreign/libnsgif/COPYING",
+          "upstreamByteSha256": "1469b759cf18e43c6e1b4ff892307d3962cbbb337ac497620d6690a219fad10c",
+          "sourceRef": "v8.18.3"
+        }
+      ],
+      "note": "libvips 8.18.3 固定了 vendored 源码与许可字节；其 README 仅记录 2023-01-22 更新日期，没有独立 libnsgif commit/version。"
+    },
+    {
+      "id": "libwebp-copying",
+      "repositoryPath": "licenses/embedded-components/libwebp-COPYING.txt",
+      "repositorySha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "libwebp@1.6.0"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/webmproject/libwebp/v1.6.0/COPYING",
+          "upstreamByteSha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf",
+          "sourceRef": "v1.6.0"
+        }
+      ]
+    },
+    {
+      "id": "libxml2-copyright",
+      "repositoryPath": "licenses/embedded-components/libxml2-Copyright.txt",
+      "repositorySha256": "5d4873884a890122a4b9b20ad56ac6f7da1d796a5bfcf04a427970ac96217626",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "libxml2@2.15.3"
+          ],
+          "upstreamUrl": "https://gitlab.gnome.org/GNOME/libxml2/-/raw/v2.15.3/Copyright",
+          "upstreamByteSha256": "5d4873884a890122a4b9b20ad56ac6f7da1d796a5bfcf04a427970ac96217626",
+          "sourceRef": "v2.15.3"
+        }
+      ]
+    },
+    {
+      "id": "zlib-ng-license",
+      "repositoryPath": "licenses/embedded-components/zlib-ng-LICENSE.md",
+      "repositorySha256": "6c9f0d975b41afaa34d22f55bb8986ce69e5cb7ad327cb2b28820cd425edf5ee",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "zlib-ng@2.3.3"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/zlib-ng/zlib-ng/2.3.3/LICENSE.md",
+          "upstreamByteSha256": "6c9f0d975b41afaa34d22f55bb8986ce69e5cb7ad327cb2b28820cd425edf5ee",
+          "sourceRef": "2.3.3"
+        }
+      ]
+    },
+    {
+      "id": "emscripten-license",
+      "repositoryPath": "licenses/embedded-components/emscripten-LICENSE.txt",
+      "repositorySha256": "620a78084fc7ca97c0b5dea9abf891f3ffcadfdbf305276f099c9c4e12fc1d86",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "emscripten@6.0.1"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/emscripten-core/emscripten/6.0.1/LICENSE",
+          "upstreamByteSha256": "620a78084fc7ca97c0b5dea9abf891f3ffcadfdbf305276f099c9c4e12fc1d86",
+          "sourceRef": "6.0.1"
+        }
+      ]
+    },
+    {
+      "id": "resvg-license-mit",
+      "repositoryPath": "licenses/embedded-components/resvg-LICENSE-MIT.txt",
+      "repositorySha256": "f5d934dc281b44e0003ee461ac740b18b6629a454decd872c774d34e4ee0b21d",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "resvg@0.47.0"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/linebender/resvg/v0.47.0/LICENSE-MIT",
+          "upstreamByteSha256": "f5d934dc281b44e0003ee461ac740b18b6629a454decd872c774d34e4ee0b21d",
+          "sourceRef": "v0.47.0"
+        }
+      ]
+    },
+    {
+      "id": "resvg-license-apache",
+      "repositoryPath": "licenses/embedded-components/resvg-LICENSE-APACHE.txt",
+      "repositorySha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+      "upstreamCopies": [
+        {
+          "componentIds": [
+            "resvg@0.47.0"
+          ],
+          "upstreamUrl": "https://raw.githubusercontent.com/linebender/resvg/v0.47.0/LICENSE-APACHE",
+          "upstreamByteSha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+          "sourceRef": "v0.47.0"
+        }
+      ]
+    },
+    {
+      "id": "sharp-libvips-third-party-notices",
+      "repositoryPath": "licenses/embedded-components/sharp-libvips-v1.3.2-THIRD-PARTY-NOTICES.md",
+      "repositorySha256": "25ffcfa69e28b1913ced27ec778b90f24911a1bb3021253577e8b0af55db0d49",
+      "upstreamCopies": [
+        {
+          "componentIds": [],
+          "upstreamUrl": "https://raw.githubusercontent.com/lovell/sharp-libvips/4da6d14c0d59866adfb9d8cf52bcaa53846dc4f6/THIRD-PARTY-NOTICES.md",
+          "upstreamByteSha256": "25ffcfa69e28b1913ced27ec778b90f24911a1bb3021253577e8b0af55db0d49",
+          "sourceRef": "4da6d14c0d59866adfb9d8cf52bcaa53846dc4f6"
+        }
+      ]
+    },
+    {
+      "id": "wasm-vips-third-party-notices",
+      "repositoryPath": "licenses/embedded-components/wasm-vips-9ff73c-THIRD-PARTY-NOTICES.md",
+      "repositorySha256": "0f52de00dd217125646ae85177def3e144de48d11f76368f257ba6468d3f7d8d",
+      "upstreamCopies": [
+        {
+          "componentIds": [],
+          "upstreamUrl": "https://raw.githubusercontent.com/kleisauke/wasm-vips/9ff73c569c91ded6f8d8c7570967d0dadcf0134d/THIRD-PARTY-NOTICES.md",
+          "upstreamByteSha256": "0f52de00dd217125646ae85177def3e144de48d11f76368f257ba6468d3f7d8d",
+          "sourceRef": "9ff73c569c91ded6f8d8c7570967d0dadcf0134d"
+        }
+      ]
+    }
+  ],
+  "verificationRules": [
+    "Every target componentIds item must resolve to exactly one components record.",
+    "Every components.materialIds item must resolve to exactly one materials record.",
+    "Every material repositoryPath must exist and match repositorySha256.",
+    "Every upstream copy must match upstreamByteSha256; repository and upstream hashes may differ only where note explains the exact byte transformation.",
+    "Do not replace the confirmed Cairo official license expression with the inaccurate MPL-2.0 label from sharp-libvips."
+  ]
+}

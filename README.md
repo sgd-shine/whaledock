@@ -32,6 +32,8 @@
 
 安装版已经带有内置引擎，**普通用户不需要另装 Node.js，也不需要打开终端**。首次进入 Harness 后，仍需按[官方说明](https://github.com/deepseek-ai/deepseek-harness)配置所需的模型/API Key。
 
+安装包包含第三方组件；逐包清单、源码地址与完整许可证见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+
 ### macOS 首次打开
 
 当前安装包没有 Apple 签名与公证。首次打开若被 Gatekeeper 拦截，请在「应用程序」中**右键 WhaleDock → 打开 → 打开**；之后可正常双击。
@@ -117,7 +119,13 @@ npm run dist:mac:x64     # Intel Mac dmg + zip
 npm run dist:win         # Windows x64 Setup + portable（建议在 Windows runner）
 ```
 
-每个 dist 命令会先生成与目标平台/架构匹配的内置 dsh 运行环境，产物写入 `release/`。不要把一个平台生成的 `vendor/dsh-runtime/` 直接拿去打另一个平台的包。
+每个 dist 命令会先生成与目标平台/架构匹配的内置 dsh 运行环境，产物写入 `release/`。macOS 构建会先把该目录标记为不索引，再把 electron-builder 的裸 `WhaleDock.app` staging bundle 移入 `release/.app-archives.noindex/` 并改为 `.app-bundle` 后缀；每个架构只保留一个滚动裸包归档，历史版本继续由版本化 dmg/zip 保存。系统应用界面只应看到 `/Applications/WhaleDock.app`。不要把一个平台生成的 `vendor/dsh-runtime/` 直接拿去打另一个平台的包。
+
+若要核对构建目录没有残留可索引的鲸坞裸包，可运行：
+
+```bash
+node scripts/macos-build-visibility.js --out-dir=release --check
+```
 
 `npm run smoke` 是不依赖图形界面的纯 Node 测试集；GitHub Actions 会在 Ubuntu、Windows 与 macOS 上运行同一套测试。
 

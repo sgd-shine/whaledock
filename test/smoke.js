@@ -11,6 +11,7 @@ const backend = require('../lib/backend');
 const config = require('../lib/config');
 const log = require('../lib/log');
 const update = require('../lib/update');
+const macosBuildVisibility = require('../scripts/macos-build-visibility');
 
 const PORT = 3123;
 let failed = 0;
@@ -215,6 +216,64 @@ async function main() {
     overwriteRaceRejected
       && fs.readFileSync(racedDownload, 'utf8') === 'victim'
       && !fs.readdirSync(tmp).some((name) => name.startsWith('raced-update.bin.part-')));
+
+  // macOS 构建裸包不能留在 Spotlight 可发现的 .app 路径；DMG/ZIP 与无关 App 必须保留。
+  const macRelease = path.join(tmp, 'mac-release');
+  const armBundle = path.join(macRelease, 'mac-arm64', 'WhaleDock.app');
+  const x64Bundle = path.join(macRelease, 'mac', 'WhaleDock.app');
+  const unrelatedBundle = path.join(macRelease, 'mac', 'Other.app');
+  const outsideBundle = path.join(tmp, 'outside', 'WhaleDock.app');
+  const linkedBundle = path.join(macRelease, 'mac-x64', 'WhaleDock.app');
+  for (const bundle of [armBundle, x64Bundle, unrelatedBundle, outsideBundle]) {
+    fs.mkdirSync(path.join(bundle, 'Contents'), { recursive: true });
+  }
+  fs.mkdirSync(path.dirname(linkedBundle), { recursive: true });
+  const linkedBundleIsSymlink = process.platform !== 'win32';
+  if (linkedBundleIsSymlink) fs.symlinkSync(outsideBundle, linkedBundle);
+  else fs.writeFileSync(linkedBundle, 'Windows runner 无需创建特权目录符号链接');
+  const dmgFixture = path.join(macRelease, 'WhaleDock-0.2.0-arm64.dmg');
+  const zipFixture = path.join(macRelease, 'WhaleDock-0.2.0-arm64-mac.zip');
+  fs.writeFileSync(dmgFixture, 'dmg');
+  fs.writeFileSync(zipFixture, 'zip');
+
+  macosBuildVisibility.prepareOutput(macRelease);
+  const stagingPlan = macosBuildVisibility.findStagingApps(macRelease);
+  const macBuildResult = { platformToTargets: new Map([[{ name: 'mac', nodeName: 'darwin' }, new Map()]]) };
+  const windowsBuildResult = { platformToTargets: new Map([[{ name: 'windows', nodeName: 'win32' }, new Map()]]) };
+  check('packaging: 只规划受控 release/mac* 下的 WhaleDock 裸 App',
+    JSON.stringify(stagingPlan) === JSON.stringify([x64Bundle, armBundle].sort())
+      && fs.existsSync(path.join(macRelease, '.metadata_never_index'))
+      && macosBuildVisibility.buildIncludesMac(macBuildResult)
+      && !macosBuildVisibility.buildIncludesMac(windowsBuildResult)
+      && JSON.stringify(macosBuildVisibility.unexpectedVisibleApps([
+        '/Applications/WhaleDock.app', '/tmp/WhaleDock.app'
+      ])) === JSON.stringify(['/tmp/WhaleDock.app']));
+
+  const archivedApps = macosBuildVisibility.archiveMacAppBundles(macRelease, {
+    unregister: false
+  });
+  const archiveRoot = path.join(macRelease, '.app-archives.noindex');
+  const x64Archive = path.join(archiveRoot, 'WhaleDock-x64.app-bundle');
+  fs.mkdirSync(path.join(x64Bundle, 'Contents'), { recursive: true });
+  fs.writeFileSync(path.join(x64Bundle, 'Contents', 'second-build'), 'new');
+  const replacedApps = macosBuildVisibility.archiveMacAppBundles(macRelease, { unregister: false });
+  check('packaging: 裸 App 归档后不可被识别为版本且保留安装包与无关文件',
+    archivedApps.length === 2
+      && replacedApps.length === 1
+      && macosBuildVisibility.findStagingApps(macRelease).length === 0
+      && fs.readdirSync(archiveRoot).filter((name) => name.endsWith('.app-bundle')).length === 2
+      && fs.readFileSync(path.join(x64Archive, 'Contents', 'second-build'), 'utf8') === 'new'
+      && fs.existsSync(path.join(archiveRoot, '.metadata_never_index'))
+      && !fs.existsSync(armBundle)
+      && !fs.existsSync(x64Bundle)
+      && fs.existsSync(unrelatedBundle)
+      && (linkedBundleIsSymlink
+        ? fs.lstatSync(linkedBundle).isSymbolicLink()
+        : fs.lstatSync(linkedBundle).isFile())
+      && fs.existsSync(outsideBundle)
+      && fs.readFileSync(dmgFixture, 'utf8') === 'dmg'
+      && fs.readFileSync(zipFixture, 'utf8') === 'zip'
+      && macosBuildVisibility.archiveMacAppBundles(macRelease, { unregister: false }).length === 0);
 
   // PATH / which
   check('backend: fullPath 非空', backend.fullPath().split(path.delimiter).length > 3);

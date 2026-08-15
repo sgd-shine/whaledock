@@ -24,6 +24,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify committed compliance materials
+        run: npm run compliance:verify
+
       - name: Set package version from tag
         run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
 
@@ -33,18 +36,32 @@ jobs:
       - name: Bundle dsh for macOS arm64
         run: npm run bundle:dsh -- --platform=darwin --arch=arm64
 
+      - name: Verify macOS arm64 third-party inventory
+        run: node scripts/third-party-inventory.js verify --runtime=vendor/dsh-runtime --inventory=compliance/inventory-darwin-arm64.json
+
       - name: Build macOS arm64 DMG and ZIP
-        run: npm run dist:mac:arm64
+        # runtime 已在上一步按 inventory 核验；这里直接打包，避免 predist 再生成一次后绕过核验。
+        run: npx --no-install electron-builder --mac dmg zip --arm64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Verify packaged macOS arm64 compliance materials
+        run: node scripts/verify-packaged-compliance.js --search=release --minimum=1
 
       - name: Bundle dsh for macOS x64
         run: npm run bundle:dsh -- --platform=darwin --arch=x64
 
+      - name: Verify macOS x64 third-party inventory
+        run: node scripts/third-party-inventory.js verify --runtime=vendor/dsh-runtime --inventory=compliance/inventory-darwin-x64.json
+
       - name: Build macOS x64 DMG and ZIP
-        run: npm run dist:mac:x64
+        # 同上，确保进入产物的就是刚核验过的 x64 runtime。
+        run: npx --no-install electron-builder --mac dmg zip --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Verify packaged macOS compliance materials
+        run: node scripts/verify-packaged-compliance.js --search=release --minimum=2
 
       - name: Verify macOS artifact names and write checksums
         shell: bash
@@ -90,6 +107,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify committed compliance materials
+        run: npm run compliance:verify
+
       - name: Set package version from tag
         shell: pwsh
         run: |
@@ -102,10 +122,17 @@ jobs:
       - name: Bundle dsh for Windows x64
         run: npm run bundle:dsh -- --platform=win32 --arch=x64
 
+      - name: Verify Windows x64 third-party inventory
+        run: node scripts/third-party-inventory.js verify --runtime=vendor/dsh-runtime --inventory=compliance/inventory-win32-x64.json
+
       - name: Build Windows installer and portable executable
-        run: npm run dist:win
+        # runtime 已按 Windows inventory 核验，禁止 predist 重建后绕过材料门。
+        run: npx --no-install electron-builder --win nsis portable --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Verify packaged Windows compliance materials
+        run: node scripts/verify-packaged-compliance.js --search=release --minimum=1
 
       - name: Verify Windows artifact names and write checksums
         shell: pwsh

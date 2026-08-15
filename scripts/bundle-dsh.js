@@ -1,14 +1,16 @@
 'use strict';
 // 构建期准备锁定版 dsh 运行时；运行期不调用 npm，也不修改用户目录。
 const { spawnSync } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { DEFAULTS } = require('../lib/config');
 
 const root = path.resolve(__dirname, '..');
-const outputDir = path.join(root, 'vendor', 'dsh-runtime');
+const auditedLockPath = path.join(root, 'compliance', 'dsh-runtime-package-lock.json');
 const version = String(DEFAULTS.dshVersion || '').trim();
-const MANIFEST_SCHEMA_VERSION = 2;
+const MANIFEST_SCHEMA_VERSION = 3;
 const INSTALL_SCRIPT_ALLOWLIST = new Set([
   '@deepseek-ai/dsh-subprocess-local',
   '@google/genai',
@@ -25,6 +27,31 @@ function option(name, fallback) {
 
 const targetPlatform = option('platform', process.platform);
 const targetArch = option('arch', process.arch);
+const defaultOutputDir = path.join(root, 'vendor', 'dsh-runtime');
+const requestedOutputDir = option('output-dir', '');
+const outputDir = requestedOutputDir ? path.resolve(requestedOutputDir) : defaultOutputDir;
+const customOutput = outputDir !== defaultOutputDir;
+
+if (customOutput) {
+  const temporaryRoot = fs.realpathSync(os.tmpdir());
+  const normalizedOutput = path.join(
+    fs.realpathSync(path.dirname(outputDir)),
+    path.basename(outputDir)
+  );
+  const relative = path.relative(temporaryRoot, normalizedOutput);
+  const workspace = relative.split(path.sep)[0];
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)
+      || !workspace.startsWith('whaledock-dsh-runtime-')) {
+    throw new Error(`自定义 output-dir 必须位于系统临时目录的 whaledock-dsh-runtime-* 工作区：${outputDir}`);
+  }
+  if (fs.existsSync(outputDir)) {
+    throw new Error(`自定义 output-dir 必须尚不存在，防止覆盖：${outputDir}`);
+  }
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
 
 if (!['darwin', 'win32', 'linux'].includes(targetPlatform)) {
   throw new Error(`不支持的内置引擎目标平台：${targetPlatform}`);
@@ -36,6 +63,15 @@ if (!['arm64', 'x64'].includes(targetArch)) {
 if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
   throw new Error('DEFAULTS.dshVersion 必须是可复现的固定版本');
 }
+
+const auditedLockContent = fs.readFileSync(auditedLockPath);
+const auditedLock = JSON.parse(auditedLockContent.toString('utf8'));
+const auditedRoot = auditedLock.packages && auditedLock.packages[''];
+if (!auditedRoot || !auditedRoot.dependencies
+    || auditedRoot.dependencies['@deepseek-ai/dsh'] !== version) {
+  throw new Error(`审计 lock 与 DEFAULTS.dshVersion 不一致：${auditedLockPath}`);
+}
+const auditedLockSha256 = sha256(auditedLockContent);
 
 function packageNameFromLockPath(lockPath) {
   const marker = 'node_modules/';
@@ -162,15 +198,18 @@ try {
       && current.platform === targetPlatform
       && current.arch === targetArch
       && current.packageIntegrity
+      && current.auditedLockSha256 === auditedLockSha256
       && installed.version === version) {
-    const lock = JSON.parse(fs.readFileSync(path.join(outputDir, 'package-lock.json'), 'utf8'));
+    const currentLockContent = fs.readFileSync(path.join(outputDir, 'package-lock.json'));
+    if (sha256(currentLockContent) !== auditedLockSha256) throw new Error('缓存 runtime lock 与审计 lock 不一致');
+    const lock = JSON.parse(currentLockContent.toString('utf8'));
     validateTargetRuntime(lock);
     console.log(`BUNDLED_DSH_REUSE ${version} ${targetPlatform}/${targetArch}`);
     process.exit(0);
   }
 } catch (_e) { /* 缓存缺失或损坏时重新生成 */ }
 
-fs.rmSync(outputDir, { recursive: true, force: true });
+if (!customOutput) fs.rmSync(outputDir, { recursive: true, force: true });
 fs.mkdirSync(outputDir, { recursive: true });
 fs.writeFileSync(path.join(outputDir, 'package.json'), JSON.stringify({
   name: 'whaledock-dsh-runtime',
@@ -180,14 +219,14 @@ fs.writeFileSync(path.join(outputDir, 'package.json'), JSON.stringify({
     '@deepseek-ai/dsh': version
   }
 }, null, 2) + '\n');
+fs.copyFileSync(auditedLockPath, path.join(outputDir, 'package-lock.json'));
 
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const install = spawnSync(npm, [
-  'install',
+  'ci',
   '--omit=dev',
   '--no-audit',
   '--no-fund',
-  '--save-exact',
   '--ignore-scripts',
   `--os=${targetPlatform}`,
   `--cpu=${targetArch}`
@@ -214,6 +253,9 @@ if (installed.name !== '@deepseek-ai/dsh' || installed.version !== version) {
 }
 
 const lock = JSON.parse(fs.readFileSync(path.join(outputDir, 'package-lock.json'), 'utf8'));
+if (sha256(fs.readFileSync(path.join(outputDir, 'package-lock.json'))) !== auditedLockSha256) {
+  throw new Error('npm ci 后 package-lock 与审计 lock 不一致');
+}
 const lockEntry = lock.packages && lock.packages['node_modules/@deepseek-ai/dsh'];
 if (!lockEntry || lockEntry.version !== version || !lockEntry.integrity) {
   throw new Error('package-lock.json 缺少锁定版 dsh 的完整性信息');
@@ -224,6 +266,7 @@ const manifest = {
   schemaVersion: MANIFEST_SCHEMA_VERSION,
   dshVersion: version,
   packageIntegrity: lockEntry.integrity,
+  auditedLockSha256,
   installScriptsIgnored: true,
   installScriptPackages,
   platform: targetPlatform,
