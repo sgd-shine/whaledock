@@ -2,6 +2,7 @@ node_modules/
 release/
 vendor/
 docs/video-evidence/
+tetris/
 *.log
 .DS_Store
 npm-debug.log*

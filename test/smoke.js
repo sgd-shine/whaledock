@@ -282,6 +282,39 @@ async function main() {
       && windowsKill[1].ms === 4000
       && JSON.stringify(windowsKill[2].args) === JSON.stringify(['/PID', '5678', '/T', '/F']));
 
+  const fastExitChild = new EventEmitter();
+  fastExitChild.pid = 2468;
+  fastExitChild.kill = () => true;
+  const fastExitState = { child: fastExitChild, exited: false };
+  fastExitChild.once('exit', () => { fastExitState.exited = true; });
+  const fastExitSignals = [];
+  const fastExitWaits = [];
+  let fastStopResolved = false;
+  const fastStop = backend.stop(fastExitState, {
+    platform: 'darwin',
+    graceMs: 4000,
+    settleMs: 300,
+    kill: (_pid, signal) => {
+      fastExitSignals.push(signal);
+      if (signal === 'SIGTERM') setImmediate(() => fastExitChild.emit('exit', 0, null));
+    },
+    // 永不自行结束：只有子进程退出事件能打断这次 4 秒等待。
+    wait: (ms) => {
+      fastExitWaits.push(ms);
+      return new Promise(() => {});
+    }
+  }).then(() => { fastStopResolved = true; });
+  await Promise.race([
+    fastStop,
+    // 给繁忙 CI runner 足够调度余量，仍显著短于 4 秒宽限期。
+    new Promise((resolve) => setTimeout(resolve, 1000))
+  ]);
+  check('backend: 子进程速退会打断宽限等待并跳过强杀',
+    fastStopResolved
+      && fastExitState.exited
+      && JSON.stringify(fastExitSignals) === JSON.stringify(['SIGTERM'])
+      && JSON.stringify(fastExitWaits) === JSON.stringify([4000]));
+
   const harnessPage = backend.classifyHarnessResponse(
     { 'content-type': 'text/html; charset=utf-8' },
     '<!doctype html><html><head><title>DeepSeek Harness</title></head></html>'

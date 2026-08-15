@@ -191,6 +191,8 @@ async function ensureBackendAndShowOnce(generation, showWindow) {
       const probe = await backend.probeHarness(port);
       if (!startupIsCurrent(generation)) return;
       if (probe.status === 'mismatch') {
+        // 启动最小化时也必须给用户一个可见的决策界面，不能静默等待。
+        createSplash();
         status('warning', `端口 ${port} 上有服务但不像 Harness，可能是其他程序占用`,
           '你可以仍然接入，或打开设置修改端口');
         const decision = await new Promise((resolve) => {
