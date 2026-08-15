@@ -8,10 +8,13 @@ const {
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 const config = require('./lib/config');
 const backend = require('./lib/backend');
 const log = require('./lib/log');
+const update = require('./lib/update');
 
 app.setName('WhaleDock');
 
@@ -21,6 +24,8 @@ const UPSTREAM_URL = 'https://github.com/deepseek-ai/deepseek-harness';
 const MANUAL_URL = 'https://github.com/sgd-shine/whaledock/blob/main/docs/%E6%93%8D%E4%BD%9C%E6%89%8B%E5%86%8C.md';
 const BACKEND_RECOVERY_DELAYS_MS = [1000, 2000, 4000];
 const BACKEND_RECOVERY_TIMEOUT_MS = 30 * 1000;
+const UPDATE_START_DELAY_MS = 15 * 1000;
+const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 let mainWindow = null;
 let splash = null;
@@ -37,6 +42,9 @@ let backendReady = false;
 let initialStartMinimized = false;
 let lastStatus = { phase: 'checking', text: '正在启动…', detail: '' };
 let pendingAttachDecision = null;
+let updateStartTimer = null;
+let updateIntervalTimer = null;
+let updateCheckPromise = null;
 const pendingBackendStops = new Set();
 
 // ---------- 单实例 ----------
@@ -107,6 +115,7 @@ async function onReady() {
   createTray();
   createAppMenu();
   registerHotkey();
+  configureUpdateSchedule();
   await ensureBackendAndShow(!initialStartMinimized);
 }
 
@@ -766,6 +775,7 @@ function registerSettingsIpc() {
     }
 
     if (loginChanged) login = loginItemStatus(loginError);
+    if (Object.prototype.hasOwnProperty.call(normalized, 'checkUpdates')) configureUpdateSchedule();
     log.line('app', `设置已保存${needsRestart ? '（后端需重启）' : ''}`);
     return {
       ok: true,
@@ -790,8 +800,7 @@ function registerSettingsIpc() {
   }));
 
   ipcMain.handle('settings:check-update', trustedSettingsHandler(async () => {
-    if (!config.get('checkUpdates')) return { ok: false, message: '自动检查更新已关闭' };
-    return { ok: false, message: '更新检查将在批次 4 接入' };
+    return runUpdateCheck(true);
   }));
 }
 
@@ -837,6 +846,243 @@ function openSettingsWindow() {
   void win.loadFile('settings.html');
 }
 
+// ---------- 更新检查（固定 GitHub latest；不携带用户标识） ----------
+function clearUpdateSchedule() {
+  if (updateStartTimer) clearTimeout(updateStartTimer);
+  if (updateIntervalTimer) clearInterval(updateIntervalTimer);
+  updateStartTimer = null;
+  updateIntervalTimer = null;
+}
+
+function configureUpdateSchedule() {
+  clearUpdateSchedule();
+  if (!config.get('checkUpdates') || quitting) {
+    log.line('app', '自动检查更新已关闭');
+    return;
+  }
+  updateStartTimer = setTimeout(() => { void runUpdateCheck(false); }, UPDATE_START_DELAY_MS);
+  updateIntervalTimer = setInterval(() => { void runUpdateCheck(false); }, UPDATE_INTERVAL_MS);
+  if (typeof updateStartTimer.unref === 'function') updateStartTimer.unref();
+  if (typeof updateIntervalTimer.unref === 'function') updateIntervalTimer.unref();
+}
+
+function updateFixtureFetch() {
+  const fixturePath = process.env.WHALEDOCK_UPDATE_FIXTURE;
+  if (!fixturePath || app.isPackaged) return null;
+  const absolute = path.resolve(fixturePath);
+  return async (url, options) => {
+    log.line('app', `使用本地更新 fixture（仅开发模式）：${absolute}`);
+    if (url !== update.RELEASE_API || options.method !== 'GET') throw new Error('fixture 收到非预期请求');
+    const body = fs.readFileSync(absolute, 'utf8');
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => String(Buffer.byteLength(body, 'utf8')) },
+      text: async () => body
+    };
+  };
+}
+
+function activeDialogParent() {
+  for (const win of [settingsWindow, mainWindow, splash]) {
+    if (win && !win.isDestroyed()) return win;
+  }
+  return null;
+}
+
+function showMessageBox(options) {
+  const parent = activeDialogParent();
+  return parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
+}
+
+function releaseSummary(notes) {
+  const first = String(notes || '').split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:#+|[-*])\s*/, '').trim())
+    .find(Boolean);
+  if (!first) return '查看发布页了解本次更新内容。';
+  return first.length > 240 ? `${first.slice(0, 237)}…` : first;
+}
+
+async function remindOnlyUpdate(result, portableWindows = false) {
+  const detail = portableWindows
+    ? `发现 WhaleDock ${result.latestVersion}。便携版不能原地安装，请到下载页获取新版。\n\n${releaseSummary(result.release.notes)}`
+    : `发现 WhaleDock ${result.latestVersion}。macOS 当前版本会提醒你下载，不会自动安装。\n\n${releaseSummary(result.release.notes)}`;
+  const { response } = await showMessageBox({
+    type: 'info',
+    title: '鲸坞有新版本',
+    message: `发现新版本 ${result.latestVersion}`,
+    detail,
+    buttons: ['去下载', '跳过此版本', '稍后'],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true
+  });
+  if (response === 0) await shell.openExternal(result.release.url || update.RELEASE_PAGE);
+  else if (response === 1) config.set({ skipVersion: result.latestVersion });
+  return { ok: true, updateAvailable: true, version: result.latestVersion, message: `发现新版本 ${result.latestVersion}` };
+}
+
+async function removeUpdateTemp(dir) {
+  try { await fs.promises.rm(dir, { recursive: true, force: true }); }
+  catch (error) { log.line('app', `清理更新临时目录失败：${error.message}`); }
+}
+
+async function offerManualUpdateFallback(result, error) {
+  const detail = `${String(error && error.message || error)}\n\n已停止自动安装。你可以前往 GitHub Releases 手动下载。`;
+  const { response } = await showMessageBox({
+    type: 'error',
+    title: '自动更新未完成',
+    message: '更新包下载或校验失败',
+    detail,
+    buttons: ['去下载', '取消'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true
+  });
+  if (response === 0) await shell.openExternal(result.release.url || update.RELEASE_PAGE);
+  return {
+    ok: false,
+    updateAvailable: true,
+    version: result.latestVersion,
+    message: `自动更新失败：${String(error && error.message || error)}`
+  };
+}
+
+async function downloadAndInstallWindowsUpdate(result) {
+  const selection = result.selection;
+  if (!selection || !selection.asset || !selection.checksumAsset) {
+    return offerManualUpdateFallback(result, new Error('Release 缺少 Windows 安装器或 SHA256SUMS-win.txt'));
+  }
+  const { response } = await showMessageBox({
+    type: 'info',
+    title: '鲸坞有新版本',
+    message: `发现新版本 ${result.latestVersion}`,
+    detail: `${releaseSummary(result.release.notes)}\n\n点击“立即更新”后会下载并校验安装包。`,
+    buttons: ['立即更新', '跳过此版本', '稍后'],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true
+  });
+  if (response === 1) {
+    config.set({ skipVersion: result.latestVersion });
+    return { ok: true, updateAvailable: true, version: result.latestVersion, message: `已跳过 ${result.latestVersion}` };
+  }
+  if (response !== 0) {
+    return { ok: true, updateAvailable: true, version: result.latestVersion, message: '稍后再更新' };
+  }
+
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'whaledock-update-'));
+  const checksumPath = path.join(tempDir, selection.checksumAsset.name);
+  const installerPath = path.join(tempDir, selection.asset.name);
+  try {
+    log.line('app', `开始下载更新校验和：${selection.checksumAsset.name}`);
+    await update.downloadFile(selection.checksumAsset.url, checksumPath, { maxBytes: 2 * 1024 * 1024 });
+    const checksumText = await fs.promises.readFile(checksumPath, 'utf8');
+    const expectedSha256 = update.checksumForAsset(checksumText, selection.asset.name);
+    log.line('app', `开始下载 Windows 更新：${selection.asset.name}`);
+    await update.downloadFile(selection.asset.url, installerPath, {
+      expectedSha256,
+      onProgress: ({ received, total, percent }) => {
+        const progress = percent == null ? `${received} bytes` : `${percent.toFixed(1)}%`;
+        log.line('app', `更新下载进度：${progress}${total ? ` / ${total} bytes` : ''}`);
+      }
+    });
+
+    const confirmed = await showMessageBox({
+      type: 'info',
+      title: '更新已下载并校验',
+      message: `WhaleDock ${result.latestVersion} 已准备好`,
+      detail: '点击“重启并更新”后，鲸坞会退出并静默安装新版。',
+      buttons: ['重启并更新', '稍后'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    });
+    if (confirmed.response !== 0) {
+      await removeUpdateTemp(tempDir);
+      return { ok: true, updateAvailable: true, version: result.latestVersion, message: '已取消安装' };
+    }
+
+    // 用户可以在确认框停留很久，启动安装器前再校验一次，缩小本地替换窗口。
+    await update.verifySha256(installerPath, expectedSha256);
+    const installer = spawn(installerPath, ['/S', '--force-run'], {
+      detached: true,
+      stdio: 'ignore',
+      shell: false,
+      windowsHide: true
+    });
+    await new Promise((resolve, reject) => {
+      installer.once('spawn', resolve);
+      installer.once('error', reject);
+    });
+    installer.unref();
+    log.line('app', `已启动静默安装器：${installerPath}`);
+    quitting = true;
+    app.quit();
+    return { ok: true, updateAvailable: true, version: result.latestVersion, message: '正在重启并更新' };
+  } catch (error) {
+    await removeUpdateTemp(tempDir);
+    return offerManualUpdateFallback(result, error);
+  }
+}
+
+async function performUpdateCheck(manual) {
+  if (!config.get('checkUpdates')) {
+    return { ok: false, disabled: true, message: '更新检查已关闭，未发出网络请求' };
+  }
+  const fetchImpl = updateFixtureFetch();
+  const result = await update.checkForUpdate(app.getVersion(), {
+    checkUpdates: config.get('checkUpdates'),
+    skipVersion: config.get('skipVersion'),
+    platform: process.platform,
+    arch: process.arch,
+    ...(fetchImpl ? { fetchImpl } : {})
+  });
+  if (!result.updateAvailable) {
+    const message = result.skipped
+      ? `已跳过版本 ${result.latestVersion}`
+      : `当前已是最新版本（${result.currentVersion}）`;
+    if (manual) await showMessageBox({ type: 'info', message, buttons: ['好'], noLink: true });
+    return { ok: true, updateAvailable: false, version: result.latestVersion, message };
+  }
+
+  log.line('app', `发现新版 ${result.latestVersion}`);
+  if (process.platform === 'win32' && !isPortableBuild()) {
+    return downloadAndInstallWindowsUpdate(result);
+  }
+  return remindOnlyUpdate(result, process.platform === 'win32' && isPortableBuild());
+}
+
+function runUpdateCheck(manual) {
+  if (!config.get('checkUpdates')) {
+    const disabled = Promise.resolve({ ok: false, disabled: true, message: '更新检查已关闭，未发出网络请求' });
+    if (manual) void showMessageBox({
+      type: 'info',
+      message: '更新检查已关闭',
+      detail: '请先在“设置 → 通用”中打开“自动检查新版本”。',
+      buttons: ['好'],
+      noLink: true
+    });
+    return disabled;
+  }
+  if (updateCheckPromise) return updateCheckPromise;
+  const run = performUpdateCheck(manual).catch(async (error) => {
+    log.line('app', `检查更新失败：${error && error.stack || error}`);
+    if (manual) await showMessageBox({
+      type: 'error',
+      message: '检查更新失败',
+      detail: String(error && error.message || error),
+      buttons: ['好'],
+      noLink: true
+    });
+    return { ok: false, message: `检查更新失败：${error && error.message || error}` };
+  });
+  updateCheckPromise = run;
+  const clear = () => { if (updateCheckPromise === run) updateCheckPromise = null; };
+  void run.then(clear, clear);
+  return run;
+}
+
 // ---------- 托盘 / 菜单 / 快捷键 ----------
 function createTray() {
   try {
@@ -849,6 +1095,7 @@ function createTray() {
       { label: '显示 / 隐藏窗口', click: () => toggleWindow() },
       { label: '设置…', click: () => openSettingsWindow() },
       { label: '在浏览器中打开', click: () => shell.openExternal(baseUrl()) },
+      { label: '检查更新…', click: () => { void runUpdateCheck(true); } },
       { type: 'separator' },
       { label: '重启后端', click: () => restartBackend() },
       { label: '打开日志文件夹', click: () => shell.openPath(log.dirPath()) },
@@ -925,6 +1172,8 @@ function createAppMenu() {
       label: '帮助',
       role: 'help',
       submenu: [
+        { label: '检查更新…', click: () => { void runUpdateCheck(true); } },
+        { type: 'separator' },
         { label: 'DeepSeek Harness 官方仓库', click: () => shell.openExternal(UPSTREAM_URL) }
       ]
     }
@@ -1012,6 +1261,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   quitting = true;
+  clearUpdateSchedule();
   cancelBackendRecovery('App 正在退出');
   cancelForegroundStartup('App 正在退出');
 });

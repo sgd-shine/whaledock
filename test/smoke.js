@@ -5,10 +5,12 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const { EventEmitter } = require('events');
+const { PassThrough } = require('stream');
 
 const backend = require('../lib/backend');
 const config = require('../lib/config');
 const log = require('../lib/log');
+const update = require('../lib/update');
 
 const PORT = 3123;
 let failed = 0;
@@ -56,6 +58,163 @@ async function main() {
   log.init(path.join(tmp, 'logs'));
   log.line('test', 'hello');
   check('log: 写入与读取', log.recent().includes('hello') && fs.existsSync(log.filePath()));
+
+  // update：严格 semver、精确资产、非遥测请求与本地 SHA-256。
+  let invalidVersionRejected = false;
+  try { update.compareVersions('0.2', '0.2.0'); } catch (_e) { invalidVersionRejected = true; }
+  check('update: semver 比较含 prerelease 与非法输入',
+    update.compareVersions('0.2.0-beta', '0.2.0') < 0
+      && update.compareVersions('0.2.1', '0.2.0') > 0
+      && update.compareVersions('v0.2.0+build.1', '0.2.0+build.2') === 0
+      && invalidVersionRejected);
+
+  const releaseFixture = {
+    tag_name: 'v0.2.0',
+    html_url: 'https://github.com/sgd-shine/whaledock/releases/tag/v0.2.0',
+    name: 'WhaleDock v0.2.0',
+    body: '跨平台更新',
+    draft: false,
+    prerelease: false,
+    assets: [
+      'WhaleDock-0.2.0-arm64.dmg',
+      'WhaleDock-0.2.0-arm64-mac.zip',
+      'WhaleDock-0.2.0-x64.dmg',
+      'WhaleDock-0.2.0-x64-mac.zip',
+      'WhaleDock-Setup-0.2.0.exe',
+      'WhaleDock-0.2.0-portable.exe',
+      'SHA256SUMS-mac.txt',
+      'SHA256SUMS-win.txt'
+    ].map((name) => ({
+      name,
+      browser_download_url: `https://github.com/sgd-shine/whaledock/releases/download/v0.2.0/${name}`
+    }))
+  };
+  const macArmAsset = update.pickAsset(releaseFixture, 'darwin', 'arm64');
+  const macX64Asset = update.pickAsset(releaseFixture, 'darwin', 'x64');
+  const winAsset = update.pickAsset(releaseFixture, 'win32', 'x64');
+  check('update: 三平台资产与校验和精确配对',
+    macArmAsset.asset.name === 'WhaleDock-0.2.0-arm64.dmg'
+      && macX64Asset.asset.name === 'WhaleDock-0.2.0-x64.dmg'
+      && winAsset.asset.name === 'WhaleDock-Setup-0.2.0.exe'
+      && macArmAsset.checksumAsset.name === 'SHA256SUMS-mac.txt'
+      && winAsset.checksumAsset.name === 'SHA256SUMS-win.txt');
+
+  let fetchCalls = 0;
+  let updateRequest = null;
+  const fakeFetch = async (url, options) => {
+    fetchCalls += 1;
+    updateRequest = { url, options };
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      text: async () => JSON.stringify(releaseFixture)
+    };
+  };
+  const disabledUpdate = await update.checkForUpdate('0.1.1', {
+    checkUpdates: false,
+    fetchImpl: fakeFetch,
+    platform: 'darwin',
+    arch: 'arm64'
+  });
+  const availableUpdate = await update.checkForUpdate('0.1.1', {
+    checkUpdates: true,
+    fetchImpl: fakeFetch,
+    platform: 'darwin',
+    arch: 'arm64'
+  });
+  check('update: 开关关闭零请求且请求不含用户标识',
+    disabledUpdate.reason === 'disabled'
+      && fetchCalls === 1
+      && availableUpdate.updateAvailable === true
+      && updateRequest.url === update.RELEASE_API
+      && JSON.stringify(Object.keys(updateRequest.options.headers).sort())
+        === JSON.stringify(['Accept', 'User-Agent'].sort())
+      && updateRequest.options.headers['User-Agent'] === 'WhaleDock-Update');
+
+  const hashFixture = path.join(tmp, 'update-sha-fixture.bin');
+  fs.writeFileSync(hashFixture, 'abc');
+  const shaPass = await update.verifySha256(
+    hashFixture,
+    'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
+  );
+  fs.appendFileSync(hashFixture, 'tampered');
+  const shaFail = await update.verifySha256(
+    hashFixture,
+    'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
+  );
+  check('update: SHA-256 篡改前通过、篡改后失败', shaPass && !shaFail);
+
+  const installerName = 'WhaleDock-Setup-0.2.0.exe';
+  const installerDigest = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
+  let prefixedChecksumRejected = false;
+  try {
+    update.checksumForAsset(`${installerDigest} *release/${installerName}\n`, installerName);
+  } catch (error) {
+    prefixedChecksumRejected = error && error.code === 'ERR_CHECKSUM_NOT_FOUND';
+  }
+  check('update: 校验和合约只接受产物裸文件名',
+    update.checksumForAsset(`${installerDigest} *${installerName}\n`, installerName) === installerDigest
+      && prefixedChecksumRejected);
+
+  const skippedUpdate = await update.checkForUpdate('0.1.1', {
+    checkUpdates: true,
+    skipVersion: '0.2.0',
+    fetchImpl: fakeFetch,
+    platform: 'darwin',
+    arch: 'arm64'
+  });
+  check('update: skipVersion 抑制已跳过版本',
+    skippedUpdate.skipped === true
+      && skippedUpdate.updateAvailable === false
+      && skippedUpdate.reason === 'skipped');
+
+  function injectedDownload(body, declaredLength, beforeEnd) {
+    return (_url, _options, callback) => {
+      const request = new EventEmitter();
+      request.setTimeout = () => {};
+      request.destroy = () => {};
+      process.nextTick(() => {
+        const response = new PassThrough();
+        response.statusCode = 200;
+        response.headers = { 'content-length': String(declaredLength) };
+        callback(response);
+        if (beforeEnd) beforeEnd();
+        response.end(body);
+      });
+      return request;
+    };
+  }
+
+  const shortDownload = path.join(tmp, 'short-update.bin');
+  let lengthMismatchRejected = false;
+  try {
+    await update.downloadFile('https://example.invalid/update.bin', shortDownload, {
+      request: injectedDownload(Buffer.from('abc'), 100),
+      timeoutMs: 2000
+    });
+  } catch (error) {
+    lengthMismatchRejected = error && error.code === 'ERR_DOWNLOAD_LENGTH_MISMATCH';
+  }
+  check('update: Content-Length 不符时拒绝并清理半包',
+    lengthMismatchRejected
+      && !fs.existsSync(shortDownload)
+      && !fs.readdirSync(tmp).some((name) => name.startsWith('short-update.bin.part-')));
+
+  const racedDownload = path.join(tmp, 'raced-update.bin');
+  let overwriteRaceRejected = false;
+  try {
+    await update.downloadFile('https://example.invalid/update.bin', racedDownload, {
+      request: injectedDownload(Buffer.from('new'), 3, () => fs.writeFileSync(racedDownload, 'victim')),
+      timeoutMs: 2000
+    });
+  } catch (error) {
+    overwriteRaceRejected = error && error.code === 'ERR_DESTINATION_EXISTS';
+  }
+  check('update: overwrite=false 竞态下不覆盖已有文件',
+    overwriteRaceRejected
+      && fs.readFileSync(racedDownload, 'utf8') === 'victim'
+      && !fs.readdirSync(tmp).some((name) => name.startsWith('raced-update.bin.part-')));
 
   // PATH / which
   check('backend: fullPath 非空', backend.fullPath().split(path.delimiter).length > 3);
