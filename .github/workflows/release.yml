@@ -18,8 +18,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.2
           cache: npm
+
+      - name: Verify pinned Node and npm toolchain
+        run: node -e "const cp=require('child_process');const npm=cp.spawnSync(process.platform==='win32'?'npm.cmd':'npm',['--version'],{encoding:'utf8',shell:process.platform==='win32'});if(process.version!=='v22.23.2'||npm.status!==0||npm.stdout.trim()!=='10.9.8')throw new Error('Expected Node v22.23.2 / npm 10.9.8, got '+process.version+' / '+npm.stdout.trim())"
 
       - name: Install dependencies
         run: npm ci
@@ -101,8 +104,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.2
           cache: npm
+
+      - name: Verify pinned Node and npm toolchain
+        run: node -e "const cp=require('child_process');const npm=cp.spawnSync(process.platform==='win32'?'npm.cmd':'npm',['--version'],{encoding:'utf8',shell:process.platform==='win32'});if(process.version!=='v22.23.2'||npm.status!==0||npm.stdout.trim()!=='10.9.8')throw new Error('Expected Node v22.23.2 / npm 10.9.8, got '+process.version+' / '+npm.stdout.trim())"
 
       - name: Install dependencies
         run: npm ci

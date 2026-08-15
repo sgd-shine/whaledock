@@ -21,8 +21,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.2
           cache: npm
+
+      - name: Verify pinned Node and npm toolchain
+        run: node -e "const cp=require('child_process');const npm=cp.spawnSync(process.platform==='win32'?'npm.cmd':'npm',['--version'],{encoding:'utf8',shell:process.platform==='win32'});if(process.version!=='v22.23.2'||npm.status!==0||npm.stdout.trim()!=='10.9.8')throw new Error('Expected Node v22.23.2 / npm 10.9.8, got '+process.version+' / '+npm.stdout.trim())"
 
       - name: Install dependencies
         run: npm ci
@@ -60,4 +63,5 @@ jobs:
       - name: Compare Windows x64 runtime inventory
         if: runner.os == 'Windows'
         shell: pwsh
-        run: git diff --no-index --exit-code -- compliance/inventory-win32-x64.json "$env:RUNNER_TEMP/inventory-win32-x64-actual.json"
+        run: |
+          node -e "const c=require('crypto'),f=require('fs');const [expected,actual]=process.argv.slice(1),a=f.readFileSync(expected),b=f.readFileSync(actual),sha=x=>c.createHash('sha256').update(x).digest('hex');if(!a.equals(b)){console.error('Windows inventory byte mismatch expected='+sha(a)+' actual='+sha(b));process.exit(1)};console.log('WINDOWS_INVENTORY_BYTES_VERIFIED '+sha(a))" compliance/inventory-win32-x64.json "$env:RUNNER_TEMP/inventory-win32-x64-actual.json"
