@@ -26,7 +26,7 @@
 | 电脑 | 下载文件 | 安装方式 |
 | --- | --- | --- |
 | Apple Silicon Mac | `WhaleDock-<版本>-arm64.dmg` | 打开 dmg，拖入「应用程序」 |
-| Intel Mac | `WhaleDock-<版本>-x64.dmg` | 打开 dmg，拖入「应用程序」 |
+| Intel Mac | `WhaleDock-<版本>-x64.dmg` | 打开 dmg，拖入「应用程序」；当前仅在 Apple Silicon + Rosetta 抽查，未做 Intel 真机 |
 | Windows 10/11 x64 | `WhaleDock-Setup-<版本>.exe` | 双击，按当前用户安装 |
 | Windows 10/11 x64 便携使用 | `WhaleDock-<版本>-portable.exe` | 放到固定目录后直接双击；无需安装 |
 
@@ -48,7 +48,7 @@
 
 请不要从第三方下载站获取安装包。Release 同时提供 `SHA256SUMS-win.txt` / `SHA256SUMS-mac.txt`，可用于核对下载文件。
 
-> Windows 版 dsh 行为和半自动更新链路必须以 SGD 对 beta 产物的 Windows 真机验收为准；验收完成前不要把 CI 构建成功等同于 Windows 人工验收通过。
+> Windows x64 当前为**实验性支持，尚未做 Windows 真机验证**。CI 只证明构建与纯 Node 合约，不等于内置 dsh、安装/便携版或半自动更新已经真机通过。遇到问题请从设置页复制日志，并在本仓库提交 issue；不要清理用户的 `.dsh` 数据。
 
 ## 内置引擎如何工作
 

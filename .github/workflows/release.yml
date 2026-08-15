@@ -200,9 +200,9 @@ jobs:
             {
               echo "## 公开 Release 已被审批门阻止"
               echo
-              echo "构建产物已保留在本次 Actions run，可供 SGD 验收。"
+              echo "构建产物已保留在本次 Actions run，可供精确哈希、inventory 与合规回读。"
               echo
-              echo "完成 G1、许可材料和人工验收后，将仓库变量设为："
+              echo "确认无 S1 且 G1、平台 inventory 与成品材料闭环后，将仓库变量临时设为："
               echo
               printf '    %s\n' "$expected"
             } >> "$GITHUB_STEP_SUMMARY"
@@ -222,4 +222,10 @@ jobs:
             release-assets/SHA256SUMS-win.txt
           fail_on_unmatched_files: true
           generate_release_notes: true
+          body: |
+            ## 重要平台边界
+
+            - macOS 构建未签名、未公证；首次启动通常需要右键 App 后选择“打开”。
+            - Windows x64 构建未签名，且为实验性支持，尚未完成 Windows 真机验证；SmartScreen 拦截时可选择“更多信息 → 仍要运行”。遇到问题请提交 issue，并附鲸坞日志与完整资产名。
+            - Intel x64 仅在 Apple Silicon + Rosetta 环境抽查，尚未完成 Intel Mac 真机验证。
           prerelease: ${{ contains(github.ref_name, '-') }}
