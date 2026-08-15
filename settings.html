@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>鲸坞设置</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #090e17;
+    --surface: #101824;
+    --surface-raised: #152131;
+    --field: #0c1420;
+    --line: #263548;
+    --line-strong: #3b526c;
+    --text: #edf4fa;
+    --muted: #91a2b4;
+    --faint: #65768a;
+    --accent: #5bd4e6;
+    --accent-strong: #17aac2;
+    --accent-ink: #06151a;
+    --success: #63d29b;
+    --warning: #f3c56a;
+    --error: #ff8585;
+    --focus: rgba(91, 212, 230, .28);
+    --radius: 10px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
+  body {
+    margin: 0;
+    overflow: hidden;
+    background:
+      linear-gradient(90deg, rgba(91, 212, 230, .025) 1px, transparent 1px) 0 0 / 28px 28px,
+      var(--bg);
+    color: var(--text);
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button, input { font: inherit; }
+
+  button, input, [role="tab"] { -webkit-app-region: no-drag; }
+
+  button:focus-visible,
+  input:focus-visible,
+  summary:focus-visible,
+  [role="tab"]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .app {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    height: 100%;
+    min-height: 480px;
+  }
+
+  .titlebar {
+    display: flex;
+    align-items: center;
+    min-height: 64px;
+    padding: 17px 24px 12px;
+    border-bottom: 1px solid rgba(255,255,255,.045);
+    -webkit-app-region: drag;
+  }
+
+  .brand-mark {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    margin-right: 11px;
+    border: 1px solid #28576a;
+    border-radius: 9px;
+    background: #102837;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .2);
+  }
+
+  .brand-mark svg { width: 22px; height: 22px; }
+  .heading { min-width: 0; }
+  h1 { margin: 0; font-size: 16px; font-weight: 660; letter-spacing: .02em; }
+  .subtitle { margin-top: 1px; color: var(--muted); font-size: 11px; letter-spacing: .02em; }
+
+  .tabs {
+    display: flex;
+    gap: 5px;
+    padding: 9px 24px 8px;
+    background: rgba(9, 14, 23, .78);
+    border-bottom: 1px solid var(--line);
+  }
+
+  [role="tab"] {
+    position: relative;
+    min-width: 72px;
+    padding: 7px 14px 8px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    transition: color .14s ease, background .14s ease;
+  }
+
+  [role="tab"]:hover { color: var(--text); background: rgba(255,255,255,.045); }
+  [role="tab"][aria-selected="true"] { color: var(--text); background: var(--surface-raised); }
+  [role="tab"][aria-selected="true"]::after {
+    content: "";
+    position: absolute;
+    right: 14px;
+    bottom: 4px;
+    left: 14px;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--accent);
+  }
+
+  main {
+    min-height: 0;
+    overflow: auto;
+    padding: 16px 24px 22px;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+
+  [role="tabpanel"][hidden] { display: none; }
+
+  .section + .section { margin-top: 20px; }
+  .section-title {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+  }
+
+  .card {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: rgba(16, 24, 36, .92);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, .12);
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+    min-height: 58px;
+    padding: 11px 14px;
+  }
+
+  .row + .row { border-top: 1px solid rgba(38, 53, 72, .76); }
+  .row.stack { display: block; }
+  .row-label { color: var(--text); font-weight: 540; }
+  .row-note { margin-top: 2px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+
+  .switch {
+    position: relative;
+    display: inline-flex;
+    width: 38px;
+    height: 22px;
+    flex: 0 0 auto;
+  }
+
+  .switch input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .track {
+    width: 100%;
+    border: 1px solid var(--line-strong);
+    border-radius: 99px;
+    background: #172230;
+    cursor: pointer;
+    transition: background .16s ease, border-color .16s ease;
+  }
+  .track::after {
+    content: "";
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #a5b3c1;
+    box-shadow: 0 1px 4px rgba(0,0,0,.5);
+    transition: transform .16s ease, background .16s ease;
+  }
+  .switch input:checked + .track { border-color: var(--accent-strong); background: var(--accent-strong); }
+  .switch input:checked + .track::after { transform: translateX(16px); background: white; }
+  .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .switch input:disabled + .track { opacity: .45; cursor: not-allowed; }
+
+  .field-line { display: flex; align-items: center; gap: 7px; margin-top: 8px; }
+  input[type="text"], input[type="number"] {
+    min-width: 0;
+    height: 34px;
+    padding: 6px 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: 7px;
+    background: var(--field);
+    color: var(--text);
+    caret-color: var(--accent);
+    box-shadow: inset 0 1px 1px rgba(0,0,0,.22);
+    transition: border-color .14s ease, box-shadow .14s ease;
+  }
+  input[type="text"]:hover, input[type="number"]:hover { border-color: #52708e; }
+  input[type="text"]:focus, input[type="number"]:focus {
+    border-color: var(--accent-strong);
+    box-shadow: 0 0 0 3px var(--focus);
+    outline: none;
+  }
+  input:disabled { color: var(--faint); opacity: .62; cursor: not-allowed; }
+  .grow { flex: 1 1 auto; width: 100%; }
+  .port { width: 104px; }
+  .version { width: 176px; }
+
+  .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 34px;
+    padding: 6px 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: 7px;
+    background: var(--surface-raised);
+    color: var(--text);
+    cursor: pointer;
+    white-space: nowrap;
+    text-decoration: none;
+    transition: border-color .14s ease, background .14s ease, transform .08s ease;
+  }
+  .button:hover:not(:disabled) { border-color: #6485a4; background: #1a2a3d; }
+  .button:active:not(:disabled) { transform: translateY(1px); }
+  .button:disabled { color: var(--faint); opacity: .55; cursor: not-allowed; }
+  .button[aria-disabled="true"] { color: var(--faint); opacity: .55; pointer-events: none; }
+  .button.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 670; }
+  .button.primary:hover:not(:disabled) { border-color: #82e4f0; background: #82e4f0; }
+  .button.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+  .button.small { min-height: 30px; padding: 4px 10px; font-size: 12px; }
+
+  .inline-action { display: flex; align-items: center; gap: 8px; }
+  .status-text { max-width: 250px; color: var(--muted); font-size: 11px; text-align: right; }
+  .status-text.success { color: var(--success); }
+  .status-text.error { color: var(--error); }
+  .status-text.warning { color: var(--warning); }
+
+  .notice {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    border: 1px solid rgba(243, 197, 106, .42);
+    border-radius: 9px;
+    background: rgba(106, 76, 24, .19);
+    color: #f7d99c;
+  }
+  .notice.show { display: flex; }
+  .notice strong { display: block; color: #ffe7ba; font-size: 12px; }
+  .notice span { display: block; margin-top: 1px; color: #cbb689; font-size: 11px; }
+
+  .runtime {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--line);
+  }
+  .runtime-item { padding: 13px 14px; background: var(--surface); }
+  .runtime-label { color: var(--muted); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+  .runtime-value { margin-top: 3px; font: 12px/1.4 "SFMono-Regular", Consolas, monospace; color: var(--text); }
+
+  .help-actions { display: flex; gap: 8px; padding: 13px 14px; border-top: 1px solid var(--line); }
+
+  .faq details { border-top: 1px solid var(--line); }
+  .faq details:first-child { border-top: 0; }
+  .faq summary {
+    position: relative;
+    padding: 12px 34px 12px 14px;
+    color: var(--text);
+    cursor: pointer;
+    list-style: none;
+  }
+  .faq summary::-webkit-details-marker { display: none; }
+  .faq summary::after {
+    content: "+";
+    position: absolute;
+    top: 10px;
+    right: 14px;
+    color: var(--accent);
+    font-size: 17px;
+    font-weight: 300;
+  }
+  .faq details[open] summary::after { content: "−"; }
+  .faq p { margin: -3px 34px 13px 14px; color: var(--muted); font-size: 12px; }
+
+  .footer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    min-height: 63px;
+    padding: 12px 24px;
+    border-top: 1px solid var(--line);
+    background: #0c131e;
+    box-shadow: 0 -12px 30px rgba(0,0,0,.14);
+  }
+  #save-status { min-height: 18px; color: var(--muted); font-size: 11px; }
+  #save-status.success { color: var(--success); }
+  #save-status.error { color: var(--error); }
+  #save-status.loading::before,
+  .button.loading::before {
+    content: "";
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-right: 6px;
+    border: 1.5px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    vertical-align: -1px;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .footer-actions { display: flex; gap: 8px; }
+
+  .skeleton {
+    height: 12px;
+    border-radius: 6px;
+    background: #1b2938;
+    animation: breathe 1s ease-in-out infinite alternate;
+  }
+  @keyframes breathe { to { opacity: .42; } }
+  body[data-loading="true"] main { opacity: .62; pointer-events: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition: none !important; }
+  }
+
+  @media (max-height: 540px) {
+    .titlebar { min-height: 52px; padding-top: 10px; padding-bottom: 8px; }
+    .subtitle { display: none; }
+    .tabs { padding-top: 6px; padding-bottom: 6px; }
+    main { padding-top: 12px; }
+    .footer { min-height: 56px; padding-top: 9px; padding-bottom: 9px; }
+  }
+</style>
+</head>
+<body data-loading="true">
+<div class="app">
+  <header class="titlebar">
+    <div class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 40 40" fill="none">
+        <path d="M8 20c0-7 6-11 14-11 7 0 12 3 13 8-1 6-6 10-13 10S8 25 8 20Z" fill="#EAFBFD"/>
+        <circle cx="15" cy="17" r="1.4" fill="#102837"/>
+        <path d="M33 17c2-3 4-5 6-5-1 2-2 4-2 6 1 2 2 4 2 6-2 0-4-2-6-5Z" fill="#EAFBFD"/>
+        <path d="M11 32c6 3 16 3 22 0" stroke="#5BD4E6" stroke-width="2.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="heading">
+      <h1>鲸坞设置</h1>
+      <div class="subtitle">WhaleDock · 非官方 DeepSeek Harness 桌面客户端</div>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="设置分类">
+    <button id="tab-general" role="tab" aria-selected="true" aria-controls="panel-general" tabindex="0">通用</button>
+    <button id="tab-backend" role="tab" aria-selected="false" aria-controls="panel-backend" tabindex="-1">后端</button>
+    <button id="tab-help" role="tab" aria-selected="false" aria-controls="panel-help" tabindex="-1">帮助</button>
+  </nav>
+
+  <main>
+    <div id="restart-notice" class="notice" role="status" aria-live="polite">
+      <div><strong>后端设置已保存</strong><span>这些改动要在重启后端后生效。</span></div>
+      <button id="restart-now" class="button small">立即重启</button>
+    </div>
+
+    <section id="panel-general" role="tabpanel" aria-labelledby="tab-general">
+      <div class="section">
+        <h2 class="section-title">启动</h2>
+        <div class="card">
+          <div class="row">
+            <div>
+              <div class="row-label">开机自动启动鲸坞</div>
+              <div id="login-note" class="row-note">随系统登录自动启动</div>
+            </div>
+            <label class="switch" aria-label="开机自动启动鲸坞">
+              <input id="openAtLogin" type="checkbox">
+              <span class="track"></span>
+            </label>
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-label">启动时最小化到托盘</div>
+              <div class="row-note">后端照常启动；失败时仍会弹出提示</div>
+            </div>
+            <label class="switch" aria-label="启动时最小化到托盘">
+              <input id="startMinimized" type="checkbox">
+              <span class="track"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">操作</h2>
+        <div class="card">
+          <div class="row stack">
+            <label class="row-label" for="hotkey">全局快捷键</label>
+            <div class="row-note">用于快速显示或隐藏主窗口</div>
+            <div class="field-line">
+              <input id="hotkey" class="grow" type="text" autocomplete="off" spellcheck="false" placeholder="CommandOrControl+Shift+H">
+              <button id="reset-hotkey" class="button">恢复默认</button>
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-label">自动检查新版本</div>
+              <div class="row-note">仅访问 GitHub Releases，不携带用户标识</div>
+            </div>
+            <label class="switch" aria-label="自动检查新版本">
+              <input id="checkUpdates" type="checkbox">
+              <span class="track"></span>
+            </label>
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-label">更新状态</div>
+              <div id="update-status" class="row-note" role="status" aria-live="polite">尚未手动检查</div>
+            </div>
+            <button id="check-update" class="button">立即检查</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="panel-backend" role="tabpanel" aria-labelledby="tab-backend" hidden>
+      <div class="section">
+        <h2 class="section-title">连接</h2>
+        <div class="card">
+          <div class="row">
+            <div>
+              <label class="row-label" for="port">端口</label>
+              <div class="row-note">1024–65535</div>
+            </div>
+            <input id="port" class="port" type="number" min="1024" max="65535" step="1" inputmode="numeric">
+          </div>
+          <div class="row stack">
+            <label class="row-label" for="workdir">工作目录</label>
+            <div class="field-line">
+              <input id="workdir" class="grow" type="text" autocomplete="off" spellcheck="false" placeholder="使用用户主目录">
+              <button id="choose-workdir" class="button">选择…</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">引擎</h2>
+        <div class="card">
+          <div class="row">
+            <div>
+              <label class="row-label" for="dshVersion">后端版本</label>
+              <div class="row-note">支持 latest 或含 rc 后缀的版本号</div>
+            </div>
+            <input id="dshVersion" class="version" type="text" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-label">优先使用内置引擎</div>
+              <div class="row-note">跳过本机 Node 探测，适合环境混乱时</div>
+            </div>
+            <label class="switch" aria-label="优先使用内置引擎">
+              <input id="preferBundled" type="checkbox">
+              <span class="track"></span>
+            </label>
+          </div>
+          <div class="row stack">
+            <label class="row-label" for="command">自定义启动命令</label>
+            <div class="row-note">高级选项，一般不用填；留空恢复自动探测</div>
+            <div class="field-line">
+              <input id="command" class="grow" type="text" autocomplete="off" spellcheck="false" placeholder="例如：dsh web">
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="panel-help" role="tabpanel" aria-labelledby="tab-help" hidden>
+      <div class="section">
+        <h2 class="section-title">关于</h2>
+        <div class="card">
+          <div class="runtime" aria-label="版本信息">
+            <div class="runtime-item"><div class="runtime-label">WhaleDock</div><div id="app-version" class="runtime-value">读取中…</div></div>
+            <div class="runtime-item"><div class="runtime-label">平台 / 架构</div><div id="platform-arch" class="runtime-value">读取中…</div></div>
+          </div>
+          <div class="help-actions">
+            <a id="open-manual" class="button" href="#" target="_blank" rel="noreferrer" aria-disabled="true">打开操作手册</a>
+            <a id="open-logs" class="button" href="#" target="_blank" rel="noreferrer" aria-disabled="true">打开日志文件夹</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">常见问题</h2>
+        <div class="card faq">
+          <details>
+            <summary>macOS 提示无法验证开发者</summary>
+            <p>当前版本未签名。首次启动请在“访达”中右键鲸坞，选择“打开”，再确认一次。</p>
+          </details>
+          <details>
+            <summary>Windows 出现 SmartScreen 提示</summary>
+            <p>当前版本未签名。确认文件来自官方 Releases 后，点“更多信息”→“仍要运行”。</p>
+          </details>
+          <details>
+            <summary>首启较慢，或提示端口被占用</summary>
+            <p>首次准备后端可能需要几分钟；若端口被其他程序占用，请到“后端”标签改端口并重启后端。</p>
+          </details>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div id="save-status" role="status" aria-live="polite">正在读取设置…</div>
+    <div class="footer-actions">
+      <button id="cancel" class="button ghost">取消</button>
+      <button id="save" class="button primary" disabled>保存</button>
+    </div>
+  </footer>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const api = window.whaleSettings;
+  const fieldNames = [
+    'openAtLogin', 'startMinimized', 'hotkey', 'checkUpdates',
+    'port', 'workdir', 'dshVersion', 'preferBundled', 'command'
+  ];
+  const booleanFields = new Set(['openAtLogin', 'startMinimized', 'checkUpdates', 'preferBundled']);
+  const backendFields = new Set(['port', 'workdir', 'dshVersion', 'preferBundled', 'command']);
+  const els = Object.fromEntries(fieldNames.map((name) => [name, document.getElementById(name)]));
+  const saveButton = document.getElementById('save');
+  const cancelButton = document.getElementById('cancel');
+  const saveStatus = document.getElementById('save-status');
+  const restartNotice = document.getElementById('restart-notice');
+  const restartButton = document.getElementById('restart-now');
+  const updateButton = document.getElementById('check-update');
+  const updateStatus = document.getElementById('update-status');
+  let snapshot = null;
+  let runtimeSnapshot = {};
+  let busy = false;
+
+  function messageOf(value, fallback) {
+    if (typeof value === 'string' && value.trim()) return value;
+    if (value && typeof value.message === 'string') return value.message;
+    if (value && typeof value.error === 'string') return value.error;
+    return fallback;
+  }
+
+  function normalizedConfig(payload) {
+    const source = payload && (payload.config || payload.settings || payload);
+    return {
+      openAtLogin: Boolean(source && source.openAtLogin),
+      startMinimized: Boolean(source && source.startMinimized),
+      hotkey: String((source && source.hotkey) || 'CommandOrControl+Shift+H'),
+      checkUpdates: source && source.checkUpdates !== undefined ? Boolean(source.checkUpdates) : true,
+      port: Number((source && source.port) || 3080),
+      workdir: (source && source.workdir) || null,
+      dshVersion: String((source && source.dshVersion) || ''),
+      preferBundled: Boolean(source && source.preferBundled),
+      command: (source && source.command) || null
+    };
+  }
+
+  function valueOf(name) {
+    if (booleanFields.has(name)) return els[name].checked;
+    if (name === 'port') return Number(els[name].value);
+    const value = els[name].value.trim();
+    if (name === 'workdir' || name === 'command') return value || null;
+    return value;
+  }
+
+  function renderConfig(config) {
+    for (const name of fieldNames) {
+      const value = config[name];
+      if (booleanFields.has(name)) els[name].checked = Boolean(value);
+      else els[name].value = value == null ? '' : String(value);
+    }
+  }
+
+  function diff() {
+    if (!snapshot) return {};
+    const patch = {};
+    for (const name of fieldNames) {
+      const current = valueOf(name);
+      const original = snapshot[name] == null && (name === 'workdir' || name === 'command') ? null : snapshot[name];
+      if (current !== original) patch[name] = current;
+    }
+    return patch;
+  }
+
+  function setStatus(text, type) {
+    saveStatus.textContent = text || '';
+    saveStatus.className = type || '';
+  }
+
+  function setBusy(next, label) {
+    busy = next;
+    document.body.dataset.loading = next ? 'true' : 'false';
+    for (const element of document.querySelectorAll('input, button')) element.disabled = next;
+    if (!next) updateDirtyState();
+    if (next && label) setStatus(label, 'loading');
+  }
+
+  function updateDirtyState() {
+    const dirty = snapshot && Object.keys(diff()).length > 0;
+    saveButton.disabled = busy || !dirty;
+    cancelButton.disabled = busy;
+    updateButton.disabled = busy || !els.checkUpdates.checked;
+  }
+
+  function showRestartNotice(show) {
+    restartNotice.classList.toggle('show', Boolean(show));
+  }
+
+  function responseFailed(result) {
+    return result && (result.ok === false || result.success === false);
+  }
+
+  function runtimeFrom(payload) {
+    return (payload && (payload.runtime || payload.meta)) || payload || {};
+  }
+
+  function renderRuntime(payload) {
+    const runtime = runtimeFrom(payload);
+    runtimeSnapshot = { ...runtimeSnapshot, ...runtime };
+    document.getElementById('app-version').textContent = runtimeSnapshot.version || runtimeSnapshot.appVersion || '0.2.0';
+    const platform = runtimeSnapshot.platform || '未知平台';
+    const arch = runtimeSnapshot.arch || '未知架构';
+    document.getElementById('platform-arch').textContent = `${platform} / ${arch}`;
+
+    const login = runtime.loginItem || payload && payload.loginItem || runtimeSnapshot.loginItem || {};
+    runtimeSnapshot.loginItem = login;
+    const loginNote = document.getElementById('login-note');
+    if (typeof login === 'string') {
+      loginNote.textContent = login;
+    } else if (login.error) {
+      loginNote.textContent = login.error || '系统未接受，请在系统登录项中手动添加';
+      loginNote.style.color = 'var(--warning)';
+    } else if (login.desired !== undefined && login.actual !== undefined && login.desired !== login.actual) {
+      loginNote.textContent = login.desired
+        ? '系统未接受，请在系统登录项中手动添加'
+        : '系统登录项仍在启用，请重试或手动移除';
+      loginNote.style.color = 'var(--warning)';
+    } else if (runtimeSnapshot.portable || runtimeSnapshot.isPortable) {
+      loginNote.textContent = '便携版将使用当前 exe 路径；移动后会自动修正';
+      loginNote.style.color = '';
+    } else if (login.actual) {
+      loginNote.textContent = '系统登录项已启用';
+      loginNote.style.color = '';
+    } else {
+      loginNote.textContent = '随系统登录自动启动';
+      loginNote.style.color = '';
+    }
+
+    for (const [id, url] of [
+      ['open-manual', runtimeSnapshot.manualUrl],
+      ['open-logs', runtimeSnapshot.logsUrl]
+    ]) {
+      const link = document.getElementById(id);
+      if (typeof url === 'string' && url.length > 0) {
+        link.href = url;
+        link.setAttribute('aria-disabled', 'false');
+        link.tabIndex = 0;
+      } else {
+        link.href = '#';
+        link.setAttribute('aria-disabled', 'true');
+        link.tabIndex = -1;
+      }
+    }
+  }
+
+  async function load() {
+    setBusy(true, '正在读取设置…');
+    try {
+      const payload = await api.get();
+      if (responseFailed(payload)) throw new Error(messageOf(payload, '读取设置失败'));
+      snapshot = normalizedConfig(payload);
+      renderConfig(snapshot);
+      renderRuntime(payload);
+      setStatus('设置已是最新', 'success');
+    } catch (error) {
+      setStatus(messageOf(error, '读取设置失败，请关闭后重试'), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save() {
+    const patch = diff();
+    if (!Object.keys(patch).length) return;
+    setBusy(true, '正在保存设置…');
+    showRestartNotice(false);
+    try {
+      const result = await api.apply(patch);
+      if (responseFailed(result)) throw new Error(messageOf(result, '保存失败'));
+      snapshot = normalizedConfig((result && (result.config || result.settings)) || { ...snapshot, ...patch });
+      renderConfig(snapshot);
+      const restartRequired = Boolean(result && result.restartRequired) || Object.keys(patch).some((name) => backendFields.has(name));
+      showRestartNotice(restartRequired);
+      const warning = result && (result.warning || result.loginItemWarning || result.loginItem && result.loginItem.error);
+      setStatus(warning || (restartRequired ? '已保存，后端改动等待重启' : '设置已保存'), warning ? 'error' : 'success');
+      if (result && result.loginItem) {
+        renderRuntime({ runtime: { ...runtimeSnapshot, loginItem: result.loginItem } });
+      }
+    } catch (error) {
+      setStatus(messageOf(error, '保存失败，请检查输入后重试'), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function chooseWorkdir() {
+    const button = document.getElementById('choose-workdir');
+    button.disabled = true;
+    button.classList.add('loading');
+    try {
+      const result = await api.chooseWorkdir();
+      const selected = typeof result === 'string' ? result : result && (result.path || result.workdir || result.filePaths && result.filePaths[0]);
+      if (selected) {
+        els.workdir.value = selected;
+        els.workdir.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    } catch (error) {
+      setStatus(messageOf(error, '无法打开目录选择器'), 'error');
+    } finally {
+      button.classList.remove('loading');
+      button.disabled = busy;
+    }
+  }
+
+  async function restartBackend() {
+    setBusy(true, '正在重启后端…');
+    restartButton.classList.add('loading');
+    try {
+      const result = await api.restartBackend();
+      if (responseFailed(result)) throw new Error(messageOf(result, '后端重启失败'));
+      showRestartNotice(false);
+      setStatus(messageOf(result, '后端已重启'), 'success');
+    } catch (error) {
+      setStatus(messageOf(error, '后端重启失败，请查看日志'), 'error');
+    } finally {
+      restartButton.classList.remove('loading');
+      setBusy(false);
+    }
+  }
+
+  async function checkUpdate() {
+    updateButton.disabled = true;
+    updateButton.classList.add('loading');
+    updateStatus.className = 'row-note';
+    updateStatus.textContent = '正在检查 GitHub Releases…';
+    try {
+      const result = await api.checkUpdate();
+      if (responseFailed(result)) throw new Error(messageOf(result, '检查更新失败'));
+      const text = messageOf(result, result && result.updateAvailable ? `发现新版本 ${result.version || ''}` : '当前已是最新版本');
+      updateStatus.textContent = text;
+      updateStatus.classList.add(result && result.updateAvailable ? 'warning' : 'success');
+    } catch (error) {
+      updateStatus.textContent = messageOf(error, '检查失败，请稍后重试');
+      updateStatus.classList.add('error');
+    } finally {
+      updateButton.classList.remove('loading');
+      updateButton.disabled = busy || !els.checkUpdates.checked;
+    }
+  }
+
+  function activateTab(tab, focus) {
+    for (const candidate of document.querySelectorAll('[role="tab"]')) {
+      const active = candidate === tab;
+      candidate.setAttribute('aria-selected', String(active));
+      candidate.tabIndex = active ? 0 : -1;
+      document.getElementById(candidate.getAttribute('aria-controls')).hidden = !active;
+    }
+    if (focus) tab.focus();
+    document.querySelector('main').scrollTop = 0;
+  }
+
+  const tabs = [...document.querySelectorAll('[role="tab"]')];
+  for (const tab of tabs) {
+    tab.addEventListener('click', () => activateTab(tab, false));
+    tab.addEventListener('keydown', (event) => {
+      const current = tabs.indexOf(tab);
+      let next = current;
+      if (event.key === 'ArrowRight') next = (current + 1) % tabs.length;
+      else if (event.key === 'ArrowLeft') next = (current - 1 + tabs.length) % tabs.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = tabs.length - 1;
+      else return;
+      event.preventDefault();
+      activateTab(tabs[next], true);
+    });
+  }
+
+  for (const name of fieldNames) {
+    els[name].addEventListener('input', () => {
+      updateDirtyState();
+      if (name === 'checkUpdates') updateButton.disabled = busy || !els.checkUpdates.checked;
+    });
+    els[name].addEventListener('change', updateDirtyState);
+  }
+
+  document.getElementById('reset-hotkey').addEventListener('click', () => {
+    els.hotkey.value = 'CommandOrControl+Shift+H';
+    els.hotkey.dispatchEvent(new Event('input', { bubbles: true }));
+    els.hotkey.focus();
+  });
+  document.getElementById('choose-workdir').addEventListener('click', chooseWorkdir);
+  document.getElementById('check-update').addEventListener('click', checkUpdate);
+  document.getElementById('restart-now').addEventListener('click', restartBackend);
+  saveButton.addEventListener('click', save);
+  cancelButton.addEventListener('click', () => window.close());
+  document.addEventListener('keydown', (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      if (!saveButton.disabled) save();
+    }
+    if (event.key === 'Escape' && !busy) window.close();
+  });
+
+  if (!api) {
+    setStatus('设置桥接不可用，请重新启动鲸坞', 'error');
+    setBusy(false);
+  } else {
+    load();
+  }
+})();
+</script>
+</body>
+</html>

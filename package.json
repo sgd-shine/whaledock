@@ -27,7 +27,9 @@
     "files": [
       "main.js",
       "preload.js",
+      "preload-settings.js",
       "splash.html",
+      "settings.html",
       "lib/**/*",
       "assets/**/*",
       "package.json"

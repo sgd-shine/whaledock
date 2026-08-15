@@ -25,6 +25,29 @@ async function main() {
   const data = config.init(tmp);
   check('config: 默认值加载', data.port === 3080 && data.autoStartBackend === true);
   check('config: 默认锁定后端版本', data.dshVersion === '0.1.0-rc.6');
+  check('config: v0.2 五个新字段默认值正确',
+    data.preferBundled === false
+      && data.openAtLogin === false
+      && data.startMinimized === false
+      && data.checkUpdates === true
+      && data.skipVersion === null);
+
+  const oldConfigDir = path.join(tmp, 'old-config');
+  fs.mkdirSync(oldConfigDir, { recursive: true });
+  fs.writeFileSync(path.join(oldConfigDir, 'config.json'), JSON.stringify({
+    port: 4321,
+    hotkey: 'CommandOrControl+Shift+J'
+  }));
+  const upgraded = config.init(oldConfigDir);
+  check('config: 旧配置无损补齐 v0.2 默认值',
+    upgraded.port === 4321
+      && upgraded.hotkey === 'CommandOrControl+Shift+J'
+      && upgraded.preferBundled === false
+      && upgraded.openAtLogin === false
+      && upgraded.startMinimized === false
+      && upgraded.checkUpdates === true
+      && upgraded.skipVersion === null);
+  config.init(tmp);
   config.set({ port: PORT, command: `node "${path.join(__dirname, 'fake-backend.js')}"` });
   check('config: 写入并读取', config.get('port') === PORT);
   check('config: 文件已落盘', fs.existsSync(config.filePath()));
@@ -99,6 +122,17 @@ async function main() {
       && JSON.stringify(windowsKill[0].args) === JSON.stringify(['/PID', '5678', '/T'])
       && windowsKill[1].ms === 4000
       && JSON.stringify(windowsKill[2].args) === JSON.stringify(['/PID', '5678', '/T', '/F']));
+
+  const harnessPage = backend.classifyHarnessResponse(
+    { 'content-type': 'text/html; charset=utf-8' },
+    '<!doctype html><html><head><title>DeepSeek Harness</title></head></html>'
+  );
+  const otherPage = backend.classifyHarnessResponse(
+    { 'content-type': 'text/html' },
+    '<html><head><title>Another local service</title></head></html>'
+  );
+  check('backend: attach 弱特征分类 match / mismatch',
+    harnessPage.status === 'match' && otherPage.status === 'mismatch');
 
   const fakeWindowsChild = new EventEmitter();
   fakeWindowsChild.pid = 6789;

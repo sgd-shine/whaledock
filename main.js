@@ -8,6 +8,7 @@ const {
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
 const config = require('./lib/config');
 const backend = require('./lib/backend');
 const log = require('./lib/log');
@@ -17,11 +18,13 @@ app.setName('WhaleDock');
 const isMac = process.platform === 'darwin';
 const SMOKE = !!process.env.HARNESS_SMOKE; // 无头自测模式（CI/沙箱用）
 const UPSTREAM_URL = 'https://github.com/deepseek-ai/deepseek-harness';
+const MANUAL_URL = 'https://github.com/sgd-shine/whaledock/blob/main/docs/%E6%93%8D%E4%BD%9C%E6%89%8B%E5%86%8C.md';
 const BACKEND_RECOVERY_DELAYS_MS = [1000, 2000, 4000];
 const BACKEND_RECOVERY_TIMEOUT_MS = 30 * 1000;
 
 let mainWindow = null;
 let splash = null;
+let settingsWindow = null;
 let tray = null;
 let backendState = null;
 let spawnedByUs = false;
@@ -30,6 +33,10 @@ let startupPromise = null;
 let startupGeneration = 0;
 let recoveringBackend = false;
 let backendRecoveryGeneration = 0;
+let backendReady = false;
+let initialStartMinimized = false;
+let lastStatus = { phase: 'checking', text: '正在启动…', detail: '' };
+let pendingAttachDecision = null;
 const pendingBackendStops = new Set();
 
 // ---------- 单实例 ----------
@@ -65,8 +72,13 @@ function sendSplash(channel, payload) {
 }
 
 function status(phase, text, detail) {
+  lastStatus = { phase, text, detail: detail || '' };
   log.line('app', `${phase}: ${text}${detail ? ' — ' + detail : ''}`);
-  sendSplash('status', { phase, text, detail });
+  if ((phase === 'error' || phase === 'warning')
+      && (!splash || splash.isDestroyed()) && app.isReady()) {
+    createSplash();
+  }
+  sendSplash('status', lastStatus);
   if (phase === 'error' && SMOKE) {
     console.log('SMOKE_FAIL: ' + text);
     app.exit(1);
@@ -83,15 +95,19 @@ async function onReady() {
   config.init(app.getPath('userData'));
   log.init(path.join(app.getPath('userData'), 'logs'));
   log.line('app', `鲸坞 WhaleDock v${app.getVersion()} 启动 (${process.platform}/${process.arch})`);
+  initialStartMinimized = config.get('startMinimized') && !SMOKE;
 
   if (SMOKE) setTimeout(() => { console.log('SMOKE_TIMEOUT'); app.exit(2); }, 90 * 1000);
 
   ipcMain.on('splash-action', onSplashAction);
-  createSplash();
+  registerSettingsIpc();
+  reconcileLoginItem();
+  if (!initialStartMinimized) createSplash();
+  else log.line('app', '启动最小化已启用：后台启动期间不创建启动页或主窗口');
   createTray();
   createAppMenu();
   registerHotkey();
-  await ensureBackendAndShow();
+  await ensureBackendAndShow(!initialStartMinimized);
 }
 
 function startManagedBackend() {
@@ -121,10 +137,10 @@ async function waitForPendingBackendStops() {
   await Promise.allSettled(pending);
 }
 
-function ensureBackendAndShow() {
+function ensureBackendAndShow(showWindow = true) {
   if (startupPromise) return startupPromise;
   const generation = ++startupGeneration;
-  const run = ensureBackendAndShowOnce(generation);
+  const run = ensureBackendAndShowOnce(generation, showWindow);
   startupPromise = run;
   const clear = () => {
     if (startupPromise === run) startupPromise = null;
@@ -140,10 +156,15 @@ function startupIsCurrent(generation) {
 function cancelForegroundStartup(reason) {
   if (startupPromise && reason) log.line('app', `取消前台启动：${reason}`);
   startupGeneration += 1;
+  if (pendingAttachDecision) {
+    pendingAttachDecision.resolve(null);
+    pendingAttachDecision = null;
+  }
 }
 
-async function ensureBackendAndShowOnce(generation) {
+async function ensureBackendAndShowOnce(generation, showWindow) {
   try {
+    backendReady = false;
     const port = config.get('port');
     status('checking', '正在检查本地 Harness 服务…');
 
@@ -158,8 +179,28 @@ async function ensureBackendAndShowOnce(generation) {
       const ownProcessAlive = !!(backendState && !backendState.exited);
       spawnedByUs = ownProcessAlive;
       if (!ownProcessAlive) backendState = null;
+      const probe = await backend.probeHarness(port);
+      if (!startupIsCurrent(generation)) return;
+      if (probe.status === 'mismatch') {
+        status('warning', `端口 ${port} 上有服务但不像 Harness，可能是其他程序占用`,
+          '你可以仍然接入，或打开设置修改端口');
+        const decision = await new Promise((resolve) => {
+          pendingAttachDecision = { generation, resolve };
+        });
+        if (pendingAttachDecision && pendingAttachDecision.generation === generation) {
+          pendingAttachDecision = null;
+        }
+        if (!startupIsCurrent(generation) || decision !== 'attach') return;
+        showWindow = true;
+      } else if (probe.status === 'unknown') {
+        log.line('app', `attach 弱特征判定失败，按原逻辑接入：${probe.reason || '未知原因'}`);
+      }
       status('attach', `检测到端口 ${port} 已有服务，直接接入`);
-      return openMainWindow();
+      backendReady = true;
+      if (showWindow) return openMainWindow();
+      closeSplash();
+      log.line('app', '服务已就绪，保持最小化到托盘');
+      return;
     }
 
     if (!config.get('autoStartBackend')) {
@@ -218,8 +259,14 @@ async function ensureBackendAndShowOnce(generation) {
       return;
     }
 
-    status('ready', '服务已就绪，正在打开窗口…');
-    openMainWindow();
+    backendReady = true;
+    if (showWindow) {
+      status('ready', '服务已就绪，正在打开窗口…');
+      openMainWindow();
+    } else {
+      status('ready', '服务已就绪，保持最小化到托盘');
+      closeSplash();
+    }
   } catch (e) {
     log.line('app', 'ensureBackend error: ' + (e && e.stack || e));
     if (startupIsCurrent(generation)) status('error', '启动出错', String(e && e.message || e));
@@ -302,6 +349,7 @@ async function recoverBackendInBackground() {
         spawnedByUs = ownProcessAlive;
         if (!ownProcessAlive) backendState = null;
         recoveringBackend = false;
+        backendReady = true;
         log.line('app', `后台恢复：第 ${attempt}/${total} 次成功，端口已有服务`);
         reloadMainWindowAfterRecovery();
         return;
@@ -330,6 +378,7 @@ async function recoverBackendInBackground() {
         const readyAndOwned = ready && !attemptState.exited && backendState === attemptState;
         if (readyAndOwned) {
           recoveringBackend = false;
+          backendReady = true;
           log.line('app', `后台恢复：第 ${attempt}/${total} 次成功`);
           reloadMainWindowAfterRecovery();
           return;
@@ -375,6 +424,7 @@ function onBackendExit(state, code) {
   const wasSpawnedByUs = spawnedByUs;
   backendState = null;
   spawnedByUs = false;
+  backendReady = false;
   if (quitting || !wasSpawnedByUs) return;
   if (startupPromise) {
     log.line('app', '后端在前台启动流程中退出，交由启动页处理');
@@ -395,13 +445,14 @@ function onBackendExit(state, code) {
     }).catch((e) => {
       log.line('app', '显示后端退出提示失败: ' + (e && e.message || e));
     });
-  } else if (mainWindow && !mainWindow.isDestroyed()) {
+  } else {
     void recoverBackendInBackground();
   }
 }
 
 // ---------- 窗口 ----------
 function createSplash() {
+  if (splash && !splash.isDestroyed()) return splash;
   splash = new BrowserWindow({
     width: 520,
     height: 440,
@@ -414,15 +465,22 @@ function createSplash() {
       nodeIntegration: false
     }
   });
-  splash.loadFile('splash.html');
+  void splash.loadFile('splash.html');
+  splash.webContents.once('did-finish-load', () => {
+    sendSplash('status', lastStatus);
+    for (const line of String(log.recent() || '').split('\n').slice(-40)) {
+      if (line) sendSplash('log', line);
+    }
+  });
   splash.on('closed', () => {
     splash = null;
     // 主窗口还没出来就关掉启动页 = 用户想退出
-    if (!mainWindow && !quitting) {
+    if (!mainWindow && !settingsWindow && !quitting) {
       quitting = true;
       app.quit();
     }
   });
+  return splash;
 }
 
 function closeSplash() {
@@ -528,9 +586,15 @@ function showApp() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
     mainWindow.focus();
+  } else if (backendReady) {
+    openMainWindow();
   } else if (splash && !splash.isDestroyed()) {
     splash.show();
     splash.focus();
+  } else {
+    const win = createSplash();
+    win.show();
+    win.focus();
   }
 }
 
@@ -543,6 +607,236 @@ function toggleWindow() {
   }
 }
 
+// ---------- 设置窗 / 登录项 ----------
+function portableExecutableFile() {
+  const value = process.env.PORTABLE_EXECUTABLE_FILE;
+  return value ? path.resolve(value) : null;
+}
+
+function isPortableBuild() {
+  return Boolean(portableExecutableFile() || process.env.PORTABLE_EXECUTABLE_DIR);
+}
+
+function loginItemOptions(openAtLogin) {
+  const options = { openAtLogin: Boolean(openAtLogin) };
+  if (process.platform === 'win32') {
+    options.path = portableExecutableFile() || process.execPath;
+    options.args = [];
+  }
+  if (isMac) options.openAsHidden = Boolean(config.get('startMinimized'));
+  return options;
+}
+
+function loginItemStatus(errorMessage = '') {
+  const desired = Boolean(config.get('openAtLogin'));
+  try {
+    const query = loginItemOptions(desired);
+    const actualState = app.getLoginItemSettings(query);
+    const actual = typeof actualState.executableWillLaunchAtLogin === 'boolean'
+      ? actualState.executableWillLaunchAtLogin
+      : Boolean(actualState.openAtLogin);
+    let error = errorMessage;
+    if (!error && desired !== actual) {
+      error = desired && isMac
+        ? '系统未接受，请在 系统设置→通用→登录项 手动添加'
+        : (desired ? '系统未接受开机自启设置' : '系统登录项仍在启用，请重试或手动移除');
+    }
+    return {
+      desired,
+      actual,
+      error: error || null,
+      path: process.platform === 'win32' ? query.path : null
+    };
+  } catch (error) {
+    return { desired, actual: false, error: errorMessage || error.message, path: null };
+  }
+}
+
+function applyLoginItem(desired) {
+  try {
+    app.setLoginItemSettings(loginItemOptions(desired));
+    return loginItemStatus();
+  } catch (error) {
+    return loginItemStatus(error.message);
+  }
+}
+
+function reconcileLoginItem() {
+  const desired = Boolean(config.get('openAtLogin'));
+  const before = loginItemStatus();
+  if (before.actual !== desired || (desired && portableExecutableFile())) {
+    const after = applyLoginItem(desired);
+    if (desired && portableExecutableFile()) {
+      log.line('app', `便携版登录项已对账为当前路径：${portableExecutableFile()}`);
+    }
+    if (after.error) log.line('app', `开机自启对账失败：${after.error}`);
+    else log.line('app', `开机自启对账完成：${after.actual ? '已启用' : '已关闭'}`);
+  }
+}
+
+function switchHotkey(previous, next) {
+  if (previous === next) return;
+  if (previous) globalShortcut.unregister(previous);
+  let registered = false;
+  try { registered = globalShortcut.register(next, () => toggleWindow()); } catch (_e) { registered = false; }
+  if (registered) return;
+
+  let restored = !previous;
+  if (previous) {
+    try { restored = globalShortcut.register(previous, () => toggleWindow()); } catch (_e) { restored = false; }
+  }
+  throw new Error(restored
+    ? '该组合键被占用，已恢复原快捷键'
+    : '该组合键被占用，且原快捷键恢复失败；请重启鲸坞');
+}
+
+function settingsSnapshot() {
+  const current = config.get();
+  const result = {};
+  for (const key of config.SETTINGS_FIELDS) result[key] = current[key];
+  return result;
+}
+
+function settingsRuntime() {
+  return {
+    platform: process.platform,
+    arch: process.arch,
+    version: app.getVersion(),
+    portable: isPortableBuild(),
+    loginItem: loginItemStatus(),
+    manualUrl: MANUAL_URL,
+    logsUrl: pathToFileURL(log.dirPath()).href
+  };
+}
+
+function trustedSettingsEvent(event) {
+  if (!settingsWindow || settingsWindow.isDestroyed()) return false;
+  if (event.sender !== settingsWindow.webContents) return false;
+  if (!event.senderFrame || event.senderFrame !== event.sender.mainFrame) return false;
+  return event.senderFrame.url === pathToFileURL(path.join(__dirname, 'settings.html')).href;
+}
+
+function trustedSettingsHandler(handler) {
+  return async (event, ...args) => {
+    if (!trustedSettingsEvent(event)) throw new Error('拒绝非设置窗的 IPC 请求');
+    return handler(...args);
+  };
+}
+
+function registerSettingsIpc() {
+  const channels = [
+    'settings:get', 'settings:apply', 'settings:choose-workdir',
+    'settings:restart-backend', 'settings:check-update'
+  ];
+  for (const channel of channels) ipcMain.removeHandler(channel);
+
+  ipcMain.handle('settings:get', trustedSettingsHandler(async () => ({
+    settings: settingsSnapshot(),
+    runtime: settingsRuntime()
+  })));
+
+  ipcMain.handle('settings:apply', trustedSettingsHandler(async (patch) => {
+    const before = config.get();
+    const normalized = config.validateSettingsPatch(patch);
+    const needsRestart = config.restartRequired(before, normalized);
+    const hotkeyChanged = Object.prototype.hasOwnProperty.call(normalized, 'hotkey')
+      && normalized.hotkey !== before.hotkey;
+    const loginChanged = Object.prototype.hasOwnProperty.call(normalized, 'openAtLogin')
+      && normalized.openAtLogin !== before.openAtLogin;
+    let login = loginItemStatus();
+    let loginError = '';
+
+    if (hotkeyChanged) switchHotkey(before.hotkey, normalized.hotkey);
+    if (loginChanged) {
+      // loginItemStatus 的 desired 来自配置；先按新期望写系统，保存后再做真实回读。
+      try { app.setLoginItemSettings(loginItemOptions(normalized.openAtLogin)); }
+      catch (error) { loginError = error.message; }
+    }
+
+    try {
+      config.set(normalized);
+    } catch (error) {
+      if (hotkeyChanged) {
+        try { switchHotkey(normalized.hotkey, before.hotkey); } catch (rollbackError) {
+          log.line('app', `配置写入失败后快捷键回滚也失败：${rollbackError.message}`);
+        }
+      }
+      if (loginChanged) applyLoginItem(before.openAtLogin);
+      throw error;
+    }
+
+    if (loginChanged) login = loginItemStatus(loginError);
+    log.line('app', `设置已保存${needsRestart ? '（后端需重启）' : ''}`);
+    return {
+      ok: true,
+      settings: settingsSnapshot(),
+      restartRequired: needsRestart,
+      message: needsRestart ? '已保存，重启后端生效' : '设置已保存',
+      loginItem: login
+    };
+  }));
+
+  ipcMain.handle('settings:choose-workdir', trustedSettingsHandler(async () => {
+    const result = await dialog.showOpenDialog(settingsWindow, {
+      title: '选择 Harness 工作目录',
+      properties: ['openDirectory', 'createDirectory']
+    });
+    return result.canceled ? null : result.filePaths[0] || null;
+  }));
+
+  ipcMain.handle('settings:restart-backend', trustedSettingsHandler(async () => {
+    await restartBackend();
+    return { ok: true, message: '后端已重启' };
+  }));
+
+  ipcMain.handle('settings:check-update', trustedSettingsHandler(async () => {
+    if (!config.get('checkUpdates')) return { ok: false, message: '自动检查更新已关闭' };
+    return { ok: false, message: '更新检查将在批次 4 接入' };
+  }));
+}
+
+function openSettingsWindow() {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.show();
+    settingsWindow.focus();
+    return;
+  }
+  const settingsFileUrl = pathToFileURL(path.join(__dirname, 'settings.html')).href;
+  const logsUrl = pathToFileURL(log.dirPath()).href;
+  const win = new BrowserWindow({
+    width: 560,
+    height: 680,
+    minWidth: 520,
+    minHeight: 560,
+    show: false,
+    title: '鲸坞设置',
+    backgroundColor: '#090e17',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-settings.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+  settingsWindow = win;
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url === MANUAL_URL) void shell.openExternal(url);
+    else if (url === logsUrl) void shell.openPath(log.dirPath());
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (event, url) => {
+    if (url !== settingsFileUrl) event.preventDefault();
+  });
+  win.once('ready-to-show', () => {
+    if (!win.isDestroyed()) {
+      win.show();
+      win.focus();
+    }
+  });
+  win.on('closed', () => { if (settingsWindow === win) settingsWindow = null; });
+  void win.loadFile('settings.html');
+}
+
 // ---------- 托盘 / 菜单 / 快捷键 ----------
 function createTray() {
   try {
@@ -553,6 +847,7 @@ function createTray() {
     tray.setToolTip('鲸坞 WhaleDock');
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: '显示 / 隐藏窗口', click: () => toggleWindow() },
+      { label: '设置…', click: () => openSettingsWindow() },
       { label: '在浏览器中打开', click: () => shell.openExternal(baseUrl()) },
       { type: 'separator' },
       { label: '重启后端', click: () => restartBackend() },
@@ -561,6 +856,7 @@ function createTray() {
       { type: 'separator' },
       { label: '退出鲸坞', click: () => { quitting = true; app.quit(); } }
     ]));
+    if (!isMac) tray.on('click', () => toggleWindow());
   } catch (e) {
     log.line('app', 'tray 创建失败: ' + e.message);
   }
@@ -573,13 +869,22 @@ function createAppMenu() {
       submenu: [
         { role: 'about', label: '关于鲸坞 WhaleDock' },
         { type: 'separator' },
+        { label: '设置…', accelerator: 'Command+,', click: () => openSettingsWindow() },
+        { type: 'separator' },
         { role: 'hide', label: '隐藏' },
         { role: 'hideOthers' },
         { role: 'unhide' },
         { type: 'separator' },
         { role: 'quit', label: '退出鲸坞 WhaleDock' }
       ]
-    }] : []),
+    }] : [{
+      label: '文件',
+      submenu: [
+        { label: '设置…', click: () => openSettingsWindow() },
+        { type: 'separator' },
+        { label: '退出鲸坞', click: () => { quitting = true; app.quit(); } }
+      ]
+    }]),
     {
       label: '编辑',
       submenu: [
@@ -640,6 +945,7 @@ function registerHotkey() {
 
 async function restartBackend() {
   log.line('app', '重启后端…');
+  backendReady = false;
   cancelBackendRecovery('用户手动重启后端');
   cancelForegroundStartup('用户手动重启后端');
   const inFlightStartup = startupPromise;
@@ -689,6 +995,12 @@ function onSplashAction(_e, name) {
   else if (name === 'quit') { quitting = true; app.quit(); }
   else if (name === 'copy-logs') clipboard.writeText(log.recent() || '(暂无日志)');
   else if (name === 'open-logs') shell.openPath(log.dirPath());
+  else if (name === 'open-settings') openSettingsWindow();
+  else if (name === 'attach-anyway' && pendingAttachDecision) {
+    const pending = pendingAttachDecision;
+    pendingAttachDecision = null;
+    pending.resolve('attach');
+  }
 }
 
 // ---------- 生命周期 ----------

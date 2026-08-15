@@ -12,6 +12,7 @@
     --accent: #6366f1;
     --accent2: #22d3ee;
     --err: #f87171;
+    --warn: #fbbf24;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; }
@@ -49,6 +50,7 @@
   }
   @keyframes slide { 0% { left: -40%; } 100% { left: 100%; } }
   .bar.stopped::after { animation: none; background: var(--err); left: 0; width: 100%; }
+  .bar.warning::after { animation: none; background: var(--warn); left: 0; width: 100%; }
   #log {
     width: 100%; max-width: 460px; height: 96px;
     background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.07);
@@ -95,15 +97,23 @@
     <button onclick="harness.action('open-logs')">打开日志</button>
     <button onclick="harness.action('quit')">退出</button>
   </div>
+  <div class="btns" id="warning-btns">
+    <button class="primary" onclick="harness.action('attach-anyway')">仍然接入</button>
+    <button onclick="harness.action('open-settings')">打开设置改端口</button>
+  </div>
 <script>
   const $ = (id) => document.getElementById(id);
   window.harness.onStatus((p) => {
     $('status').textContent = p.text || '';
     $('detail').textContent = p.detail || '';
     const isErr = p.phase === 'error';
+    const isWarning = p.phase === 'warning';
     $('bar').classList.toggle('stopped', isErr);
+    $('bar').classList.toggle('warning', isWarning);
     $('btns').classList.toggle('show', isErr);
+    $('warning-btns').classList.toggle('show', isWarning);
     if (isErr) $('status').style.color = 'var(--err)';
+    else if (isWarning) $('status').style.color = 'var(--warn)';
     else $('status').style.color = 'var(--text)';
   });
   window.harness.onLog((line) => {
