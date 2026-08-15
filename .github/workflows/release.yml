@@ -1,5 +1,5 @@
-# 打 tag（比如 v0.1.0）自动构建 macOS 安装包并发布 Release
-# 用法：git tag v0.1.0 && git push origin v0.1.0
+# 推送 SemVer tag 后构建 macOS/Windows 全部产物；公开 Release 另受绑定产物哈希的审批门控。
+# v0.2.0-beta 会构建成包内版本 0.2.0-beta，并标记为 prerelease。
 name: Release
 
 on:
@@ -8,11 +8,11 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-mac:
-    runs-on: macos-latest
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -24,19 +24,208 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify committed compliance materials
+        run: npm run compliance:verify
+
+      - name: Set package version from tag
+        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+
       - name: Smoke test (no GUI)
         run: npm run smoke
 
-      - name: Build .dmg / .zip
-        run: npx electron-builder --mac --publish never
+      - name: Bundle dsh for macOS arm64
+        run: npm run bundle:dsh -- --platform=darwin --arch=arm64
+
+      - name: Verify macOS arm64 third-party inventory
+        run: node scripts/third-party-inventory.js verify --runtime=vendor/dsh-runtime --inventory=compliance/inventory-darwin-arm64.json
+
+      - name: Build macOS arm64 DMG and ZIP
+        # runtime 已在上一步按 inventory 核验；这里直接打包，避免 predist 再生成一次后绕过核验。
+        run: npx --no-install electron-builder --mac dmg zip --arm64 --publish never
         env:
-          # 没有 Apple 开发者证书也能构建（未签名包，用户首次打开需右键→打开）
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
-      - name: Publish release
+      - name: Verify packaged macOS arm64 compliance materials
+        run: node scripts/verify-packaged-compliance.js --search=release --minimum=1
+
+      - name: Bundle dsh for macOS x64
+        run: npm run bundle:dsh -- --platform=darwin --arch=x64
+
+      - name: Verify macOS x64 third-party inventory
+        run: node scripts/third-party-inventory.js verify --runtime=vendor/dsh-runtime --inventory=compliance/inventory-darwin-x64.json
+
+      - name: Build macOS x64 DMG and ZIP
+        # 同上，确保进入产物的就是刚核验过的 x64 runtime。
+        run: npx --no-install electron-builder --mac dmg zip --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Verify packaged macOS compliance materials
+        run: node scripts/verify-packaged-compliance.js --search=release --minimum=2
+
+      - name: Verify macOS artifact names and write checksums
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          cd release
+          assets=(
+            "WhaleDock-${version}-arm64.dmg"
+            "WhaleDock-${version}-arm64-mac.zip"
+            "WhaleDock-${version}-x64.dmg"
+            "WhaleDock-${version}-x64-mac.zip"
+          )
+          for asset in "${assets[@]}"; do test -f "$asset"; done
+          shasum -a 256 "${assets[@]}" > SHA256SUMS-mac.txt
+          node - "${assets[@]}" <<'NODE'
+          const fs = require('fs');
+          const update = require('../lib/update');
+          const sums = fs.readFileSync('SHA256SUMS-mac.txt', 'utf8');
+          for (const asset of process.argv.slice(2)) update.checksumForAsset(sums, asset);
+          NODE
+
+      - name: Upload macOS release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: whaledock-mac-${{ github.ref_name }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            release/WhaleDock-*.dmg
+            release/WhaleDock-*-mac.zip
+            release/SHA256SUMS-mac.txt
+
+  build-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify committed compliance materials
+        run: npm run compliance:verify
+
+      - name: Set package version from tag
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          npm version --no-git-tag-version --allow-same-version $version
+
+      - name: Smoke test (no GUI)
+        run: npm run smoke
+
+      - name: Bundle dsh for Windows x64
+        run: npm run bundle:dsh -- --platform=win32 --arch=x64
+
+      - name: Verify Windows x64 third-party inventory
+        run: node scripts/third-party-inventory.js verify --runtime=vendor/dsh-runtime --inventory=compliance/inventory-win32-x64.json
+
+      - name: Build Windows installer and portable executable
+        # runtime 已按 Windows inventory 核验，禁止 predist 重建后绕过材料门。
+        run: npx --no-install electron-builder --win nsis portable --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Verify packaged Windows compliance materials
+        run: node scripts/verify-packaged-compliance.js --search=release --minimum=1
+
+      - name: Verify Windows artifact names and write checksums
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $assets = @(
+            "WhaleDock-Setup-$version.exe",
+            "WhaleDock-$version-portable.exe"
+          )
+          Push-Location release
+          foreach ($asset in $assets) {
+            if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) {
+              throw "Missing release asset: $asset"
+            }
+          }
+          $lines = foreach ($asset in $assets) {
+            $hash = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $asset"
+          }
+          $lines | Set-Content -LiteralPath SHA256SUMS-win.txt -Encoding ascii
+          node -e "const fs=require('fs');const update=require('../lib/update');const sums=fs.readFileSync('SHA256SUMS-win.txt','utf8');for(const asset of process.argv.slice(1))update.checksumForAsset(sums,asset)" @assets
+          if ($LASTEXITCODE -ne 0) {
+            throw "Update checksum contract validation failed"
+          }
+          Pop-Location
+
+      - name: Upload Windows release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: whaledock-win-${{ github.ref_name }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            release/WhaleDock-Setup-*.exe
+            release/WhaleDock-*-portable.exe
+            release/SHA256SUMS-win.txt
+
+  publish-release:
+    needs: [build-mac, build-windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all release assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: whaledock-*-${{ github.ref_name }}
+          merge-multiple: true
+          path: release-assets
+
+      - name: Verify release set and enforce public release approval
+        shell: bash
+        env:
+          WHALEDOCK_BUNDLED_COMPLIANCE_APPROVAL: ${{ vars.WHALEDOCK_BUNDLED_COMPLIANCE_APPROVAL }}
+        run: |
+          cd release-assets
+          sed 's/\r$//' SHA256SUMS-mac.txt SHA256SUMS-win.txt |
+            sed '/^[[:space:]]*$/d' |
+            LC_ALL=C sort > SHA256SUMS-all.txt
+          sha256sum --check SHA256SUMS-all.txt
+
+          release_set_sha="$(sha256sum SHA256SUMS-all.txt | awk '{print $1}')"
+          expected="release:${GITHUB_REF_NAME}:sha256:${release_set_sha}"
+          if [[ "${WHALEDOCK_BUNDLED_COMPLIANCE_APPROVAL:-}" != "$expected" ]]; then
+            {
+              echo "## 公开 Release 已被审批门阻止"
+              echo
+              echo "构建产物已保留在本次 Actions run，可供精确哈希、inventory 与合规回读。"
+              echo
+              echo "确认无 S1 且 G1、平台 inventory 与成品材料闭环后，将仓库变量临时设为："
+              echo
+              printf '    %s\n' "$expected"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=Public Release blocked::G1/compliance approval does not match this exact release set"
+            exit 1
+          fi
+
+      - name: Publish one GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/*.dmg
-            release/*.zip
+            release-assets/WhaleDock-*.dmg
+            release-assets/WhaleDock-*-mac.zip
+            release-assets/WhaleDock-Setup-*.exe
+            release-assets/WhaleDock-*-portable.exe
+            release-assets/SHA256SUMS-mac.txt
+            release-assets/SHA256SUMS-win.txt
+          fail_on_unmatched_files: true
           generate_release_notes: true
+          body: |
+            ## 重要平台边界
+
+            - macOS 构建未签名、未公证；首次启动通常需要右键 App 后选择“打开”。
+            - Windows x64 构建未签名，且为实验性支持，尚未完成 Windows 真机验证；SmartScreen 拦截时可选择“更多信息 → 仍要运行”。遇到问题请提交 issue，并附鲸坞日志与完整资产名。
+            - Intel x64 仅在 Apple Silicon + Rosetta 环境抽查，尚未完成 Intel Mac 真机验证。
+          prerelease: ${{ contains(github.ref_name, '-') }}

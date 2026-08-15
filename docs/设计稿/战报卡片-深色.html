@@ -1,0 +1,47 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:1080px; height:1440px; overflow:hidden; }
+body { font-family:"Noto Sans CJK SC","PingFang SC",sans-serif; color:#e5e7eb;
+  background:radial-gradient(1400px 800px at 18% -8%, #16213e 0%, #0b0f19 58%);
+  display:flex; flex-direction:column; padding:88px 84px; position:relative; }
+.brand { display:flex; align-items:center; gap:22px; }
+.brand svg { width:76px; height:76px; }
+.brand .name { font-size:40px; font-weight:700; letter-spacing:1px; }
+.brand .en { font-size:24px; color:#9ca3af; letter-spacing:3px; margin-top:4px; }
+.done { margin-top:110px; display:flex; align-items:center; gap:26px; }
+.check { width:76px; height:76px; border-radius:50%; background:linear-gradient(145deg,#22d3ee,#4f46e5);
+  display:flex; align-items:center; justify-content:center; font-size:44px; color:#fff; font-weight:800; }
+.done .t { font-size:56px; font-weight:700; }
+.task { margin-top:52px; font-size:74px; font-weight:800; line-height:1.28; letter-spacing:1px; }
+.task .hl { color:#7dd3fc; }
+.grid { margin-top:96px; display:grid; grid-template-columns:1fr 1fr; gap:34px; }
+.cell { background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.09);
+  border-radius:26px; padding:38px 42px; }
+.cell .k { font-size:28px; color:#9ca3af; letter-spacing:2px; }
+.cell .v { font-size:58px; font-weight:800; margin-top:14px; }
+.cell .v small { font-size:30px; font-weight:500; color:#9ca3af; margin-left:8px; }
+.cyan { color:#22d3ee; } .indigo { color:#a5b4fc; }
+.wave { position:absolute; left:0; right:0; bottom:196px; height:120px; opacity:.5; }
+.footer { margin-top:auto; display:flex; justify-content:space-between; align-items:flex-end; position:relative; z-index:2; }
+.slogan { font-size:30px; color:#9ca3af; }
+.slogan b { color:#e5e7eb; font-weight:600; }
+.meta { text-align:right; font-size:26px; color:#6b7280; line-height:1.8; }
+</style></head><body>
+  <div class="brand">
+    <svg viewBox="0 0 100 100"><path d="M76 44 C80 36 86 30 92 27.5 C94.5 26.5 96 29 94.2 31.3 C90.5 36 87.5 40.5 85.5 46 Z" fill="#fff"/><path d="M76 46 C80 54 86 60 92 62.5 C94.5 63.5 96 61 94.2 58.7 C90.5 54 87.5 49.5 85.5 44 Z" fill="#fff"/><path d="M14 52 C14 36 30 26 48 26 C66 26 78 34 79 45 C78 56 66 66 48 66 C30 66 14 62 14 52 Z" fill="#fff"/><circle cx="30" cy="44" r="3.2" fill="#0b0f19"/><path d="M32 14 C32 11 36 11 36 14 L36 19 C36 22 32 22 32 19 Z" fill="#a5f3fc"/><path d="M42 9 C42 6 46 6 46 9 L46 16 C46 19 42 19 42 16 Z" fill="#a5f3fc"/><path d="M20 78 C34 86 66 86 80 78" stroke="#22d3ee" stroke-width="7" stroke-linecap="round" fill="none"/></svg>
+    <div><div class="name">鲸坞</div><div class="en">WHALEDOCK</div></div>
+  </div>
+  <div class="done"><div class="check">✓</div><div class="t">AI 任务完成</div></div>
+  <div class="task">重构官网首页文案，<br>并生成 <span class="hl">3 版</span>备选方案</div>
+  <div class="grid">
+    <div class="cell"><div class="k">耗时</div><div class="v">12<small>分</small>34<small>秒</small></div></div>
+    <div class="cell"><div class="k">TOKEN 消耗</div><div class="v cyan">48,230</div></div>
+    <div class="cell"><div class="k">成本</div><div class="v">¥ 0.87</div></div>
+    <div class="cell"><div class="k">模型</div><div class="v indigo" style="font-size:44px;margin-top:22px">deepseek-chat</div></div>
+  </div>
+  <svg class="wave" viewBox="0 0 1080 120" preserveAspectRatio="none"><path d="M0 70 C180 30 360 110 540 70 C720 30 900 110 1080 70 L1080 120 L0 120 Z" fill="#4f46e5" opacity=".25"/><path d="M0 85 C180 45 360 125 540 85 C720 45 900 125 1080 85 L1080 120 L0 120 Z" fill="#22d3ee" opacity=".18"/></svg>
+  <div class="footer">
+    <div class="slogan"><b>给鲸鱼一个靠岸的坞</b><br>github.com/sgd-shine/whaledock</div>
+    <div class="meta">2026-08-14 22:41<br>鲸坞 WhaleDock v0.3</div>
+  </div>
+</body></html>

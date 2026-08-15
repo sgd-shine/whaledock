@@ -1,0 +1,297 @@
+{
+  "schemaVersion": 1,
+  "verifiedAt": "2026-08-15",
+  "scope": "WhaleDock bundled dsh runtime for darwin/arm64, darwin/x64 and win32/x64",
+  "buildRecipes": [
+    {
+      "id": "sharp-libvips@1.3.2",
+      "sourceUrl": "https://github.com/lovell/sharp-libvips/archive/4da6d14c0d59866adfb9d8cf52bcaa53846dc4f6.tar.gz",
+      "sourceSha256": "4f438a108427ed9054c62c134c559af10522815ea42892a9ca31f655d97fc806",
+      "commit": "4da6d14c0d59866adfb9d8cf52bcaa53846dc4f6",
+      "tag": "v1.3.2",
+      "verificationMethod": "tag-commit-and-downloaded-archive-sha256",
+      "upstreamAttestation": true
+    },
+    {
+      "id": "sharp@0.35.3",
+      "sourceUrl": "https://github.com/lovell/sharp/archive/1018449164723ba0203c1beffaba0e21f7829c18.tar.gz",
+      "sourceSha256": "c9559a4ada7e98bfa0d6208a1f04f58ac8ddde466e6d7ae23fe9fd437e19047b",
+      "commit": "1018449164723ba0203c1beffaba0e21f7829c18",
+      "tag": "v0.35.3",
+      "verificationMethod": "tag-commit-and-downloaded-archive-sha256",
+      "upstreamAttestation": true
+    },
+    {
+      "id": "wasm-vips@9ff73c569c91ded6f8d8c7570967d0dadcf0134d",
+      "sourceUrl": "https://github.com/kleisauke/wasm-vips/archive/9ff73c569c91ded6f8d8c7570967d0dadcf0134d.tar.gz",
+      "sourceSha256": "ce1859a4e2dca584d5dd35af9de6ab9f4d3b76a0ac0027fd5b62ad8b194124b3",
+      "commit": "9ff73c569c91ded6f8d8c7570967d0dadcf0134d",
+      "verificationMethod": "inferred-from-workflow-time-and-exact-versions-vector",
+      "upstreamAttestation": false,
+      "caveat": "sharp-libvips v1.3.2 fetched wasm-vips HEAD without recording the resolved commit; this is the only commit between the preceding mismatched version vector and the next post-build commit, but it is not upstream-attested."
+    },
+    {
+      "id": "build-win64-mxe@8.18.3",
+      "sourceUrl": "https://github.com/libvips/build-win64-mxe/archive/bca68727eb1df12c5d2b204a13a392989d505774.tar.gz",
+      "sourceSha256": "01d63c45d5406b80c38cc4fc5e8a0630a5eeac2e45fae2c676979a4cb1d365fd",
+      "commit": "bca68727eb1df12c5d2b204a13a392989d505774",
+      "tag": "v8.18.3",
+      "verificationMethod": "tag-commit-and-downloaded-archive-sha256",
+      "upstreamAttestation": false
+    }
+  ],
+  "buildInputPackages": [
+    {
+      "name": "@img/sharp-libvips-dev-wasm32",
+      "version": "1.3.2",
+      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-dev-wasm32/-/sharp-libvips-dev-wasm32-1.3.2.tgz",
+      "integrity": "sha512-WYWUA7413vd+Tl0LDQ7/8z5FJYgQTVbNMp47jS4TfeT5G9/iWdRLvpjRRdJ3GJGqpjxqX0Tm/pH6Ey0d4o6mcQ==",
+      "tarballSha256": "5a5eb818b4721dfae030c3f132f05b45e1c51d6f40503b051ee9348e8b86a03b",
+      "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/@img%2fsharp-libvips-dev-wasm32@1.3.2",
+      "recipe": "sharp-libvips@1.3.2"
+    },
+    {
+      "name": "@img/sharp-libvips-win32-x64",
+      "version": "1.3.2",
+      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-win32-x64/-/sharp-libvips-win32-x64-1.3.2.tgz",
+      "integrity": "sha512-T10FUimHrO/JzFNo26IS1N0wZBVGI9VCyxZHkkmhv8ayeUAHURaONXbqWK8S/uy0IDe5QCY7XuiCbMNovL1m6g==",
+      "tarballSha256": "bcae355919358e0406c1674d0beaf841e9b11f321f8a54b927cddf4935c27668",
+      "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/@img%2fsharp-libvips-win32-x64@1.3.2",
+      "recipe": "sharp-libvips@1.3.2"
+    }
+  ],
+  "components": [
+    {
+      "id": "aom@3.14.1",
+      "license": "BSD-2-Clause AND LicenseRef-AOM-Patent-1.0",
+      "sourceUrl": "https://storage.googleapis.com/aom-releases/libaom-3.14.1.tar.gz",
+      "sourceSha256": "44bf90dbd23e734d50e70a8c41c285193922938bd0d3bc2ee56764d181d55ef5",
+      "verificationMethod": "downloaded-official-release-sha256",
+      "licenseFiles": ["licenses/embedded/AOM-LICENSE.txt", "licenses/embedded/AOM-PATENTS.txt"]
+    },
+    {
+      "id": "cairo@1.18.4",
+      "license": "LGPL-2.1-only OR MPL-1.1",
+      "sourceUrl": "https://cairographics.org/releases/cairo-1.18.4.tar.xz",
+    "sourceSha256": "445ed8208a6e4823de1226a74ca319d3600e83f6369f99b14265006599c32ccb",
+    "commit": "4541e0cd3a751b85e52e2a83d02ac6145a5efa85",
+    "verificationMethod": "official-checksum-and-tag",
+    "licenseFiles": [
+      "licenses/embedded-components/cairo-COPYING-LGPL-2.1.txt",
+      "licenses/embedded-components/cairo-COPYING-MPL-1.1.txt",
+      "licenses/embedded-components/cairo-COPYING.txt"
+    ]
+    },
+    {
+      "id": "fribidi@1.0.16",
+    "license": "LGPL-2.1-or-later",
+      "sourceUrl": "https://github.com/fribidi/fribidi/releases/download/v1.0.16/fribidi-1.0.16.tar.xz",
+      "sourceSha256": "1b1cde5b235d40479e91be2f0e88a309e3214c8ab470ec8a2744d82a5a9ea05c",
+      "commit": "68162babff4f39c4e2dc164a5e825af93bda9983",
+    "verificationMethod": "signed-tag-and-downloaded-release-sha256",
+    "licenseFiles": [
+      "licenses/embedded-components/fribidi-COPYING.txt"
+    ]
+    },
+    {
+      "id": "glib@2.89.0",
+    "license": "LGPL-2.1-or-later",
+      "sourceUrl": "https://download.gnome.org/sources/glib/2.89/glib-2.89.0.tar.xz",
+      "sourceSha256": "205bf5dab175de68f11e33be7bb36d4ad4c5a5097d8c0c88a8682b257b6293dc",
+      "commit": "00648e21e997f4b4a681b9fcaadfd473bec041a8",
+    "verificationMethod": "official-checksum-and-tag",
+    "licenseFiles": [
+      "licenses/embedded-components/glib-COPYING.pointer.txt",
+      "licenses/embedded-components/glib-LGPL-2.1-or-later.txt"
+    ]
+    },
+    {
+      "id": "glib@2.89.1",
+    "license": "LGPL-2.1-or-later",
+      "sourceUrl": "https://download.gnome.org/sources/glib/2.89/glib-2.89.1.tar.xz",
+      "sourceSha256": "74447129c31afe141810f995626e8b99ab677413dae76ee3cf5a9cc6e75a486e",
+      "commit": "fc5e493ba42d81d51fca58ca3ce5fdfe318cc2e7",
+    "verificationMethod": "official-checksum-and-tag",
+    "licenseFiles": [
+      "licenses/embedded-components/glib-COPYING.pointer.txt",
+      "licenses/embedded-components/glib-LGPL-2.1-or-later.txt"
+    ]
+    },
+    {
+      "id": "libexif@0.6.26",
+    "license": "LGPL-2.1-or-later",
+      "sourceUrl": "https://github.com/libexif/libexif/releases/download/v0.6.26/libexif-0.6.26.tar.xz",
+      "sourceSha256": "4a055ed6575e61ca46c3172be3c753cc16c9becd0f99ec71d58dd0e471476c0c",
+      "commit": "b2edc5a8adf4d1b79ce9413a9c9d8f3ab871c082",
+    "verificationMethod": "signed-release-and-downloaded-archive-sha256",
+    "licenseFiles": [
+      "licenses/embedded-components/libexif-COPYING.txt"
+    ]
+    },
+    {
+      "id": "libheif@1.23.0",
+    "license": "LGPL-3.0-only",
+      "sourceUrl": "https://github.com/strukturag/libheif/releases/download/v1.23.0/libheif-1.23.0.tar.gz",
+      "sourceSha256": "4c9182b18897617182eed12ab5eb9f9d855b3aa3a736d6bdb31abc034ec7d393",
+      "commit": "bd114ed6d592adc92a09882172ab71d1b4c6e1b1",
+    "verificationMethod": "github-asset-digest-and-tag",
+    "licenseFiles": [
+      "licenses/embedded-components/libheif-COPYING.txt"
+    ]
+    },
+    {
+      "id": "libheif@1.23.1",
+    "license": "LGPL-3.0-only",
+      "sourceUrl": "https://github.com/strukturag/libheif/releases/download/v1.23.1/libheif-1.23.1.tar.gz",
+      "sourceSha256": "0de0327f60fcd47de90d5654c6fe152232738d60d84fe084ec3e0f35e03b166a",
+      "commit": "2c4bbb54c2738d4a5efbbe3e5fa1d5d76bb88eb0",
+    "verificationMethod": "github-asset-digest-and-tag",
+    "licenseFiles": [
+      "licenses/embedded-components/libheif-COPYING.txt"
+    ]
+    },
+    {
+      "id": "librsvg@2.62.3",
+    "license": "LGPL-2.1-or-later",
+      "sourceUrl": "https://download.gnome.org/sources/librsvg/2.62/librsvg-2.62.3.tar.xz",
+      "sourceSha256": "7eb449b2722a768021356f66dfee3202c229b54ed4e6a70ce40c090e97ff16f2",
+      "commit": "3bff095d38e1e174c5e9fd81f9a4d65d0ef09f77",
+    "verificationMethod": "official-checksum-and-tag",
+    "licenseFiles": [
+      "licenses/embedded-components/librsvg-libvips-LGPL-2.1.txt"
+    ]
+    },
+    {
+      "id": "librsvg@2.62.90",
+    "license": "LGPL-2.1-or-later",
+      "sourceUrl": "https://download.gnome.org/sources/librsvg/2.62/librsvg-2.62.90.tar.xz",
+      "sourceSha256": "5d108758255c225590d862d94f2591ee1f8cc976dc7b25b06eaba74f21850f08",
+      "commit": "1a830b1e34bab5c69aec7c5cf86812376b4e53e2",
+    "verificationMethod": "official-checksum-and-tag",
+    "licenseFiles": [
+      "licenses/embedded-components/librsvg-libvips-LGPL-2.1.txt"
+    ]
+    },
+    {
+      "id": "libvips@8.18.3",
+    "license": "LGPL-2.1-or-later",
+      "sourceUrl": "https://github.com/libvips/libvips/releases/download/v8.18.3/vips-8.18.3.tar.xz",
+      "sourceSha256": "f41285b61bfb495605494f074ca341f7791a1d406e2f157dcea606ef1ae1b146",
+      "commit": "3664cfc5dc2c5661288f5bf5a85ccc51c64c1626",
+    "verificationMethod": "official-checksum-and-tag",
+    "licenseFiles": [
+      "licenses/embedded-components/librsvg-libvips-LGPL-2.1.txt"
+    ]
+    },
+    {
+      "id": "pango@1.57.1",
+    "license": "LGPL-2.0-or-later",
+      "sourceUrl": "https://download.gnome.org/sources/pango/1.57/pango-1.57.1.tar.xz",
+      "sourceSha256": "e65d6d117080dc3aeeb7d8b4b3b518f7383aa2e6cfce23117c623cd624764c2f",
+      "commit": "8f68873915b281ef5afcf0daa101d08047e305ba",
+    "verificationMethod": "official-checksum-and-tag",
+    "licenseFiles": [
+      "licenses/embedded-components/pango-proxy-libintl-COPYING.txt"
+    ]
+    },
+    {
+      "id": "pango@1.58.0",
+    "license": "LGPL-2.0-or-later",
+      "sourceUrl": "https://download.gnome.org/sources/pango/1.58/pango-1.58.0.tar.xz",
+      "sourceSha256": "bc5bad6213ad4886a47d1e80292fd850b64159b50db67917a43d9ea80ee2298a",
+      "commit": "f25cbfe376ce2550d89fb7b4eb989b6a6218efc6",
+    "verificationMethod": "official-checksum-and-tag",
+    "licenseFiles": [
+      "licenses/embedded-components/pango-proxy-libintl-COPYING.txt"
+    ]
+    },
+    {
+      "id": "proxy-libintl@0.5",
+    "license": "LGPL-2.0-or-later",
+      "sourceUrl": "https://github.com/frida/proxy-libintl/archive/33934de09af6a6627eb44e310a8079df009abdbb.tar.gz",
+      "sourceSha256": "4ab5af85ec6124cb526a15c58bbc0877d241807e30855779808dbf9292d861aa",
+      "commit": "33934de09af6a6627eb44e310a8079df009abdbb",
+    "verificationMethod": "tag-commit-and-downloaded-archive-sha256",
+    "licenseFiles": [
+      "licenses/embedded-components/pango-proxy-libintl-COPYING.txt"
+    ]
+    }
+  ],
+  "containers": [
+    {
+      "name": "@img/sharp-libvips-darwin-arm64",
+      "version": "1.3.2",
+      "targets": ["darwin/arm64"],
+      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-darwin-arm64/-/sharp-libvips-darwin-arm64-1.3.2.tgz",
+      "integrity": "sha512-9J6ypZFpQBj4YnePGoq/S38w6nz+vqg5WZLrLGY4YuSemdMq47GMLBPO42MzwdGwpg/agZ7xzZcFHa48xlywfg==",
+      "tarballSha256": "529c803101fd8b3b9f7b0056c87ba3e3c97b3b9aac8730db34f555b677dd8ca1",
+      "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/@img%2fsharp-libvips-darwin-arm64@1.3.2",
+      "buildRecipes": ["sharp-libvips@1.3.2"],
+      "componentSources": ["aom@3.14.1", "cairo@1.18.4", "fribidi@1.0.16", "glib@2.89.1", "libexif@0.6.26", "libheif@1.23.1", "librsvg@2.62.90", "libvips@8.18.3", "pango@1.58.0", "proxy-libintl@0.5"]
+    },
+    {
+      "name": "@img/sharp-libvips-darwin-x64",
+      "version": "1.3.2",
+      "targets": ["darwin/x64"],
+      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-darwin-x64/-/sharp-libvips-darwin-x64-1.3.2.tgz",
+      "integrity": "sha512-m2pW1n6cns9VaubNwsZ+c3CRYjxNQWgJ5gPlnL1nbBcpkBvFm6SCFN5o0psFHI8w9n11NKhFkeEDns98tiqbEw==",
+      "tarballSha256": "5756aba421c88cdd45af13bf1cbf7ff39a074d4d014cac29bbd11387dc566692",
+      "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/@img%2fsharp-libvips-darwin-x64@1.3.2",
+      "buildRecipes": ["sharp-libvips@1.3.2"],
+      "componentSources": ["aom@3.14.1", "cairo@1.18.4", "fribidi@1.0.16", "glib@2.89.1", "libexif@0.6.26", "libheif@1.23.1", "librsvg@2.62.90", "libvips@8.18.3", "pango@1.58.0", "proxy-libintl@0.5"]
+    },
+    {
+      "name": "@img/sharp-win32-x64",
+      "version": "0.35.3",
+      "targets": ["win32/x64"],
+      "resolved": "https://registry.npmjs.org/@img/sharp-win32-x64/-/sharp-win32-x64-0.35.3.tgz",
+      "integrity": "sha512-D4y1vNeZrIIJCN+uHaWVtH86B+aCrdMYYjicy9pXHvbGZeGYLLSd3wdVuC37FxVXlU1ARsk84eKWfWMXGYEqvA==",
+      "tarballSha256": "f0f81118ad4557cceb6c4f90adaf252926e7cd3f6cd3d7040053d4bba088e940",
+      "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/@img%2fsharp-win32-x64@0.35.3",
+      "buildRecipes": ["sharp@0.35.3", "sharp-libvips@1.3.2", "build-win64-mxe@8.18.3"],
+      "buildInputPackages": ["@img/sharp-libvips-win32-x64@1.3.2"],
+      "componentSources": ["aom@3.14.1", "cairo@1.18.4", "fribidi@1.0.16", "glib@2.89.0", "libexif@0.6.26", "libheif@1.23.0", "librsvg@2.62.3", "libvips@8.18.3", "pango@1.57.1", "proxy-libintl@0.5"]
+    },
+    {
+      "name": "@img/sharp-wasm32",
+      "version": "0.35.3",
+      "targets": ["darwin/arm64", "darwin/x64", "win32/x64"],
+      "resolved": "https://registry.npmjs.org/@img/sharp-wasm32/-/sharp-wasm32-0.35.3.tgz",
+      "integrity": "sha512-cZ0XkcYGpHZkqW6iCkqTcmUC0CD9DhD5d/qeZlZkfRBn6GnHniZXLUo5+9xw8Iv76YE6LQFN9YNBlKREcCG76w==",
+      "tarballSha256": "fcab5cbbbf24ce63840c273e2da0214147f68e478bfa899b1a06db6d65eb86e0",
+      "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/@img%2fsharp-wasm32@0.35.3",
+      "buildRecipes": ["sharp@0.35.3", "sharp-libvips@1.3.2", "wasm-vips@9ff73c569c91ded6f8d8c7570967d0dadcf0134d"],
+      "buildInputPackages": ["@img/sharp-libvips-dev-wasm32@1.3.2"],
+      "componentSources": ["aom@3.14.1", "glib@2.89.1", "libexif@0.6.26", "libheif@1.23.1", "libvips@8.18.3"]
+    }
+  ],
+  "attributionSources": [
+    {
+      "id": "fontconfig@2.18.1",
+      "sourceCommit": "d87ec67db56518e9e9c36ff38f151dfc9b728b2e",
+      "sourceUrl": "https://gitlab.freedesktop.org/fontconfig/fontconfig/-/tree/d87ec67db56518e9e9c36ff38f151dfc9b728b2e",
+      "licenseFile": "licenses/embedded/fontconfig-COPYING.txt",
+      "licenseSha256": "51a51aa9823704fd90bccc616cdd17ebabb5b2b3e9cbde886ca02c7002288067"
+    },
+    {
+      "id": "aws-sdk-js-v3@c41e9a98",
+      "sourceUrl": "https://github.com/aws/aws-sdk-js-v3/archive/c41e9a98d4227b06099fdc7ea42bcf6fc5a1029f.tar.gz",
+      "sourceSha256": "ee4d882d4f938bb4ddcf3a1a8228bb82f9379a2f4ef623dec14f9d73f9c6e0b2"
+    },
+    {
+      "id": "pi@0.82.1",
+      "sourceUrl": "https://github.com/earendil-works/pi/archive/b4f293684bba718d59cc1157679bcf6157b3a7f5.tar.gz",
+      "sourceSha256": "75f3724cd69c48eb2b4b975e19b73a56b6be2023356bb571e719a4bf57891ecf"
+    },
+    {
+      "id": "koffi@3.1.5",
+      "sourceUrl": "https://codeberg.org/Koromix/rygel/archive/9f21705571f7745c6edfec19fadb642240b748f0.tar.gz",
+      "sourceSha256": "f68032a4c6719ca7065de0bd98a6e0067122370381b3fe9f2bbabd52cb152913"
+    },
+    {
+      "id": "data-uri-to-buffer@4.0.1",
+      "sourceUrl": "https://github.com/TooTallNate/node-data-uri-to-buffer/archive/85cd8c854aefbf1bb636789d80364cfac8ea1583.tar.gz",
+      "sourceSha256": "6b3747fe931cc5935f87c91df541cdc71bc69d8f8cd367d9befc852d2d2e150b"
+    }
+  ]
+}

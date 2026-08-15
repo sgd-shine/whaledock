@@ -1,7 +1,7 @@
 {
   "name": "whaledock",
   "productName": "WhaleDock",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "鲸坞 WhaleDock — Unofficial desktop app for DeepSeek Harness (dsh): auto-starts the local dsh backend and wraps its Web UI in a native window. 非官方 DeepSeek Harness 桌面客户端：给鲸鱼一个靠岸的坞。",
   "main": "main.js",
   "author": "SGD",
@@ -10,7 +10,18 @@
   "scripts": {
     "start": "electron .",
     "smoke": "node test/smoke.js",
-    "dist": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac"
+    "bundle:dsh": "node scripts/bundle-dsh.js",
+    "compliance:sources": "node scripts/third-party-inventory.js sources --inventories=compliance --sources=compliance/SOURCES.json --output=compliance/SOURCES.md",
+    "compliance:notices": "node scripts/third-party-inventory.js notices --inventories=compliance --output=THIRD_PARTY_NOTICES.md",
+    "compliance:verify": "node scripts/third-party-inventory.js sources --check --inventories=compliance --sources=compliance/SOURCES.json --output=compliance/SOURCES.md && node scripts/third-party-inventory.js notices --check --inventories=compliance --sources=compliance/SOURCES.json --output=THIRD_PARTY_NOTICES.md",
+    "dist": "npm run dist:mac:arm64",
+    "dist:mac": "npm run dist:mac:arm64 && npm run dist:mac:x64",
+    "predist:mac:arm64": "npm run bundle:dsh -- --platform=darwin --arch=arm64",
+    "dist:mac:arm64": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg zip --arm64 --publish never",
+    "predist:mac:x64": "npm run bundle:dsh -- --platform=darwin --arch=x64",
+    "dist:mac:x64": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg zip --x64 --publish never",
+    "predist:win": "npm run bundle:dsh -- --platform=win32 --arch=x64",
+    "dist:win": "electron-builder --win nsis portable --x64 --publish never"
   },
   "devDependencies": {
     "electron": "^43.4.0",
@@ -19,24 +30,83 @@
   "build": {
     "appId": "com.sgd.whaledock",
     "productName": "WhaleDock",
+    "beforePack": "scripts/macos-build-visibility.js",
+    "afterAllArtifactBuild": "scripts/macos-build-visibility.js",
     "directories": {
       "output": "release"
     },
     "files": [
       "main.js",
       "preload.js",
+      "preload-settings.js",
       "splash.html",
+      "settings.html",
+      "LICENSE",
       "lib/**/*",
       "assets/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "vendor/dsh-runtime",
+        "to": "dsh-runtime",
+        "filter": ["package.json", "package-lock.json", "manifest.json"]
+      },
+      {
+        "from": "vendor/dsh-runtime/node_modules",
+        "to": "dsh-runtime/node_modules",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "compliance/THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "from": "compliance/SOURCES.md",
+        "to": "compliance/SOURCES.md"
+      },
+      {
+        "from": "compliance/SOURCES.json",
+        "to": "compliance/SOURCES.json"
+      },
+      {
+        "from": "licenses",
+        "to": "compliance/licenses",
+        "filter": ["**/*"]
+      }
+    ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.png",
+      "artifactName": "WhaleDock-${version}-${arch}-mac.${ext}",
       "target": [
-        { "target": "dmg", "arch": ["arm64"] },
-        { "target": "zip", "arch": ["arm64"] }
+        { "target": "dmg", "arch": ["arm64", "x64"] },
+        { "target": "zip", "arch": ["arm64", "x64"] }
       ]
+    },
+    "dmg": {
+      "artifactName": "WhaleDock-${version}-${arch}.${ext}"
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "artifactName": "WhaleDock-Setup-${version}.${ext}",
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "packElevateHelper": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "portable": {
+      "artifactName": "WhaleDock-${version}-portable.${ext}",
+      "requestExecutionLevel": "user"
     }
   }
 }
