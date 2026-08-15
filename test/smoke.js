@@ -1,9 +1,10 @@
 'use strict';
-// 纯 Node 冒烟测试：不需要 Electron。共 14 项断言。
+// 纯 Node 冒烟测试：不需要 Electron。
 // 覆盖：PATH 探测、which、端口探测、用自定义命令启动/停止后端（连进程组一起停）。
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
+const { EventEmitter } = require('events');
 
 const backend = require('../lib/backend');
 const config = require('../lib/config');
@@ -34,8 +35,92 @@ async function main() {
   check('log: 写入与读取', log.recent().includes('hello') && fs.existsSync(log.filePath()));
 
   // PATH / which
-  check('backend: fullPath 非空', backend.fullPath().split(':').length > 3);
+  check('backend: fullPath 非空', backend.fullPath().split(path.delimiter).length > 3);
   check('backend: which(node) 找得到', !!backend.which('node'), backend.which('node') || '');
+
+  // Windows PATH / PATHEXT 用参数注入在任意 runner 上验证。
+  const windowsEnv = {
+    Path: 'C:\\Existing\\bin;C:\\Tools',
+    PATHEXT: '.EXE;.CMD;.BAT',
+    USERPROFILE: 'C:\\Users\\Shine',
+    APPDATA: 'C:\\Users\\Shine\\AppData\\Roaming',
+    LOCALAPPDATA: 'C:\\Users\\Shine\\AppData\\Local',
+    ProgramFiles: 'C:\\Program Files',
+    ProgramData: 'C:\\ProgramData',
+    NVM_SYMLINK: 'C:\\Program Files\\nodejs'
+  };
+  let windowsLoginShellCalled = false;
+  const windowsPath = backend.fullPath(true, {
+    platform: 'win32',
+    env: windowsEnv,
+    homeDir: windowsEnv.USERPROFILE,
+    loginShellPath: () => {
+      windowsLoginShellCalled = true;
+      return 'SHOULD_NOT_BE_USED';
+    }
+  });
+  const windowsPathParts = windowsPath.split(';');
+  check('backend: Windows PATH 常见目录且跳过 login shell',
+    !windowsLoginShellCalled
+      && windowsPathParts.includes('C:\\Program Files\\nodejs')
+      && windowsPathParts.includes('C:\\Users\\Shine\\AppData\\Roaming\\npm')
+      && windowsPathParts.includes('C:\\Users\\Shine\\AppData\\Local\\Volta\\bin')
+      && windowsPathParts.includes('C:\\Users\\Shine\\scoop\\shims')
+      && windowsPathParts.includes('C:\\ProgramData\\chocolatey\\bin'));
+
+  check('backend: execCandidates 按 PATHEXT 展开',
+    JSON.stringify(backend.execCandidates('dsh', 'win32', '.EXE;.CMD;.BAT'))
+      === JSON.stringify(['dsh.exe', 'dsh.cmd', 'dsh.bat', 'dsh'])
+      && JSON.stringify(backend.execCandidates('dsh', 'darwin', '.EXE;.CMD'))
+        === JSON.stringify(['dsh']));
+
+  const shimDir = path.join(tmp, 'windows-shims');
+  fs.mkdirSync(shimDir, { recursive: true });
+  const dshShim = path.join(shimDir, 'dsh.cmd');
+  fs.writeFileSync(dshShim, '@echo off\r\n');
+  const portableWindowsPath = { ...path.posix, delimiter: ';' };
+  const windowsDsh = backend.which('dsh', {
+    platform: 'win32',
+    env: { PATHEXT: '.EXE;.CMD;.BAT' },
+    pathValue: `${path.join(tmp, 'missing')};${shimDir}`,
+    pathModule: portableWindowsPath
+  });
+  check('backend: Windows which 命中临时 dsh.cmd 垫片', windowsDsh === dshShim,
+    windowsDsh || 'null');
+
+  const darwinKill = backend.killPlan(1234, 'darwin');
+  const windowsKill = backend.killPlan(5678, 'win32');
+  check('backend: killPlan 两平台顺序正确',
+    darwinKill[0].target === 'group'
+      && darwinKill[0].signal === 'SIGTERM'
+      && darwinKill[1].ms === 4000
+      && darwinKill[2].signal === 'SIGKILL'
+      && JSON.stringify(windowsKill[0].args) === JSON.stringify(['/PID', '5678', '/T'])
+      && windowsKill[1].ms === 4000
+      && JSON.stringify(windowsKill[2].args) === JSON.stringify(['/PID', '5678', '/T', '/F']));
+
+  const fakeWindowsChild = new EventEmitter();
+  fakeWindowsChild.pid = 6789;
+  fakeWindowsChild.stdout = new EventEmitter();
+  fakeWindowsChild.stderr = new EventEmitter();
+  fakeWindowsChild.kill = () => true;
+  let windowsSpawnCall = null;
+  backend.start({ workdir: 'C:\\Work' }, {}, {
+    platform: 'win32',
+    env: windowsEnv,
+    pathValue: windowsPath,
+    findCommand: (name) => name === 'dsh' ? 'C:\\Program Files\\nodejs\\dsh.cmd' : null,
+    spawn: (file, args, options) => {
+      windowsSpawnCall = { file, args, options };
+      return fakeWindowsChild;
+    }
+  });
+  check('backend: Windows .cmd 使用 shell 且隐藏控制台',
+    windowsSpawnCall.file === '"C:\\Program Files\\nodejs\\dsh.cmd"'
+      && windowsSpawnCall.options.shell === true
+      && windowsSpawnCall.options.detached === false
+      && windowsSpawnCall.options.windowsHide === true);
+  fakeWindowsChild.emit('exit', 0, null);
 
   // 端口应当未开
   check('backend: 端口初始未开', !(await backend.isPortOpen(PORT)));
