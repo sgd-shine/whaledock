@@ -24,6 +24,18 @@ function writeJson(file, value) {
 
 function configFile(dir) { return path.join(dir, 'config.json'); }
 
+// 与产品同一口径的既有路径身份：原生 realpath（Windows 展开 8.3 短名）后去掉 \\?\ 前缀。
+// 这里直接用 Node/libuv 的结果，不复用产品实现，才能证明产品与操作系统口径一致。
+function osRealPath(value) {
+  const realpathSync = fs.realpathSync.native || fs.realpathSync;
+  let resolved = realpathSync(value);
+  if (process.platform === 'win32') {
+    if (resolved.startsWith('\\\\?\\UNC\\')) resolved = `\\\\${resolved.slice(8)}`;
+    else if (/^\\\\\?\\[A-Za-z]:/.test(resolved)) resolved = resolved.slice(4);
+  }
+  return path.resolve(resolved);
+}
+
 function assertCode(code) {
   return (error) => Boolean(error && error.code === code);
 }
@@ -227,7 +239,7 @@ async function run() {
       const documents = path.join(tmp, 'Documents');
       const first = workspaces.ensureDefaultWorkspace(documents);
       assert.equal(first.created, true);
-      assert.equal(first.canonicalPath, fs.realpathSync(path.join(
+      assert.equal(first.canonicalPath, osRealPath(path.join(
         documents, '鲸坞工作台', '默认工作区'
       )));
       if (process.platform !== 'win32') {
@@ -251,9 +263,44 @@ async function run() {
       fs.mkdirSync(real);
       fs.symlinkSync(real, link, 'dir');
       const value = workspaces.canonicalWorkspace(link);
-      assert.equal(value.path, fs.realpathSync(real));
+      assert.equal(value.path, osRealPath(real));
       assert.equal(value.key, process.platform === 'win32' ? value.path.toLowerCase() : value.path);
       assert.throws(() => workspaces.canonicalWorkspace(path.join(tmp, 'missing')), assertCode('ERR_WORKSPACE_NOT_DIRECTORY'));
+    });
+
+    await test('路径身份统一走原生 realpath：Windows 8.3 别名与 \\\\?\\ 前缀不能绕过受保护根', async () => {
+      // JS 版 fs.realpathSync 只解析 symlink，会保留 8.3 短名；原生版返回最终长路径。
+      // 产品必须取原生结果，否则 lib/image-input.js（fs.promises.realpath 是原生实现）
+      // 拿到的长路径与受保护根的短路径比不上，别名工作区就能绕过保护。
+      const shortHome = 'C:\\Users\\RUNNER~1\\home';
+      const longRoot = 'C:\\Users\\runneradmin\\home\\.dsh';
+      const win32Options = { platform: 'win32', pathImpl: path.win32, homeDir: shortHome };
+      const fsImpl = {
+        realpathSync: Object.assign((value) => value, {
+          native: (value) => (value === 'C:\\Users\\RUNNER~1\\home\\.dsh'
+            ? `\\\\?\\${longRoot}` : value)
+        })
+      };
+      const roots = config.protectedWorkspaceRoots({ ...win32Options, fsImpl });
+      assert(roots.includes(longRoot), '受保护根必须归一为原生长路径且去掉 \\\\?\\ 前缀');
+      assert.equal(config.isProtectedWorkspacePath(`${longRoot}\\project`, {
+        ...win32Options, fsImpl
+      }), true);
+
+      const wsFsImpl = {
+        statSync: () => ({ isDirectory: () => true }),
+        realpathSync: Object.assign((value) => value, {
+          native: () => '\\\\?\\C:\\Users\\runneradmin\\home\\.dsh\\nested'
+        })
+      };
+      assert.throws(() => workspaces.canonicalWorkspace('C:\\Users\\RUNNER~1\\alias-link', {
+        platform: 'win32', pathImpl: path.win32, fsImpl: wsFsImpl, forbiddenRoots: roots
+      }), assertCode('ERR_WORKSPACE_PROTECTED'));
+
+      assert.equal(config.normalizeRealPath('\\\\?\\UNC\\server\\share\\x',
+        { platform: 'win32', pathImpl: path.win32 }), '\\\\server\\share\\x');
+      assert.equal(config.normalizeRealPath('/tmp/./x',
+        { platform: 'linux', pathImpl: path.posix }), '/tmp/x');
     });
 
     await test('canonical workspace 拒绝 fake home/.dsh 本身、后代与 realpath 落入链接', async () => {
@@ -294,7 +341,7 @@ async function run() {
       assert.equal(workspaces.canonicalWorkspace(normal, {
         forbiddenRoots: activeForbiddenRoots
       }).path,
-        fs.realpathSync(normal));
+        osRealPath(normal));
       assert.equal(config.isProtectedWorkspacePath(protectedChild, { homeDir: fakeHome }), true);
       assert.equal(config.isProtectedWorkspacePath(normal, { homeDir: fakeHome }), false);
       assert.throws(() => coordinatorFixture({
@@ -312,7 +359,7 @@ async function run() {
       fs.symlinkSync(symlinkTarget, path.join(symlinkHome, '.dsh'),
         process.platform === 'win32' ? 'junction' : 'dir');
       const symlinkForbiddenRoots = config.protectedWorkspaceRoots({ homeDir: symlinkHome });
-      assert(symlinkForbiddenRoots.includes(fs.realpathSync(symlinkTarget)));
+      assert(symlinkForbiddenRoots.includes(osRealPath(symlinkTarget)));
       assert(!/(?:readFile|readdir)/.test(config.protectedWorkspaceRoots.toString()));
       assert.throws(() => workspaces.canonicalWorkspace(symlinkTarget, {
         forbiddenRoots: symlinkForbiddenRoots
