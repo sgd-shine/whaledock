@@ -1,16 +1,21 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-15（v0.4.0 实现完成，待发布）
+更新：2026-08-16（v0.4.0 已正式发布）
 
 ## 阶段结论
 
-**v0.2.0 的工程/合规与 v0.3.0 的公开发布闭环保留为历史证据；v0.4.0 批次 12 的工作区管理与截图入口已完成源码实现和本地验证，当前为 implementation complete / release pending。公开稳定版仍是 v0.3.0。**
+**v0.2.0 / v0.3.0 的工程、合规与发布闭环保留为历史证据；v0.4.0 批次 12 的工作区管理与截图入口已完成源码实现、本地验证、三平台 CI 与公开发布，当前为 released。公开稳定版是 v0.4.0。**
 
 - PR [#1](https://github.com/sgd-shine/whaledock/pull/1) 已合并；正式 tag 指向 main 提交 `d8a8a774…`。
 - 批次 7 审计修复：`591f6c1`
 - 批次 9 合规与构建可见性：`4e0c04c`
-- 当前稳定版：[`v0.3.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0)；非 draft、非 prerelease，`releases/latest` 已命中 v0.3 正式版（tag `v0.3.0`）。
-- 当前源码版本：`0.4.0`；尚无 v0.4 正式 tag、tag CI 或公开 Release，不得写成已发布。
+- 当前稳定版：[`v0.4.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.4.0)；非 draft、非 prerelease，`releases/latest` 已命中 v0.4 正式版。[`v0.3.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0) 保留为历史版本。
+- 当前源码版本：`0.4.0` 已发布；v0.5 开发中的源码版本变更以各自方案文档为准。
+- v0.4.0 已正式公开发布：[Release v0.4.0](https://github.com/sgd-shine/whaledock/releases/tag/v0.4.0)，非 draft、非 prerelease，`releases/latest` 回读为 `v0.4.0`。正式注解 tag 对象 `4cd0a1f0e33201ba8b478a9869730a6177bbbcdd` 指向提交 `3a8913be6900dc8a1b64ee0a61bc03c8ba256443`。
+- 该提交的 main CI [31930571815](https://github.com/sgd-shine/whaledock/actions/runs/31930571815) 三平台全绿；[Release run 31930662943](https://github.com/sgd-shine/whaledock/actions/runs/31930662943) 的 build-mac / build-windows 一次通过，publish job 首次按预期被审批门 fail-closed 阻止，设置精确批准值后重跑成功。
+- 八项资产与精确字节数：`SHA256SUMS-mac.txt` 372 B、`SHA256SUMS-win.txt` 189 B、`WhaleDock-0.4.0-arm64-mac.zip` 204,794,555 B、`WhaleDock-0.4.0-arm64.dmg` 185,282,665 B、`WhaleDock-0.4.0-x64-mac.zip` 207,776,496 B、`WhaleDock-0.4.0-x64.dmg` 188,209,037 B、`WhaleDock-Setup-0.4.0.exe` 161,480,303 B、`WhaleDock-0.4.0-portable.exe` 161,292,453 B。发布前已把两个 Actions artifact 下载到本地，`shasum -a 256 -c` 六项产物全部 OK，这是独立于 CI 的成品回读。
+- 三平台 vendor 闭包与包数同 v0.3 完全一致（arm64 `9f5613cb…` 526 包、x64 `928f3fd6…` 526 包、win32/x64 `47ad1d95…` 525 包），没有新增包，因此按预授权直接发布，没有触发 S1。
+- 精确批准值 `release:v0.4.0:sha256:d9ed43878b3bb8c3aa4167c3c176d26c18d13dffa21b1bb9bdd3a549bd00a301` 只在本次 publish 期间存在；Release 与八项资产回读后立即删除，仓库变量回读 `total_count=0`。
 - 正式注解 tag 对象 `8af8f86a527a105c9dbe5a204e75afcdd9dba409` 指向提交 `fe2d4def7bb7ef1d9339b71b1e28236fd9e1eabf`；[main CI 31893926627](https://github.com/sgd-shine/whaledock/actions/runs/31893926627) 的 Ubuntu、Windows、macOS 全绿。
 - [Release run 31894036652](https://github.com/sgd-shine/whaledock/actions/runs/31894036652) 的构建与成品回读通过；attempt 2 的 publish job [95035294975](https://github.com/sgd-shine/whaledock/actions/runs/31894036652/job/95035294975) 成功发布八项资产。
 - 精确批准值 `release:v0.3.0:sha256:8a7e9f14cfdaee35eb5baaa016547ec0a5d32d110876436185f186a3257407ad` 仅用于本次 publish；Release 回读后已删除，仓库变量回读不存在。
@@ -18,7 +23,7 @@
 
 Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不阻断本次发布，但不得改写为已经通过。
 
-## v0.4 批次 12 已实现，待发布
+## v0.4 批次 12 已实现并发布
 
 ### 工作区启动与切换
 
@@ -141,7 +146,7 @@ Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不
 
 ## 尚未完成
 
-1. v0.4 尚未走三平台 tag CI、正式 tag、Release 成品回读和公开发布；当前稳定版仍是 v0.3.0。
+1. v0.4 的三平台 tag CI、正式 tag、Release 成品回读与公开发布已完成；本机安装版尚未升级到 0.4.0，也未真机点过 v0.4 的「检查更新」。
 2. v0.4 未对真实会话提交 prompt，未走完图片保存→OCR→复制/提交的全量 GUI 链；Windows.Media.Ocr、Windows `Win+Shift+S`/剪贴板、macOS 屏幕录制权限和安装包 GUI 仍待真机。
 3. v0.4 并行多开保留为 P2；官方视觉 API 与 vision 插件只保留可探测槽位。
 4. v0.3 Electron 系统通知权限及 Notification→Dock/托盘/banner 可见降级链尚未真机；真实 managed backend 跨预算线后的进程树停止、App 重启 latch 和“今日继续”恢复也未做 GUI+真进程闭环。

@@ -53,9 +53,9 @@ v0.3.0 已作为当前稳定版公开发布：[正式 Release](https://github.co
 
 发布门精确批准值 `release:v0.3.0:sha256:8a7e9f14cfdaee35eb5baaa016547ec0a5d32d110876436185f186a3257407ad` 只在本次 publish 中临时存在；Release 与资产回读后已删除，仓库变量回读不存在。
 
-## v0.4.0 源码实现完成，待发布
+## v0.4.0 已发布
 
-v0.4.0 的批次 12 已在源码态完成，当前状态是 **implementation complete / release pending**；当前已公开的稳定下载版仍是 [`v0.3.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0)。
+v0.4.0 的批次 12 已完成实现、三平台 CI 与公开发布，当前稳定下载版是 [`v0.4.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.4.0)；[`v0.3.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0) 保留为历史版本。
 
 - **单工作区管理**：只有 `config.json` 确实不存在的新用户才会创建 `~/Documents/鲸坞工作台/默认工作区`（POSIX 尽量为 `0700`）；既有配置即使 `workdir:null` 也原样尊重，不暗中迁移。
 - **菜单、托盘与标题**：两处都有“工作区”子菜单，可切换最近目录或打开新文件夹；标题显示已提交的工作区名。切换使用串行 journal，必须完成旧后端停止、config 持久、新后端归属与实际 cwd 回读后才提交；失败回滚或 fail-closed。
@@ -175,7 +175,7 @@ npm run dist:win         # Windows x64 Setup + portable（建议在 Windows runn
 node scripts/macos-build-visibility.js --out-dir=release --check
 ```
 
-`npm run smoke` 是不依赖图形界面的纯 Node 测试集。当前 v0.4 源码态本地回读为 **201 PASS / ALL PASS**，新增覆盖配置/默认工作区、串行切换与 journal 恢复、受保护目录拒绝、安全图片落盘、OCR 路由、rc.6 prompt fail-closed 适配和 Electron 薄层信任边界。这是本地纯 Node 证据；v0.3 正式 tag 提交的 main CI 31893926627 仍只证明 v0.3 的 Ubuntu、Windows 与 macOS 三平台状态，v0.4 尚未 tag/发布。
+`npm run smoke` 是不依赖图形界面的纯 Node 测试集。当前 v0.4 源码态本地回读为 **201 PASS / ALL PASS**，新增覆盖配置/默认工作区、串行切换与 journal 恢复、受保护目录拒绝、安全图片落盘、OCR 路由、rc.6 prompt fail-closed 适配和 Electron 薄层信任边界。这是本地纯 Node 证据；v0.4 正式 tag 提交的 [main CI 31930571815](https://github.com/sgd-shine/whaledock/actions/runs/31930571815) 三平台全绿是另一类证据，两者不互相替代。
 
 ## 常见问题
 
