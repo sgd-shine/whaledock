@@ -32,7 +32,7 @@ v0.2 工程/macOS 验收/G1 与 v0.3.0 正式公开发布保留为历史证据�
 
 ### 当前自动、GUI 与合规证据
 
-- 本地 `npm run smoke` 已实际回读 **200 PASS / ALL PASS**；四个 v0.4 子套件（workspace、image-input、backend-prompt、main-v04）已由统一 smoke 真实执行，且覆盖 Windows 长路径/8.3 路径身份、`~/.dsh` 本身、后代、链接入口及真实目标的工作区/保存拒绝。
+- 本地 `npm run smoke` 已实际回读 **201 PASS / ALL PASS**；四个 v0.4 子套件（workspace、image-input、backend-prompt、main-v04）已由统一 smoke 真实执行，且覆盖 Windows 长路径/8.3 路径身份、`~/.dsh` 本身、后代、链接入口及真实目标的工作区/保存拒绝。同一提交的 [main CI 31930427567](https://github.com/sgd-shine/whaledock/actions/runs/31930427567) 三平台全绿，Windows runner 侧同样回读 201 PASS / ALL PASS。
 - `npm run compliance:verify` 通过；darwin/x64 inventory 仍为 526 包，closure `928f3fd6cf6a876eeeff8fedb0df8d2864265279da7e7cf6636c2a03d87afdde`。根 `dependencies` 仍为空，devDependencies 只有 electron/electron-builder，本版没有新增运行时依赖或许可闭包。
 - macOS arm64 源码态在隔离 userData `/private/tmp/whaledock-v04-gui` 中真实启动 managed dsh。标题回读“默认工作区”；设置只读工作区/截图快捷键、应用菜单、capture 自有窗口真实标签和取消均已走查；退出后 dsh 和 3080 端口清零。
 - 首轮 GUI 发现 dropzone 事件漏接使 `captureId:null`；新增静态/TDD 回归后重验，已在显示真实工作区标签的图片窗口中成功取消。未加载真实图片，因此不把它写成预览链已通过。
@@ -40,7 +40,7 @@ v0.2 工程/macOS 验收/G1 与 v0.3.0 正式公开发布保留为历史证据�
 
 ### 发布前与发布后待补证
 
-- v0.4 尚需正式提交/推送、三平台 CI、正式 tag、Release 双平台构建/成品回读、精确审批门与公开 Release 回读。完成前不得写成 v0.4 已发布。
+- v0.4 代码已提交并推送到 `origin/main`，三平台 main CI 已全绿；尚需正式 tag、Release 双平台构建/成品回读、精确审批门与公开 Release 回读。完成前不得写成 v0.4 已发布。
 - 未对真实用户会话提交 prompt，也未走完图片保存→OCR→复制/提交全量 GUI 流程。
 - Windows 工作区、`Win+Shift+S`/剪贴板、Windows.Media.Ocr、Setup/portable GUI 未真机；Windows 继续是未签名、未真机的实验性支持。
 - Intel Mac 未真机；未签名 x64 成品回读和 Apple Silicon + Rosetta 抽查都不是 Intel 真机。macOS 屏幕录制/剪贴板权限与安装包 GUI 也未做 v0.4 全量人工验收；签名/公证仍属 S3。

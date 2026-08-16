@@ -63,7 +63,7 @@ v0.4.0 的批次 12 已在源码态完成，当前状态是 **implementation com
 - **两次确认与本地降级**：第一次确认后才把图片安全保存到当前工作区的 `鲸坞截图/`，第二次确认后才交付文本。路由为官方视觉槽位 → vision 插件槽位 → macOS Vision / Windows.Media.Ocr 本地 OCR → 仅路径；锁定的 rc.6 prompt 合约不能精确证明时，复制同一份用户已检查文本并提示手动粘贴。
 - **不侵入 Harness**：主 Harness BrowserWindow 仍无 preload、无 Node、无 DOM/脚本注入。工作区只是 dsh 默认 cwd，**不是文件读取沙箱**。
 
-本地统一 `npm run smoke` 已回读 **200 PASS / ALL PASS**。工作区选择与图片保存还会在字面路径和 realpath 两层拒绝 `~/.dsh` 本身、后代及链接目标。隔离的 macOS arm64 源码态 GUI 已用真实 managed dsh 回读默认工作区标题、菜单、设置中的只读工作区/截图快捷键和自有图片窗口，并完成取消清理；退出后 dsh 与 3080 端口清零。真实 prompt 提交、完整图片保存/交付流、Windows、Intel、系统权限与安装包 GUI 仍待独立验证。
+本地统一 `npm run smoke` 已回读 **201 PASS / ALL PASS**。工作区选择与图片保存还会在字面路径和 realpath 两层拒绝 `~/.dsh` 本身、后代及链接目标。隔离的 macOS arm64 源码态 GUI 已用真实 managed dsh 回读默认工作区标题、菜单、设置中的只读工作区/截图快捷键和自有图片窗口，并完成取消清理；退出后 dsh 与 3080 端口清零。真实 prompt 提交、完整图片保存/交付流、Windows、Intel、系统权限与安装包 GUI 仍待独立验证。
 
 ## 下载与安装
 
@@ -175,7 +175,7 @@ npm run dist:win         # Windows x64 Setup + portable（建议在 Windows runn
 node scripts/macos-build-visibility.js --out-dir=release --check
 ```
 
-`npm run smoke` 是不依赖图形界面的纯 Node 测试集。当前 v0.4 源码态本地回读为 **200 PASS / ALL PASS**，新增覆盖配置/默认工作区、串行切换与 journal 恢复、受保护目录拒绝、安全图片落盘、OCR 路由、rc.6 prompt fail-closed 适配和 Electron 薄层信任边界。这是本地纯 Node 证据；v0.3 正式 tag 提交的 main CI 31893926627 仍只证明 v0.3 的 Ubuntu、Windows 与 macOS 三平台状态，v0.4 尚未 tag/发布。
+`npm run smoke` 是不依赖图形界面的纯 Node 测试集。当前 v0.4 源码态本地回读为 **201 PASS / ALL PASS**，新增覆盖配置/默认工作区、串行切换与 journal 恢复、受保护目录拒绝、安全图片落盘、OCR 路由、rc.6 prompt fail-closed 适配和 Electron 薄层信任边界。这是本地纯 Node 证据；v0.3 正式 tag 提交的 main CI 31893926627 仍只证明 v0.3 的 Ubuntu、Windows 与 macOS 三平台状态，v0.4 尚未 tag/发布。
 
 ## 常见问题
 
