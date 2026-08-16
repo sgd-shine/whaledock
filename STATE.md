@@ -1,16 +1,21 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-16（v0.4.0 已正式发布）
+更新：2026-08-16（v0.5.0 已正式发布，第二阶段收尾）
 
 ## 阶段结论
 
-**v0.2.0 / v0.3.0 的工程、合规与发布闭环保留为历史证据；v0.4.0 批次 12 的工作区管理与截图入口已完成源码实现、本地验证、三平台 CI 与公开发布，当前为 released。公开稳定版是 v0.4.0。**
+**v0.2.0 / v0.3.0 / v0.4.0 的工程、合规与发布闭环保留为历史证据；v0.5.0 批次 13 的桌面宠物与皮肤主题已完成实现、本地验证、三平台 CI 与公开发布，当前为 released。公开稳定版是 v0.5.0。第二阶段（v0.3→v0.5）到此收尾。**
 
 - PR [#1](https://github.com/sgd-shine/whaledock/pull/1) 已合并；正式 tag 指向 main 提交 `d8a8a774…`。
 - 批次 7 审计修复：`591f6c1`
 - 批次 9 合规与构建可见性：`4e0c04c`
-- 当前稳定版：[`v0.4.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.4.0)；非 draft、非 prerelease，`releases/latest` 已命中 v0.4 正式版。[`v0.3.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0) 保留为历史版本。
-- 当前源码版本：`0.4.0` 已发布；v0.5 开发中的源码版本变更以各自方案文档为准。
+- 当前稳定版：[`v0.5.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.5.0)；非 draft、非 prerelease，`releases/latest` 已命中 v0.5 正式版。[`v0.4.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.4.0) 与 [`v0.3.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0) 保留为历史版本。
+- 当前源码版本：`0.5.0` 已发布。
+- v0.5.0 已正式公开发布：[Release v0.5.0](https://github.com/sgd-shine/whaledock/releases/tag/v0.5.0)，非 draft、非 prerelease，`releases/latest` 回读为 `v0.5.0`。正式注解 tag 指向提交 `19c84a4`。
+- 该提交的 main CI [31932130219](https://github.com/sgd-shine/whaledock/actions/runs/31932130219) 三平台全绿；[Release run 31932206962](https://github.com/sgd-shine/whaledock/actions/runs/31932206962) 的 build-mac / build-windows 一次通过，publish job 首次按预期被审批门 fail-closed 阻止，设置精确批准值后重跑成功。
+- 八项资产与精确字节数：`SHA256SUMS-mac.txt` 372 B、`SHA256SUMS-win.txt` 189 B、`WhaleDock-0.5.0-arm64-mac.zip` 204,815,588 B、`WhaleDock-0.5.0-arm64.dmg` 185,292,092 B、`WhaleDock-0.5.0-x64-mac.zip` 207,797,528 B、`WhaleDock-0.5.0-x64.dmg` 188,209,801 B、`WhaleDock-Setup-0.5.0.exe` 161,496,107 B、`WhaleDock-0.5.0-portable.exe` 161,308,254 B。发布前已把两个 Actions artifact 下载到本地，`shasum -a 256 -c` 六项产物全部 OK。
+- 三平台 vendor 闭包与包数同 v0.4 完全一致（arm64 `9f5613cb…` 526 包、x64 `928f3fd6…` 526 包、win32/x64 `47ad1d95…` 525 包），没有新增包，按预授权直接发布，未触发 S1。
+- 精确批准值 `release:v0.5.0:sha256:677674676d99c3f60cf76fb44b1ba9cf7491a0141b0986d4f7a99f31393ee4e8` 只在本次 publish 期间存在；Release 与八项资产回读后立即删除，仓库变量回读 `total_count=0`。
 - v0.4.0 已正式公开发布：[Release v0.4.0](https://github.com/sgd-shine/whaledock/releases/tag/v0.4.0)，非 draft、非 prerelease，`releases/latest` 回读为 `v0.4.0`。正式注解 tag 对象 `4cd0a1f0e33201ba8b478a9869730a6177bbbcdd` 指向提交 `3a8913be6900dc8a1b64ee0a61bc03c8ba256443`。
 - 该提交的 main CI [31930571815](https://github.com/sgd-shine/whaledock/actions/runs/31930571815) 三平台全绿；[Release run 31930662943](https://github.com/sgd-shine/whaledock/actions/runs/31930662943) 的 build-mac / build-windows 一次通过，publish job 首次按预期被审批门 fail-closed 阻止，设置精确批准值后重跑成功。
 - 八项资产与精确字节数：`SHA256SUMS-mac.txt` 372 B、`SHA256SUMS-win.txt` 189 B、`WhaleDock-0.4.0-arm64-mac.zip` 204,794,555 B、`WhaleDock-0.4.0-arm64.dmg` 185,282,665 B、`WhaleDock-0.4.0-x64-mac.zip` 207,776,496 B、`WhaleDock-0.4.0-x64.dmg` 188,209,037 B、`WhaleDock-Setup-0.4.0.exe` 161,480,303 B、`WhaleDock-0.4.0-portable.exe` 161,292,453 B。发布前已把两个 Actions artifact 下载到本地，`shasum -a 256 -c` 六项产物全部 OK，这是独立于 CI 的成品回读。
@@ -23,7 +28,7 @@
 
 Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不阻断本次发布，但不得改写为已经通过。
 
-## v0.5 批次 13 已实现，待发布
+## v0.5 批次 13 已实现并发布
 
 ### 桌面宠物
 
@@ -43,7 +48,7 @@ Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不
 
 ### 批次 13 当前实证
 
-- 源码版本 `0.5.0`；本地 `npm run smoke` 实际为 **233 PASS / ALL PASS**，新增 `pets-themes-smoke.js`（21 项）与 `main-v05-smoke.js`（9 项）两个子套件，均由统一 smoke 真实执行。
+- 源码版本 `0.5.0` 已发布；本地 `npm run smoke` 实际为 **233 PASS / ALL PASS**，新增 `pets-themes-smoke.js`（21 项）与 `main-v05-smoke.js`（9 项）两个子套件，均由统一 smoke 真实执行。
 - 隔离 userData `/private/tmp/whaledock-v05-gui` 的 macOS arm64 源码态已真实启动，日志回读「桌面宠物已开启：builtin:pixel-whale（idle/busy/waiting/celebrate/error）」，事件层就绪 13 个会话；本轮走的是 attach 外部 dsh 路径，退出后外部服务与 3080 端口按设计未被停止。
 - **宠物窗与主题的视觉表现未做目视验收**：上述只是启动与窗口创建的日志证据，不等于人工看过宠物动效、透明背景、鼠标穿透或四套主题的实际配色。这些列入《第二阶段总验收清单》。
 - 根 `dependencies` 仍为空，devDependencies 仍只有 electron/electron-builder；`lib/` 仍无 Electron require；没有新增运行时依赖或许可闭包。

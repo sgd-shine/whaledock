@@ -1,6 +1,6 @@
-# HANDOFF.md — WhaleDock v0.4.0 已发布交接
+# HANDOFF.md — WhaleDock v0.5.0 已发布交接（第二阶段收尾）
 
-更新：2026-08-16 · v0.4.0 已正式公开发布；v0.5 批次 13 开发中
+更新：2026-08-16 · v0.5.0 已正式公开发布；第二阶段 v0.3→v0.5 全部完成
 
 ## 当前结论
 
@@ -20,7 +20,7 @@ v0.2 工程/macOS 验收/G1 与 v0.3.0 公开发布保留为历史证据。v0.4 
 
 2026-08-15 SGD 的发布决定已覆盖旧的 beta-first 流程：不发 beta；Windows 真机验收不再阻断发布，改为“实验性支持（未真机验证）”；Intel 只保留 Rosetta 抽查边界；在没有 S1 冲突且 G1/成品材料闭环时，Codex 获预授权临时设置精确审批值、发布并立即删除变量。
 
-## v0.5 批次 13 交接（实现完成，待发布）
+## v0.5 批次 13 交接（已发布）
 
 ### 已实现
 
@@ -38,7 +38,12 @@ v0.2 工程/macOS 验收/G1 与 v0.3.0 公开发布保留为历史证据。v0.4 
 - macOS arm64 源码态在隔离 userData 中真实启动，日志回读宠物窗已开启且五态齐全；退出后未停止 attach 到的外部 dsh。
 - **未做目视验收**：宠物动效、透明背景、拖动、鼠标穿透、右键菜单、四套主题的实际配色、战报卡片跟随主题，均只有代码与日志证据，没有人工看过。
 - Windows 与 Intel 全线未真机；macOS 仍未签名未公证。宠物包热重载、多只同屏、点击查看任务详情为 P2。
-- v0.5 尚未 tag、未走三平台 tag CI、未发布；完成前不得写成 v0.5 已发布。
+- v0.5.0 已正式公开发布：[Release v0.5.0](https://github.com/sgd-shine/whaledock/releases/tag/v0.5.0)，非 draft、非 prerelease，`releases/latest` 回读为 `v0.5.0`。正式注解 tag 指向提交 `19c84a4`。
+- 该提交的 main CI [31932130219](https://github.com/sgd-shine/whaledock/actions/runs/31932130219) 三平台全绿；[Release run 31932206962](https://github.com/sgd-shine/whaledock/actions/runs/31932206962) 的 build-mac / build-windows 一次通过，publish job 首次按预期被审批门 fail-closed 阻止，设置精确批准值后重跑成功。
+- 八项资产与精确字节数：`SHA256SUMS-mac.txt` 372 B、`SHA256SUMS-win.txt` 189 B、`WhaleDock-0.5.0-arm64-mac.zip` 204,815,588 B、`WhaleDock-0.5.0-arm64.dmg` 185,292,092 B、`WhaleDock-0.5.0-x64-mac.zip` 207,797,528 B、`WhaleDock-0.5.0-x64.dmg` 188,209,801 B、`WhaleDock-Setup-0.5.0.exe` 161,496,107 B、`WhaleDock-0.5.0-portable.exe` 161,308,254 B。发布前已把两个 Actions artifact 下载到本地，`shasum -a 256 -c` 六项产物全部 OK。
+- 三平台 vendor 闭包与包数同 v0.4 完全一致（arm64 `9f5613cb…` 526 包、x64 `928f3fd6…` 526 包、win32/x64 `47ad1d95…` 525 包），没有新增包，按预授权直接发布，未触发 S1。
+- 精确批准值 `release:v0.5.0:sha256:677674676d99c3f60cf76fb44b1ba9cf7491a0141b0986d4f7a99f31393ee4e8` 只在本次 publish 期间存在；Release 与八项资产回读后立即删除，仓库变量回读 `total_count=0`。
+- 未做目视验收的项全部列在 `docs/第二阶段总验收清单-2026-08-16.md`；完整遗留清单见 `docs/遗留清单-2026-08-16.md`。
 
 ## v0.4 批次 12 交接
 
