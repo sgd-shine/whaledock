@@ -1,0 +1,14 @@
+{
+  "name": "极光",
+  "author": "鲸坞 WhaleDock",
+  "base": "dark",
+  "colors": {
+    "background": "#04121a",
+    "surface": "#0b2230",
+    "border": "#155e63",
+    "primary": "#2dd4bf",
+    "accent": "#a78bfa",
+    "text": "#e8fbf7",
+    "textMuted": "#8fb3b5"
+  }
+}

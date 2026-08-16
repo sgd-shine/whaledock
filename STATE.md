@@ -23,6 +23,32 @@
 
 Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不阻断本次发布，但不得改写为已经通过。
 
+## v0.5 批次 13 已实现，待发布
+
+### 桌面宠物
+
+- 宠物包是纯静态资源：`lib/pets.js` 只 `JSON.parse` manifest 的白名单字段并读 PNG 头，**绝不 require/eval/执行包内任何内容**，也不接受 `.js`/`.html`/`.svg`。坏 JSON、假 PNG、超尺寸、越界文件名与包内 symlink 逃逸都逐项跳过并给出原因，单个坏包不影响其他包。
+- 零门槛「单图宠物」：文件夹里只有一张 PNG（连 manifest 都可省）即五态可用；多张带 `idle/busy/waiting/celebrate/error` 前缀的按前缀分组；前缀一个都认不出时全部作为 idle 逐帧。缺帧一律回落 idle，idle 也无帧才判定整包不可用。
+- 漂浮、摇摆、呼吸缩放、事件弹跳/抖动全部由壳用 CSS 变换统一实现，任何一张图都会动；多帧包在此之上叠加逐帧播放。`prefers-reduced-motion` 时关闭动画。
+- 五态由 `lib/events.js` 驱动：新增 `snapshot().activity.openTurns`（未结束的 turn 计数）与纯函数 `derivePetState`，优先级为 出错/庆祝瞬时态 → 等你拍板 → 干活中 → 空闲；瞬时态自带过期，事件层 `unavailable` 时固定 idle，不用「看起来在忙」冒充真实状态。
+- 宠物窗是透明无边框独立窗口，`contextIsolation`/`sandbox`/精确 sender 校验、拒绝导航，preload 只暴露四个固定通道。主进程把帧读成 data: URL 下发（总量上限 8 MiB，超出丢帧并记日志），**渲染层拿不到任何本地路径**。可拖动、可置顶、可鼠标穿透；穿透开启时托盘「桌面宠物」子菜单仍可操作。默认关闭。
+- 内置两只：完整五态的 `pixel-whale` 与只有一张图、无 manifest 的 `极简鲸鱼`，都由 `scripts/make-pet-sprites.js` 程序化生成（原创像素画，未使用任何第三方或官方素材）。
+
+### 皮肤主题
+
+- 主题是一个 JSON：`base` + 七个颜色 token。缺色回落同基调内置值，非法色值不采纳，坏文件跳过并记日志。只解析数据字段，不执行内容。
+- 作用域限鲸坞自有界面：主进程按页面映射表用 `insertCSS` 覆盖各页面**已有的** CSS 变量，不改页面源码。主 Harness BrowserWindow 继续无 preload、无 CSS/DOM 注入——引擎的脸不动。
+- 战报卡片自带深/浅两套配色，只有主题基调与本次导出基调一致时才套用，避免出现半套皮肤。
+- 内置四套：鲸坞深色、鲸坞浅色、极光、墨鲸。
+
+### 批次 13 当前实证
+
+- 源码版本 `0.5.0`；本地 `npm run smoke` 实际为 **233 PASS / ALL PASS**，新增 `pets-themes-smoke.js`（21 项）与 `main-v05-smoke.js`（9 项）两个子套件，均由统一 smoke 真实执行。
+- 隔离 userData `/private/tmp/whaledock-v05-gui` 的 macOS arm64 源码态已真实启动，日志回读「桌面宠物已开启：builtin:pixel-whale（idle/busy/waiting/celebrate/error）」，事件层就绪 13 个会话；本轮走的是 attach 外部 dsh 路径，退出后外部服务与 3080 端口按设计未被停止。
+- **宠物窗与主题的视觉表现未做目视验收**：上述只是启动与窗口创建的日志证据，不等于人工看过宠物动效、透明背景、鼠标穿透或四套主题的实际配色。这些列入《第二阶段总验收清单》。
+- 根 `dependencies` 仍为空，devDependencies 仍只有 electron/electron-builder；`lib/` 仍无 Electron require；没有新增运行时依赖或许可闭包。
+- 宠物包热重载、多只同屏、点击宠物查看任务详情保留为 P2，本版未实现。
+
 ## v0.4 批次 12 已实现并发布
 
 ### 工作区启动与切换

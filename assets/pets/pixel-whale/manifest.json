@@ -1,0 +1,31 @@
+{
+  "name": "像素鲸鱼",
+  "author": "鲸坞 WhaleDock",
+  "license": "MIT",
+  "frameRate": 4,
+  "size": {
+    "width": 128,
+    "height": 128
+  },
+  "anchor": "bottom-right",
+  "states": {
+    "idle": [
+      "idle-1.png",
+      "idle-2.png"
+    ],
+    "busy": [
+      "busy-1.png",
+      "busy-2.png",
+      "busy-3.png"
+    ],
+    "waiting": [
+      "waiting.png"
+    ],
+    "celebrate": [
+      "celebrate.png"
+    ],
+    "error": [
+      "error.png"
+    ]
+  }
+}

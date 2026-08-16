@@ -1,0 +1,14 @@
+{
+  "name": "墨鲸",
+  "author": "鲸坞 WhaleDock",
+  "base": "dark",
+  "colors": {
+    "background": "#0c0c0d",
+    "surface": "#17181a",
+    "border": "#2c2e33",
+    "primary": "#8b8f98",
+    "accent": "#d4d7dd",
+    "text": "#ececee",
+    "textMuted": "#8a8d94"
+  }
+}

@@ -195,6 +195,22 @@
   .switch input:disabled + .track { opacity: .45; cursor: not-allowed; }
 
   .field-line { display: flex; align-items: center; gap: 7px; margin-top: 8px; }
+  /* v0.5：外观与宠物区的下拉与并排按钮，沿用既有输入框与按钮的视觉语言。 */
+  select {
+    min-width: 190px;
+    max-width: 260px;
+    height: 34px;
+    padding: 6px 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: 7px;
+    background: var(--field);
+    color: var(--text);
+    font: inherit;
+  }
+  select:hover { border-color: #52708e; }
+  select:focus { border-color: var(--accent-strong); box-shadow: 0 0 0 3px var(--focus); outline: none; }
+  .inline-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
   input[type="text"], input[type="number"] {
     min-width: 0;
     height: 34px;
@@ -405,6 +421,7 @@
     <button id="tab-general" role="tab" aria-selected="true" aria-controls="panel-general" tabindex="0">通用</button>
     <button id="tab-backend" role="tab" aria-selected="false" aria-controls="panel-backend" tabindex="-1">后端</button>
     <button id="tab-usage" role="tab" aria-selected="false" aria-controls="panel-usage" tabindex="-1">用量与预算</button>
+    <button id="tab-look" role="tab" aria-selected="false" aria-controls="panel-look" tabindex="-1">外观与宠物</button>
     <button id="tab-help" role="tab" aria-selected="false" aria-controls="panel-help" tabindex="-1">帮助</button>
   </nav>
 
@@ -614,6 +631,84 @@
       </div>
     </section>
 
+    <section id="panel-look" role="tabpanel" aria-labelledby="tab-look" hidden>
+      <div class="section">
+        <h2 class="section-title">外观</h2>
+        <div class="card">
+          <div class="row">
+            <div>
+              <div class="row-label">皮肤主题</div>
+              <div class="row-note">只作用于鲸坞自己的界面，不改动 Harness 网页；选择后立即生效</div>
+            </div>
+            <select id="theme-select" aria-label="皮肤主题"></select>
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-label">自制主题</div>
+              <div id="theme-note" class="row-note">把主题 JSON 放进主题文件夹，点“重载主题”即可看到</div>
+            </div>
+            <div class="inline-actions">
+              <button id="open-themes-dir" class="button">打开主题文件夹</button>
+              <button id="reload-themes" class="button">重载主题</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">桌面宠物</h2>
+        <div class="card">
+          <div class="row">
+            <div>
+              <div class="row-label">显示桌面宠物</div>
+              <div class="row-note">按 AI 状态显示空闲 / 干活中 / 等你拍板 / 完成庆祝 / 出错；默认关闭</div>
+            </div>
+            <label class="switch" aria-label="显示桌面宠物">
+              <input id="petEnabled" type="checkbox">
+              <span class="track"></span>
+            </label>
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-label">宠物包</div>
+              <div id="pet-note" class="row-note">内置宠物与你自己放进宠物文件夹的宠物都会出现在这里</div>
+            </div>
+            <select id="pet-select" aria-label="宠物包"></select>
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-label">总在最前</div>
+              <div class="row-note">让宠物浮在其他窗口之上</div>
+            </div>
+            <label class="switch" aria-label="总在最前">
+              <input id="petAlwaysOnTop" type="checkbox">
+              <span class="track"></span>
+            </label>
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-label">鼠标穿透</div>
+              <div class="row-note">开启后点击会穿过宠物；此时请用托盘菜单里的“桌面宠物”操作它</div>
+            </div>
+            <label class="switch" aria-label="鼠标穿透">
+              <input id="petClickThrough" type="checkbox">
+              <span class="track"></span>
+            </label>
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-label">自制宠物</div>
+              <div class="row-note">往宠物文件夹里新建一个文件夹，丢进一张 PNG 就是一只宠物</div>
+            </div>
+            <div class="inline-actions">
+              <button id="open-pets-dir" class="button">打开宠物文件夹</button>
+              <button id="rescan-pets" class="button">重新扫描</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section id="panel-help" role="tabpanel" aria-labelledby="tab-help" hidden>
       <div class="section">
         <h2 class="section-title">关于</h2>
@@ -687,6 +782,16 @@
   const restartButton = document.getElementById('restart-now');
   const updateButton = document.getElementById('check-update');
   const updateStatus = document.getElementById('update-status');
+  // 宠物与主题是即时生效项，不进入 save/cancel 的脏值比较。
+  const lookEls = {
+    theme: document.getElementById('theme-select'),
+    themeNote: document.getElementById('theme-note'),
+    pet: document.getElementById('pet-select'),
+    petNote: document.getElementById('pet-note'),
+    petEnabled: document.getElementById('petEnabled'),
+    petAlwaysOnTop: document.getElementById('petAlwaysOnTop'),
+    petClickThrough: document.getElementById('petClickThrough')
+  };
   let snapshot = null;
   let runtimeSnapshot = {};
   let busy = false;
@@ -715,6 +820,12 @@
       command: (source && source.command) || null,
       taskNotifications: source && source.taskNotifications !== undefined
         ? Boolean(source.taskNotifications) : true,
+      petEnabled: Boolean(source && source.petEnabled),
+      petPackageId: String((source && source.petPackageId) || 'builtin:pixel-whale'),
+      petAlwaysOnTop: source && source.petAlwaysOnTop !== undefined
+        ? Boolean(source.petAlwaysOnTop) : true,
+      petClickThrough: Boolean(source && source.petClickThrough),
+      theme: String((source && source.theme) || 'whaledock-dark'),
       budgetEnabled: Boolean(source && source.budgetEnabled),
       dailyTokenBudget: Number(source && source.dailyTokenBudget !== undefined
         ? source.dailyTokenBudget : 1000000),
@@ -847,6 +958,117 @@
     }
   }
 
+  function fillSelect(select, items, selected, labelOf) {
+    if (!select) return;
+    select.textContent = '';
+    if (!items.length) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = '没有可用项';
+      select.append(option);
+      select.disabled = true;
+      return;
+    }
+    select.disabled = false;
+    for (const item of items) {
+      const option = document.createElement('option');
+      option.value = item.id;
+      option.textContent = labelOf(item);
+      if (item.id === selected) option.selected = true;
+      select.append(option);
+    }
+  }
+
+  function renderLook(payload) {
+    const runtime = runtimeFrom(payload);
+    const petsInfo = runtime.pets || runtimeSnapshot.pets;
+    const themesInfo = runtime.themes || runtimeSnapshot.themes;
+    if (petsInfo) {
+      runtimeSnapshot.pets = petsInfo;
+      fillSelect(lookEls.pet, petsInfo.packages || [], petsInfo.selected,
+        (item) => `${item.name}${item.author ? ` · ${item.author}` : ''}`
+          + `${item.source === 'builtin' ? '（内置）' : ''}`);
+      lookEls.petNote.textContent = petsInfo.skipped
+        ? `有 ${petsInfo.skipped} 个宠物包被跳过，原因见日志文件夹`
+        : '往宠物文件夹里新建一个文件夹，丢进一张 PNG 就是一只宠物';
+    }
+    if (themesInfo) {
+      runtimeSnapshot.themes = themesInfo;
+      fillSelect(lookEls.theme, themesInfo.themes || [], themesInfo.selected,
+        (item) => `${item.name}${item.source === 'builtin' ? '（内置）' : ''}`);
+      lookEls.themeNote.textContent = themesInfo.skipped
+        ? `有 ${themesInfo.skipped} 个主题文件被跳过，原因见日志文件夹`
+        : '把主题 JSON 放进主题文件夹，点“重载主题”即可看到';
+    }
+    if (snapshot) {
+      lookEls.petEnabled.checked = snapshot.petEnabled === true;
+      lookEls.petAlwaysOnTop.checked = snapshot.petAlwaysOnTop !== false;
+      lookEls.petClickThrough.checked = snapshot.petClickThrough === true;
+    }
+  }
+
+  async function applyLook(patch, successText) {
+    try {
+      const result = await api.apply(patch);
+      if (responseFailed(result)) throw new Error(messageOf(result, '保存失败'));
+      const settings = (result && (result.config || result.settings)) || null;
+      if (settings) snapshot = { ...snapshot, ...settings };
+      setStatus(successText, 'success');
+    } catch (error) {
+      setStatus(messageOf(error, '保存失败'), 'error');
+    }
+    await refreshLook();
+  }
+
+  async function refreshLook() {
+    try {
+      const payload = await api.get();
+      if (!responseFailed(payload)) {
+        snapshot = normalizedConfig(payload);
+        renderLook(payload);
+      }
+    } catch (_error) { /* 只影响外观区展示，不打断其他设置 */ }
+  }
+
+  function bindLook() {
+    if (!lookEls.theme) return;
+    lookEls.theme.addEventListener('change', () => {
+      if (!lookEls.theme.value) return;
+      void applyLook({ theme: lookEls.theme.value }, '主题已切换');
+    });
+    lookEls.pet.addEventListener('change', () => {
+      if (!lookEls.pet.value) return;
+      void applyLook({ petPackageId: lookEls.pet.value }, '宠物已切换');
+    });
+    for (const [name, text] of [
+      ['petEnabled', '宠物设置已保存'],
+      ['petAlwaysOnTop', '宠物设置已保存'],
+      ['petClickThrough', '宠物设置已保存']
+    ]) {
+      lookEls[name].addEventListener('change', () => {
+        void applyLook({ [name]: lookEls[name].checked }, text);
+      });
+    }
+    document.getElementById('open-pets-dir').addEventListener('click', () => {
+      void api.openResourceDir('pets');
+    });
+    document.getElementById('open-themes-dir').addEventListener('click', () => {
+      void api.openResourceDir('themes');
+    });
+    document.getElementById('rescan-pets').addEventListener('click', () => {
+      void api.rescanPets().then((result) => {
+        renderLook({ runtime: { pets: result && result.pets } });
+        setStatus('宠物文件夹已重新扫描', 'success');
+      }).catch((error) => setStatus(messageOf(error, '重新扫描失败'), 'error'));
+    });
+    document.getElementById('reload-themes').addEventListener('click', () => {
+      void api.reloadThemes().then((result) => {
+        renderLook({ runtime: { themes: result && result.themes } });
+        setStatus('主题已重载', 'success');
+      }).catch((error) => setStatus(messageOf(error, '主题重载失败'), 'error'));
+    });
+  }
+
   async function load() {
     setBusy(true, '正在读取设置…');
     try {
@@ -856,6 +1078,7 @@
       renderConfig(snapshot);
       renderRuntime(payload);
       renderWorkspace(payload);
+      renderLook(payload);
       setStatus('设置已是最新', 'success');
     } catch (error) {
       setStatus(messageOf(error, '读取设置失败，请关闭后重试'), 'error');
@@ -1005,6 +1228,7 @@
     setStatus('设置桥接不可用，请重新启动鲸坞', 'error');
     setBusy(false);
   } else {
+    bindLook();
     load();
   }
 })();

@@ -543,7 +543,8 @@ async function main() {
 
   // v0.5 宠物包与主题包解析同样必须由统一 smoke 真实执行。
   for (const [file, label] of [
-    ['pets-themes-smoke.js', '宠物包与主题包解析']
+    ['pets-themes-smoke.js', '宠物包与主题包解析'],
+    ['main-v05-smoke.js', 'Electron 宠物窗与主题薄层']
   ]) {
     const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
       cwd: path.join(__dirname, '..'),

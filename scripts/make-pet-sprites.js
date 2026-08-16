@@ -148,15 +148,16 @@ function frame(kind) {
 // 极简款：一只纯色圆润小鲸，只有一张图，专门演示「单图宠物」。
 function minimalGrid() {
   const grid = blankGrid();
-  fillEllipse(grid, 16, 17, 10, 8, C.primary);
-  fillEllipse(grid, 16, 20, 8, 4, C.accent);
-  put(grid, 11, 15, C.white);
-  put(grid, 11, 14, C.white);
-  put(grid, 12, 15, C.eye);
-  put(grid, 12, 14, C.eye);
+  // 尾鳍先画，再让身体盖住接缝，避免两块图形糊在一起。
   for (let i = 0; i < 5; i += 1) {
-    for (let y = 12 + i; y <= 22 - i; y += 1) put(grid, 26 + i, y, C.primary);
+    for (let y = 12 + i; y <= 22 - i; y += 1) put(grid, 24 + i, y, C.primary);
   }
+  fillEllipse(grid, 14, 17, 9, 7, C.primary);
+  fillEllipse(grid, 14, 20, 7, 3, C.accent);
+  // 眼睛：白眼底 + 黑瞳，放在身体左上，确保落在实心区域内。
+  for (const [x, y] of [[9, 14], [10, 14], [9, 15], [10, 15]]) put(grid, x, y, C.white);
+  put(grid, 10, 15, C.eye);
+  put(grid, 10, 14, C.eye);
   outlineOpaque(grid, C.outline);
   return grid;
 }
@@ -242,7 +243,8 @@ function main() {
   console.log('WROTE assets/pets/pixel-whale/manifest.json');
 
   // 极简款故意不带 manifest：它本身就是「单图宠物」的活教材。
-  write(path.join(root, 'minimal-whale'), 'idle.png', minimalGrid());
+  // 文件夹名直接当展示名，所以这里用中文目录，顺便覆盖非 ASCII 资源路径。
+  write(path.join(root, '极简鲸鱼'), 'idle.png', minimalGrid());
 }
 
 main();

@@ -286,7 +286,8 @@ async function run() {
     assert(!/preload\s*:/.test(openMain));
     assert(!/(executeJavaScript|insertCSS|querySelector|innerHTML)/.test(openMain));
     const pkg = require('../package.json');
-    assert.equal(pkg.version, '0.4.0');
+    // 版本号只在当前版本的直测里精确钉住；这里只保证形状合法。
+    assert.match(pkg.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
     for (const file of ['capture.html', 'capture.js', 'preload-capture.js']) {
       assert(pkg.build.files.includes(file), file);
     }

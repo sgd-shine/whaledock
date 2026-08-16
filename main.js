@@ -19,6 +19,8 @@ const backend = require('./lib/backend');
 const events = require('./lib/events');
 const workspaces = require('./lib/workspaces');
 const imageInput = require('./lib/image-input');
+const pets = require('./lib/pets');
+const themes = require('./lib/themes');
 const log = require('./lib/log');
 const update = require('./lib/update');
 
@@ -511,6 +513,14 @@ let splash = null;
 let settingsWindow = null;
 let dashboardWindow = null;
 let noticeWindow = null;
+// v0.5 桌面宠物与主题
+let petWindow = null;
+let petPayload = null;
+let petState = 'idle';
+let petTransient = null;
+let petTransientTimer = null;
+const themedPages = new Map();
+const themedWindows = new Map();
 let tray = null;
 let backendState = null;
 let spawnedByUs = false;
@@ -969,8 +979,370 @@ function currentDashboardSnapshot() {
 }
 
 function pushDashboardState() {
+  // 宠物与看板共用同一个事件层快照，这里统一刷新，避免两套状态来源。
+  pushPetState();
   if (!dashboardWindow || dashboardWindow.isDestroyed()) return;
   dashboardWindow.webContents.send('dashboard:state', currentDashboardSnapshot());
+}
+
+// ---------- v0.5 皮肤主题 ----------
+// 主题只作用于鲸坞自有窗口：主进程把 token 注入各页面已有的 CSS 变量，
+// 不改页面源码，也绝不注入 dsh 的 Web UI。
+const THEME_VARIABLE_MAP = Object.freeze({
+  'settings.html': (c) => ({
+    '--bg': c.background, '--surface': c.surface, '--surface-raised': c.surface,
+    '--field': c.background, '--line': c.border, '--line-strong': c.border,
+    '--text': c.text, '--muted': c.textMuted, '--faint': c.textMuted,
+    '--accent': c.accent, '--accent-strong': c.primary
+  }),
+  'dashboard.html': (c) => ({
+    '--bg': c.background, '--panel': c.surface, '--panel-strong': c.surface,
+    '--line': c.border, '--text': c.text, '--muted': c.textMuted,
+    '--cyan': c.accent, '--indigo': c.primary
+  }),
+  'splash.html': (c) => ({
+    '--bg': c.background, '--panel': c.surface, '--text': c.text,
+    '--dim': c.textMuted, '--accent': c.primary, '--accent2': c.accent
+  }),
+  'capture.html': (c) => ({
+    '--bg': c.background, '--panel': c.surface, '--line': c.border,
+    '--text': c.text, '--muted': c.textMuted, '--cyan': c.accent
+  }),
+  'report-card.html': (c) => ({
+    '--bg': c.background, '--glow': c.surface, '--text': c.text,
+    '--muted': c.textMuted, '--subtle': c.textMuted,
+    '--cyan': c.accent, '--indigo': c.primary
+  })
+});
+
+function themeRoots() {
+  const roots = [{ dir: path.join(__dirname, 'assets', 'themes'), source: 'builtin' }];
+  try { roots.push({ dir: path.join(app.getPath('userData'), 'themes'), source: 'user' }); }
+  catch (_error) { /* userData 不可用时只用内置主题 */ }
+  return roots;
+}
+
+function listAvailableThemes() {
+  try { return themes.listThemes({ roots: themeRoots() }); }
+  catch (error) {
+    log.line('app', `主题扫描失败：${error && error.message || 'unknown'}`);
+    return { themes: [], skipped: [] };
+  }
+}
+
+function currentTheme() {
+  const listed = listAvailableThemes();
+  if (listed.skipped.length) {
+    log.line('app', `跳过 ${listed.skipped.length} 个主题文件：${listed.skipped
+      .map((item) => `${item.id}(${item.reason})`).join('、').slice(0, 300)}`);
+  }
+  return themes.selectTheme(listed.themes, config.get().theme);
+}
+
+function themeCssFor(page, theme) {
+  const build = THEME_VARIABLE_MAP[page];
+  if (!build) return null;
+  const declarations = Object.entries(build(theme.colors))
+    .map(([name, value]) => `${name}:${value};`).join('');
+  return `:root{color-scheme:${theme.base};${declarations}}`;
+}
+
+async function applyThemeToWindow(win, page, theme) {
+  if (!win || win.isDestroyed()) return;
+  const css = themeCssFor(page, theme || currentTheme());
+  if (!css) return;
+  const key = `whaledock-theme:${page}`;
+  try {
+    const previous = themedWindows.get(win);
+    if (previous) await win.webContents.removeInsertedCSS(previous).catch(() => {});
+    const handle = await win.webContents.insertCSS(css);
+    themedWindows.set(win, handle);
+    win.webContents.once('destroyed', () => themedWindows.delete(win));
+  } catch (error) {
+    log.line('app', `${key} 注入失败：${error && error.message || 'unknown'}`);
+  }
+}
+
+function refreshAllThemes() {
+  const theme = currentTheme();
+  for (const [win, page] of themedPages.entries()) {
+    if (!win || win.isDestroyed()) { themedPages.delete(win); continue; }
+    void applyThemeToWindow(win, page, theme);
+  }
+  if (petWindow && !petWindow.isDestroyed()) {
+    try { petWindow.setBackgroundColor('#00000000'); } catch (_error) { /* 透明窗保持透明 */ }
+  }
+  return theme;
+}
+
+// 页面注册：窗口创建时登记自己是哪个页面，加载完成后自动套用当前主题。
+function registerThemedWindow(win, page) {
+  if (!win || win.isDestroyed() || !THEME_VARIABLE_MAP[page]) return;
+  themedPages.set(win, page);
+  win.webContents.on('did-finish-load', () => { void applyThemeToWindow(win, page); });
+  win.on('closed', () => { themedPages.delete(win); themedWindows.delete(win); });
+}
+
+// ---------- v0.5 桌面宠物 ----------
+// 宠物包是纯静态资源：主进程解析 manifest/PNG，绝不执行包内任何内容，
+// 并且只把 data: URL 下发给宠物窗，渲染层拿不到任何本地路径。
+const PET_PAYLOAD_MAX_BYTES = 8 * 1024 * 1024;
+
+function petRoots() {
+  const roots = [{ dir: path.join(__dirname, 'assets', 'pets'), source: 'builtin' }];
+  try { roots.push({ dir: path.join(app.getPath('userData'), 'pets'), source: 'user' }); }
+  catch (_error) { /* userData 不可用时只用内置宠物 */ }
+  return roots;
+}
+
+function listAvailablePets() {
+  try { return pets.listPetPackages({ roots: petRoots() }); }
+  catch (error) {
+    log.line('app', `宠物包扫描失败：${error && error.message || 'unknown'}`);
+    return { packages: [], skipped: [] };
+  }
+}
+
+// 把选中的宠物包读成 data: URL；超出总上限的帧被丢弃并记日志，不静默截断。
+function buildPetPayload(petPackage) {
+  if (!petPackage) return null;
+  const states = {};
+  let total = 0;
+  let dropped = 0;
+  for (const state of pets.PET_STATES) {
+    const frames = petPackage.states[state];
+    if (!Array.isArray(frames) || !frames.length) continue;
+    const encoded = [];
+    for (const file of frames) {
+      let bytes;
+      try { bytes = fs.readFileSync(file); } catch (_error) { dropped += 1; continue; }
+      if (total + bytes.length > PET_PAYLOAD_MAX_BYTES) { dropped += 1; continue; }
+      total += bytes.length;
+      encoded.push(`data:image/png;base64,${bytes.toString('base64')}`);
+    }
+    if (encoded.length) states[state] = encoded;
+  }
+  if (!states.idle) return null;
+  if (dropped) {
+    log.line('app', `宠物包 ${petPackage.id} 有 ${dropped} 帧因读取失败或超出总上限被丢弃`);
+  }
+  return {
+    id: petPackage.id,
+    name: petPackage.name,
+    frameRate: petPackage.frameRate,
+    width: petPackage.width,
+    height: petPackage.height,
+    anchor: petPackage.anchor,
+    states
+  };
+}
+
+function loadSelectedPet() {
+  const listed = listAvailablePets();
+  if (listed.skipped.length) {
+    log.line('app', `跳过 ${listed.skipped.length} 个宠物包：${listed.skipped
+      .map((item) => `${item.id}(${item.reason})`).join('、').slice(0, 300)}`);
+  }
+  const selected = pets.selectPetPackage(listed.packages, config.get().petPackageId);
+  petPayload = buildPetPayload(selected);
+  if (selected && !petPayload) log.line('app', `宠物包 ${selected.id} 没有可用帧，已跳过`);
+  return petPayload;
+}
+
+function petWindowBounds(payload) {
+  const width = Math.min(512, Math.max(48, (payload && payload.width) || 128));
+  const height = Math.min(512, Math.max(48, (payload && payload.height) || 128));
+  const anchor = (payload && payload.anchor) || 'bottom-right';
+  let area = { x: 0, y: 0, width: 1280, height: 800 };
+  try { area = electron.screen.getPrimaryDisplay().workArea; } catch (_error) { /* 用默认值 */ }
+  const margin = 24;
+  const right = area.x + area.width - width - margin;
+  const bottom = area.y + area.height - height - margin;
+  const left = area.x + margin;
+  const top = area.y + margin;
+  const position = {
+    'bottom-right': { x: right, y: bottom },
+    'bottom-left': { x: left, y: bottom },
+    'top-right': { x: right, y: top },
+    'top-left': { x: left, y: top }
+  }[anchor] || { x: right, y: bottom };
+  return { ...position, width, height };
+}
+
+function currentPetState() {
+  return events.derivePetState({
+    snapshot: canonicalEventSnapshot(),
+    transient: petTransient,
+    now: Date.now()
+  });
+}
+
+function pushPetState() {
+  const next = currentPetState();
+  if (next === petState && petWindow && !petWindow.isDestroyed()) return;
+  petState = next;
+  if (petWindow && !petWindow.isDestroyed()) {
+    petWindow.webContents.send('pet:state', { state: petState });
+  }
+}
+
+// 终态 effect 只在宠物开启时翻译成一次性庆祝/出错表现。
+function notePetTerminal(result) {
+  if (!config.get().petEnabled) return;
+  const transient = events.petTransientFor(result, Date.now());
+  if (!transient) return;
+  petTransient = transient;
+  pushPetState();
+  if (petTransientTimer) clearTimeout(petTransientTimer);
+  petTransientTimer = setTimeout(() => {
+    petTransient = null;
+    petTransientTimer = null;
+    pushPetState();
+  }, Math.max(0, transient.until - Date.now()) + 20);
+  if (petTransientTimer.unref) petTransientTimer.unref();
+}
+
+function applyPetWindowFlags(win) {
+  if (!win || win.isDestroyed()) return;
+  const current = config.get();
+  try { win.setAlwaysOnTop(current.petAlwaysOnTop === true, 'floating'); }
+  catch (_error) { /* 系统拒绝置顶时保持普通层级 */ }
+  try { win.setIgnoreMouseEvents(current.petClickThrough === true, { forward: true }); }
+  catch (_error) { /* 不支持穿透时保持可交互 */ }
+}
+
+function closePetWindow() {
+  if (petTransientTimer) { clearTimeout(petTransientTimer); petTransientTimer = null; }
+  petTransient = null;
+  if (petWindow && !petWindow.isDestroyed()) petWindow.destroy();
+  petWindow = null;
+}
+
+function openPetWindow() {
+  if (!loadSelectedPet()) {
+    log.line('app', '没有可用宠物包，宠物窗未打开');
+    return null;
+  }
+  if (petWindow && !petWindow.isDestroyed()) {
+    petWindow.webContents.send('pet:package', petPayload);
+    applyPetWindowFlags(petWindow);
+    pushPetState();
+    petWindow.showInactive();
+    return petWindow;
+  }
+  const expectedUrl = pathToFileURL(path.join(__dirname, 'pet.html')).href;
+  const win = new BrowserWindow({
+    ...petWindowBounds(petPayload),
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    title: '鲸坞宠物',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-pet.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  petWindow = win;
+  secureLocalWindow(win, expectedUrl);
+  applyPetWindowFlags(win);
+  win.once('ready-to-show', () => { if (!win.isDestroyed()) win.showInactive(); });
+  win.webContents.on('did-finish-load', () => {
+    if (win.isDestroyed()) return;
+    win.webContents.send('pet:package', petPayload);
+    win.webContents.send('pet:state', { state: currentPetState() });
+  });
+  win.on('closed', () => { if (petWindow === win) petWindow = null; });
+  log.line('app', `桌面宠物已开启：${petPayload.id}（${Object.keys(petPayload.states).join('/')}）`);
+  void win.loadFile('pet.html');
+  return win;
+}
+
+// 开关、换包、置顶/穿透变更都走这一个入口，避免多处各自开窗。
+function syncPetWindow() {
+  const current = config.get();
+  if (!current.petEnabled) { closePetWindow(); return; }
+  if (petWindow && !petWindow.isDestroyed()) {
+    const previousId = petPayload && petPayload.id;
+    loadSelectedPet();
+    if (!petPayload) { closePetWindow(); return; }
+    if (petPayload.id !== previousId) {
+      const bounds = petWindowBounds(petPayload);
+      try { petWindow.setBounds(bounds); } catch (_error) { /* 保持原位置 */ }
+    }
+    petWindow.webContents.send('pet:package', petPayload);
+    applyPetWindowFlags(petWindow);
+    pushPetState();
+    return;
+  }
+  openPetWindow();
+}
+
+function petContextMenuTemplate() {
+  const current = config.get();
+  const listed = listAvailablePets();
+  const items = listed.packages.slice(0, 30).map((item) => ({
+    label: item.name + (item.author ? ` · ${item.author}` : ''),
+    type: 'radio',
+    checked: item.id === current.petPackageId,
+    click: () => { void applyPetSettings({ petPackageId: item.id }); }
+  }));
+  return [
+    { label: '换一只宠物', enabled: false },
+    ...(items.length ? items : [{ label: '没有可用宠物包', enabled: false }]),
+    { type: 'separator' },
+    {
+      label: '总在最前',
+      type: 'checkbox',
+      checked: current.petAlwaysOnTop === true,
+      click: () => { void applyPetSettings({ petAlwaysOnTop: !current.petAlwaysOnTop }); }
+    },
+    {
+      label: '鼠标穿透',
+      type: 'checkbox',
+      checked: current.petClickThrough === true,
+      click: () => { void applyPetSettings({ petClickThrough: !current.petClickThrough }); }
+    },
+    { type: 'separator' },
+    { label: '打开宠物文件夹', click: () => { void openUserResourceDir('pets'); } },
+    { label: '关闭宠物', click: () => { void applyPetSettings({ petEnabled: false }); } }
+  ];
+}
+
+// 宠物相关设置的唯一写入路径：先持久 config，再同步窗口，失败如实记录。
+async function applyPetSettings(patch) {
+  try {
+    config.set(config.validateSettingsPatch(patch));
+  } catch (error) {
+    log.line('app', `宠物设置写入失败：${error && error.message || 'unknown'}`);
+    return false;
+  }
+  syncPetWindow();
+  refreshTrayMenu();
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.webContents.send('settings:runtime', settingsRuntime());
+  }
+  return true;
+}
+
+// 只允许打开鲸坞自己在 userData 下的受控目录，不接受渲染层传入的任意路径。
+async function openUserResourceDir(kind) {
+  if (kind !== 'pets' && kind !== 'themes') return false;
+  let dir;
+  try { dir = path.join(app.getPath('userData'), kind); } catch (_error) { return false; }
+  try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch (_error) { /* 已存在即可 */ }
+  try { await shell.openPath(dir); return true; } catch (error) {
+    log.line('app', `打开 ${kind} 目录失败：${error && error.message || 'unknown'}`);
+    return false;
+  }
 }
 
 function budgetIsPaused() {
@@ -1454,6 +1826,7 @@ async function handleEventEffects(value, monitor) {
     if (effect.type === 'task-terminal') {
       const payload = terminalNoticePayload(effect);
       if (payload && eventLayerCurrent(monitor)) deliverTaskNotification(payload);
+      notePetTerminal(effect.result);
     } else if (effect.type === 'waiting-human') {
       deliverTaskNotification({
         kind: 'waiting',
@@ -1488,6 +1861,7 @@ async function onReady() {
   registerSettingsIpc();
   registerEventIpc();
   registerCaptureIpc();
+  registerPetIpc();
   try { await imageInput.cleanupOwnedStaging({ stagingRoot: captureStagingRoot() }); }
   catch (error) { log.line('capture', `启动清理 staging 失败：${error && error.code || 'unknown'}`); }
   await recoverWorkspaceAtStartup();
@@ -1498,7 +1872,29 @@ async function onReady() {
   createAppMenu();
   registerHotkeys();
   configureUpdateSchedule();
+  // 宠物默认关闭；只有用户显式开启过才在启动时开窗。
+  if (config.get().petEnabled && !SMOKE) syncPetWindow();
   await ensureBackendAndShow(!initialStartMinimized);
+}
+
+function registerPetIpc() {
+  const expectedUrl = pathToFileURL(path.join(__dirname, 'pet.html')).href;
+  const trusted = (handler) => async (event, ...args) => {
+    if (!trustedLocalEvent(event, petWindow, expectedUrl)) {
+      throw new Error('拒绝非宠物窗主帧的 IPC 请求');
+    }
+    return handler(...args);
+  };
+  for (const channel of ['pet:ready', 'pet:context-menu']) ipcMain.removeHandler(channel);
+  ipcMain.handle('pet:ready', trusted(async () => ({
+    package: petPayload,
+    state: currentPetState()
+  })));
+  ipcMain.handle('pet:context-menu', trusted(async () => {
+    const menu = Menu.buildFromTemplate(petContextMenuTemplate());
+    if (petWindow && !petWindow.isDestroyed()) menu.popup({ window: petWindow });
+    return { ok: true };
+  }));
 }
 
 function startManagedBackend(options = {}) {
@@ -1950,6 +2346,7 @@ function createSplash() {
       nodeIntegration: false
     }
   });
+  registerThemedWindow(splash, 'splash.html');
   void splash.loadFile('splash.html');
   splash.webContents.once('did-finish-load', () => {
     sendSplash('status', lastStatus);
@@ -2131,6 +2528,7 @@ function openDashboardWindow() {
     if (!win.isDestroyed()) { win.show(); win.focus(); }
   });
   win.on('closed', () => { if (dashboardWindow === win) dashboardWindow = null; });
+  registerThemedWindow(win, 'dashboard.html');
   void win.loadFile('dashboard.html');
 }
 
@@ -2214,6 +2612,13 @@ async function renderOffscreenReport(value) {
       readyTimer = setTimeout(() => reject(new Error('战报 renderer 渲染超时')), 15000);
     });
     await win.loadFile('report-card.html');
+    // 战报是要落盘的图片：主题必须在 capture 之前确定生效，不能依赖异步监听。
+    // 战报卡片自带深/浅两套配色；只有用户主题基调与本次请求一致时才套用，
+    // 避免深色主题的色值被浅色卡片的更高优先级规则盖掉、出现半套皮肤。
+    const reportTheme = currentTheme();
+    if (reportTheme.base === request.theme) {
+      await applyThemeToWindow(win, 'report-card.html', reportTheme);
+    }
     win.webContents.send('report:render', payload);
     await rendered;
     let image = await win.webContents.capturePage({ x: 0, y: 0, width: 1080, height: 1440 });
@@ -2494,6 +2899,7 @@ function openCaptureWindow(options = {}) {
     captureWindow = null;
     if (captureState) void cancelCurrentCapture('图片窗口已关闭');
   });
+  registerThemedWindow(win, 'capture.html');
   void win.loadFile('capture.html');
   return win;
 }
@@ -3027,7 +3433,41 @@ function settingsRuntime() {
     loginItem: loginItemStatus(),
     manualUrl: MANUAL_URL,
     logsUrl: pathToFileURL(log.dirPath()).href,
-    workspace: currentWorkspaceSurface()
+    workspace: currentWorkspaceSurface(),
+    pets: petsRuntimeSurface(),
+    themes: themesRuntimeSurface()
+  };
+}
+
+// 设置窗只拿到展示所需的最小信息：id/名字/作者/来源与被跳过的数量，
+// 不下发任何本地路径，也不下发帧数据。
+function petsRuntimeSurface() {
+  const listed = listAvailablePets();
+  return {
+    selected: config.get().petPackageId,
+    skipped: listed.skipped.length,
+    packages: listed.packages.slice(0, 100).map((item) => ({
+      id: item.id,
+      name: item.name,
+      author: item.author || null,
+      source: item.source,
+      singleImage: item.singleImage === true
+    }))
+  };
+}
+
+function themesRuntimeSurface() {
+  const listed = listAvailableThemes();
+  return {
+    selected: config.get().theme,
+    skipped: listed.skipped.length,
+    themes: listed.themes.slice(0, 100).map((item) => ({
+      id: item.id,
+      name: item.name,
+      author: item.author || null,
+      source: item.source,
+      base: item.base
+    }))
   };
 }
 
@@ -3048,7 +3488,8 @@ function trustedSettingsHandler(handler) {
 function registerSettingsIpc() {
   const channels = [
     'settings:get', 'settings:apply', 'settings:switch-workspace',
-    'settings:restart-backend', 'settings:check-update'
+    'settings:restart-backend', 'settings:check-update',
+    'settings:rescan-pets', 'settings:reload-themes', 'settings:open-resource-dir'
   ];
   for (const channel of channels) ipcMain.removeHandler(channel);
 
@@ -3115,6 +3556,13 @@ function registerSettingsIpc() {
 
     if (hotkeyTransaction) hotkeyTransaction.commit();
 
+    // 宠物与主题都是即时生效项：config 落盘成功后才动窗口。
+    if (['petEnabled', 'petPackageId', 'petAlwaysOnTop', 'petClickThrough']
+      .some((key) => Object.prototype.hasOwnProperty.call(normalized, key))) {
+      syncPetWindow();
+    }
+    if (Object.prototype.hasOwnProperty.call(normalized, 'theme')) refreshAllThemes();
+
     if (eventEffects.length) await handleEventEffects(eventEffects, eventMonitor);
     if (loginChanged) login = loginItemStatus(loginError);
     if (Object.prototype.hasOwnProperty.call(normalized, 'checkUpdates')) configureUpdateSchedule();
@@ -3146,6 +3594,20 @@ function registerSettingsIpc() {
 
   ipcMain.handle('settings:check-update', trustedSettingsHandler(async () => {
     return runUpdateCheck(true);
+  }));
+
+  // 重新扫描只重读受控目录，不接受渲染层传入路径。
+  ipcMain.handle('settings:rescan-pets', trustedSettingsHandler(async () => {
+    syncPetWindow();
+    return { ok: true, pets: petsRuntimeSurface() };
+  }));
+  ipcMain.handle('settings:reload-themes', trustedSettingsHandler(async () => {
+    const theme = refreshAllThemes();
+    return { ok: true, themes: themesRuntimeSurface(), applied: theme.id };
+  }));
+  ipcMain.handle('settings:open-resource-dir', trustedSettingsHandler(async (kind) => {
+    const opened = await openUserResourceDir(kind === 'themes' ? 'themes' : 'pets');
+    return { ok: opened };
   }));
 }
 
@@ -3188,6 +3650,7 @@ function openSettingsWindow() {
     }
   });
   win.on('closed', () => { if (settingsWindow === win) settingsWindow = null; });
+  registerThemedWindow(win, 'settings.html');
   void win.loadFile('settings.html');
 }
 
@@ -3481,6 +3944,7 @@ function trayMenuTemplate() {
     { label: '任务与用量看板…', click: () => openDashboardWindow() },
     { label: '截图与图片…', click: () => openCaptureWindow({ source: 'drop' }) },
     { label: '工作区', submenu: workspaceSubmenuTemplate() },
+    { label: '桌面宠物', submenu: petSubmenuTemplate() },
     { label: '设置…', click: () => openSettingsWindow() },
     { label: '在浏览器中打开', click: () => shell.openExternal(baseUrl()) },
     { label: '检查更新…', click: () => { void runUpdateCheck(true); } },
@@ -3490,6 +3954,22 @@ function trayMenuTemplate() {
     { label: '打开配置文件', click: () => shell.openPath(config.filePath()) },
     { type: 'separator' },
     { label: '退出鲸坞', click: () => { quitting = true; app.quit(); } }
+  ];
+}
+
+// 托盘入口在鼠标穿透打开时仍然可用，避免宠物窗右键菜单点不到。
+function petSubmenuTemplate() {
+  const current = config.get();
+  return [
+    {
+      label: '显示桌面宠物',
+      type: 'checkbox',
+      checked: current.petEnabled === true,
+      click: () => { void applyPetSettings({ petEnabled: !current.petEnabled }); }
+    },
+    { type: 'separator' },
+    ...(current.petEnabled ? petContextMenuTemplate().slice(0, -2) : []),
+    { label: '打开宠物文件夹', click: () => { void openUserResourceDir('pets'); } }
   ];
 }
 
@@ -3687,6 +4167,8 @@ if (!MAIN_HELPER_TEST) {
     void beginCaptureShutdown().catch((error) => {
       log.line('capture', `图片资源退出清理失败：${error && error.code || 'unknown'}`);
     });
+    // 宠物窗只是本地视觉层，退出时直接销毁并停掉瞬时态定时器。
+    closePetWindow();
   });
 
   app.on('will-quit', (e) => {
@@ -3725,6 +4207,11 @@ if (MAIN_HELPER_TEST) {
     workspaceSurfaceSnapshot,
     applyHotkeyBindings,
     ocrScriptsRoot,
-    captureDeliveryRequest
+    captureDeliveryRequest,
+    themeCssFor,
+    buildPetPayload,
+    petWindowBounds,
+    THEME_VARIABLE_MAP,
+    PET_PAYLOAD_MAX_BYTES
   };
 }

@@ -1,0 +1,14 @@
+{
+  "name": "鲸坞深色",
+  "author": "鲸坞 WhaleDock",
+  "base": "dark",
+  "colors": {
+    "background": "#090e17",
+    "surface": "#101a2c",
+    "border": "#1e2a5e",
+    "primary": "#4f46e5",
+    "accent": "#22d3ee",
+    "text": "#e6edf7",
+    "textMuted": "#93a4bd"
+  }
+}

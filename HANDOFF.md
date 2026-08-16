@@ -20,6 +20,26 @@ v0.2 工程/macOS 验收/G1 与 v0.3.0 公开发布保留为历史证据。v0.4 
 
 2026-08-15 SGD 的发布决定已覆盖旧的 beta-first 流程：不发 beta；Windows 真机验收不再阻断发布，改为“实验性支持（未真机验证）”；Intel 只保留 Rosetta 抽查边界；在没有 S1 冲突且 G1/成品材料闭环时，Codex 获预授权临时设置精确审批值、发布并立即删除变量。
 
+## v0.5 批次 13 交接（实现完成，待发布）
+
+### 已实现
+
+- `lib/pets.js`：宠物包发现、manifest 白名单解析、单图/前缀/无前缀三条零门槛路径、缺帧回落 idle、PNG 头校验、包内 symlink 越界拒绝、逐包容错与跳过原因。纯 Node，不 require Electron，不执行包内任何内容。
+- `lib/themes.js`：主题 JSON 解析、七色 token 白名单、缺色回落、坏文件跳过、CSS 变量输出。同样纯 Node、纯数据。
+- `lib/events.js`：新增 `snapshot().activity`（未结束 turn 计数）与纯函数 `derivePetState` / `petTransientFor`，五态优先级与瞬时态过期均可 fixture 直测。
+- `main.js`：宠物窗生命周期（透明/无边框/置顶/穿透/右键菜单/托盘子菜单）、data: URL payload、主题按页面映射注入、设置窗宠物与外观区 IPC、退出清理。
+- `pet.html` / `pet.js` / `preload-pet.js`：CSP `default-src 'none'`、外置脚本、`img-src data:`，preload 只暴露 `pet:ready` / `pet:context-menu` 与两个下行事件。
+- 内置资源：`assets/pets/pixel-whale`（五态）、`assets/pets/极简鲸鱼`（单图无 manifest）、`assets/themes/*.json`（四套），生成脚本 `scripts/make-pet-sprites.js`。
+- 文档：`docs/宠物包制作指南.md`、`docs/主题制作指南.md`（含可直接发给画图 AI 的提示词模板）、`community-pets/`、`community-themes/` 与 README 邀请 PR。
+
+### 证据与边界
+
+- 本地 `npm run smoke` **233 PASS / ALL PASS**（新增 21 + 9 项）。
+- macOS arm64 源码态在隔离 userData 中真实启动，日志回读宠物窗已开启且五态齐全；退出后未停止 attach 到的外部 dsh。
+- **未做目视验收**：宠物动效、透明背景、拖动、鼠标穿透、右键菜单、四套主题的实际配色、战报卡片跟随主题，均只有代码与日志证据，没有人工看过。
+- Windows 与 Intel 全线未真机；macOS 仍未签名未公证。宠物包热重载、多只同屏、点击查看任务详情为 P2。
+- v0.5 尚未 tag、未走三平台 tag CI、未发布；完成前不得写成 v0.5 已发布。
+
 ## v0.4 批次 12 交接
 
 ### 已实现
