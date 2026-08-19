@@ -13,6 +13,7 @@ const config = require('../lib/config');
 const log = require('../lib/log');
 const update = require('../lib/update');
 const macosBuildVisibility = require('../scripts/macos-build-visibility');
+const macosCodesign = require('../scripts/macos-codesign');
 
 const PORT = 3123;
 let failed = 0;
@@ -276,6 +277,14 @@ async function main() {
       && fs.readFileSync(zipFixture, 'utf8') === 'zip'
       && macosBuildVisibility.archiveMacAppBundles(macRelease, { unregister: false }).length === 0);
 
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  check('packaging: macOS 打包挂上 afterPack 签名钩子',
+    pkg.build.afterPack === 'scripts/macos-codesign.js' && pkg.build.mac.identity === null,
+    `${pkg.build.afterPack} / identity=${String(pkg.build.mac.identity)}`);
+  check('packaging: 签名钩子默认 ad-hoc、不引入证书或付费服务',
+    macosCodesign.signingIdentity({}).identity === '-'
+      && fs.existsSync(path.join(__dirname, '..', 'build', 'entitlements.mac.plist')));
+
   // PATH / which
   check('backend: fullPath 非空', backend.fullPath().split(path.delimiter).length > 3);
   check('backend: which(node) 找得到', !!backend.which('node'), backend.which('node') || '');
@@ -538,6 +547,21 @@ async function main() {
     if (result.stdout) process.stdout.write(result.stdout);
     if (result.stderr) process.stderr.write(result.stderr);
     check(`v0.4: ${label}直测纳入统一 smoke`, result.status === 0,
+      result.status === 0 ? file : `${file} exit=${result.status}`);
+  }
+
+  // v0.5.1 macOS 签名合约：未签名产物在 Apple Silicon 上会被判「已损坏」，是分发级缺陷。
+  for (const [file, label] of [
+    ['macos-codesign-smoke.js', 'macOS 签名目标收集与 fail-closed 校验']
+  ]) {
+    const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
+      cwd: path.join(__dirname, '..'),
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024
+    });
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    check(`v0.5.1: ${label}直测纳入统一 smoke`, result.status === 0,
       result.status === 0 ? file : `${file} exit=${result.status}`);
   }
 

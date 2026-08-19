@@ -1,7 +1,7 @@
 {
   "name": "whaledock",
   "productName": "WhaleDock",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "鲸坞 WhaleDock — Unofficial desktop app for DeepSeek Harness (dsh): auto-starts the local dsh backend and wraps its Web UI in a native window. 非官方 DeepSeek Harness 桌面客户端：给鲸鱼一个靠岸的坞。",
   "main": "main.js",
   "author": "SGD",
@@ -10,6 +10,8 @@
   "scripts": {
     "start": "electron .",
     "smoke": "node test/smoke.js",
+    "sign:mac": "node scripts/macos-codesign.js sign",
+    "verify:mac": "node scripts/macos-codesign.js verify-dir",
     "bundle:dsh": "node scripts/bundle-dsh.js",
     "compliance:sources": "node scripts/third-party-inventory.js sources --inventories=compliance --sources=compliance/SOURCES.json --output=compliance/SOURCES.md",
     "compliance:notices": "node scripts/third-party-inventory.js notices --inventories=compliance --output=THIRD_PARTY_NOTICES.md",
@@ -31,6 +33,7 @@
     "appId": "com.sgd.whaledock",
     "productName": "WhaleDock",
     "beforePack": "scripts/macos-build-visibility.js",
+    "afterPack": "scripts/macos-codesign.js",
     "afterAllArtifactBuild": "scripts/macos-build-visibility.js",
     "directories": {
       "output": "release"
@@ -107,6 +110,8 @@
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "identity": null,
+      "gatekeeperAssess": false,
       "icon": "build/icon.png",
       "artifactName": "WhaleDock-${version}-${arch}-mac.${ext}",
       "target": [

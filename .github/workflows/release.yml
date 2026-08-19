@@ -1,4 +1,7 @@
 # 推送 SemVer tag 后构建 macOS/Windows 全部产物；公开 Release 另受绑定产物哈希的审批门控。
+# macOS 产物一律由 scripts/macos-codesign.js 打签名：默认 ad-hoc（无证书、无费用），
+# 仓库配好 MACOS_SIGN_* secrets 时自动升级为 Developer ID + Hardened Runtime + 公证。
+# 不签名的 .app 下载后会被 Apple Silicon 判为「已损坏」，因此签名与校验是发布硬门。
 # v0.2.0-beta 会构建成包内版本 0.2.0-beta，并标记为 prerelease。
 name: Release
 
@@ -30,6 +33,35 @@ jobs:
       - name: Verify committed compliance materials
         run: npm run compliance:verify
 
+      # 可选：仓库配了 Developer ID 证书才会执行；没配就走 ad-hoc，构建照常通过。
+      - name: Import Developer ID certificate (optional)
+        id: mac-cert
+        env:
+          MACOS_SIGN_CERTIFICATE: ${{ secrets.MACOS_SIGN_CERTIFICATE }}
+          MACOS_SIGN_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SIGN_CERTIFICATE_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        shell: bash
+        run: |
+          if [[ -z "${MACOS_SIGN_CERTIFICATE:-}" || -z "${MACOS_SIGN_IDENTITY:-}" ]]; then
+            echo "identity=" >> "$GITHUB_OUTPUT"
+            echo "MACOS_SIGN_MODE=ad-hoc" >> "$GITHUB_ENV"
+            echo "未配置 Developer ID，本次使用 ad-hoc 签名。" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/whaledock-signing.keychain-db"
+          password="$(openssl rand -hex 24)"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          printf '%s' "$MACOS_SIGN_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_SIGN_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
+          security list-keychain -d user -s "$keychain" login.keychain-db
+          rm -f "$RUNNER_TEMP/cert.p12"
+          echo "identity=present" >> "$GITHUB_OUTPUT"
+          echo "WHALEDOCK_MAC_SIGN_IDENTITY=$MACOS_SIGN_IDENTITY" >> "$GITHUB_ENV"
+          echo "MACOS_SIGN_MODE=developer-id" >> "$GITHUB_ENV"
+
       - name: Set package version from tag
         run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
 
@@ -51,6 +83,22 @@ jobs:
       - name: Verify packaged macOS arm64 compliance materials
         run: node scripts/verify-packaged-compliance.js --search=release --minimum=1
 
+      - name: Verify macOS arm64 artifact signature
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          workdir="$RUNNER_TEMP/verify-arm64"
+          rm -rf "$workdir"; mkdir -p "$workdir"
+          ditto -x -k "release/WhaleDock-${version}-arm64-mac.zip" "$workdir"
+          node scripts/macos-codesign.js verify-dir "$workdir"
+          app="$(find "$workdir" -maxdepth 2 -name '*.app' -print -quit)"
+          codesign --verify --strict --verbose=2 "$app"
+          codesign -dv --verbose=4 "$app" 2>&1 | sed -n '1,12p'
+          if [[ "${MACOS_SIGN_MODE:-ad-hoc}" == "developer-id" ]]; then
+            spctl -a -vvv -t exec "$app"
+          fi
+          rm -rf "$workdir"
+
       - name: Bundle dsh for macOS x64
         run: npm run bundle:dsh -- --platform=darwin --arch=x64
 
@@ -65,6 +113,57 @@ jobs:
 
       - name: Verify packaged macOS compliance materials
         run: node scripts/verify-packaged-compliance.js --search=release --minimum=2
+
+      - name: Verify macOS x64 artifact signature
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          workdir="$RUNNER_TEMP/verify-x64"
+          rm -rf "$workdir"; mkdir -p "$workdir"
+          ditto -x -k "release/WhaleDock-${version}-x64-mac.zip" "$workdir"
+          node scripts/macos-codesign.js verify-dir "$workdir"
+          app="$(find "$workdir" -maxdepth 2 -name '*.app' -print -quit)"
+          codesign --verify --strict --verbose=2 "$app"
+          codesign -dv --verbose=4 "$app" 2>&1 | sed -n '1,12p'
+          if [[ "${MACOS_SIGN_MODE:-ad-hoc}" == "developer-id" ]]; then
+            spctl -a -vvv -t exec "$app"
+          fi
+          rm -rf "$workdir"
+
+      # 可选：配了 App Store Connect API Key 才执行。公证必须在算校验和之前完成，
+      # 因为 stapler 会改写 dmg 字节。没配 secrets 时整步跳过，产物仍是 ad-hoc 签名。
+      - name: Notarize and staple macOS artifacts (optional)
+        env:
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        shell: bash
+        run: |
+          if [[ "${MACOS_SIGN_MODE:-ad-hoc}" != "developer-id" ]]; then
+            echo "未使用 Developer ID 签名，跳过公证。" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ -z "${MACOS_NOTARY_KEY:-}" || -z "${MACOS_NOTARY_KEY_ID:-}" || -z "${MACOS_NOTARY_ISSUER_ID:-}" ]]; then
+            echo "::error title=Notarization missing::已用 Developer ID 签名但未配置公证密钥"
+            exit 1
+          fi
+          key="$RUNNER_TEMP/notary.p8"
+          printf '%s' "$MACOS_NOTARY_KEY" | base64 --decode > "$key"
+          version="$(node -p "require('./package.json').version")"
+          for asset in \
+            "release/WhaleDock-${version}-arm64.dmg" \
+            "release/WhaleDock-${version}-x64.dmg" \
+            "release/WhaleDock-${version}-arm64-mac.zip" \
+            "release/WhaleDock-${version}-x64-mac.zip"; do
+            xcrun notarytool submit "$asset" \
+              --key "$key" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER_ID" \
+              --wait --timeout 45m
+            # zip 不能 staple；ticket 由 Gatekeeper 联网校验。dmg 一律 staple 成离线可验。
+            case "$asset" in
+              *.dmg) xcrun stapler staple "$asset"; xcrun stapler validate "$asset" ;;
+            esac
+          done
+          rm -f "$key"
 
       - name: Verify macOS artifact names and write checksums
         shell: bash
@@ -229,9 +328,18 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
+            ## macOS 首次打开（必读）
+
+            - macOS 构建带 **ad-hoc 代码签名**，但**没有 Apple 公证**。首次打开会提示“无法验证开发者”。
+            - 处理方式：把 App 拖进「应用程序」后双击 → 出现提示点「完成」→ 打开
+              **系统设置 → 隐私与安全性**，在底部点 **“仍要打开”** → 再次确认。之后可正常双击。
+            - macOS 15 起，**右键「打开」已不再能绕过 Gatekeeper**，请按上面的系统设置路径操作。
+            - 如果看到「文件已损坏，应移到废纸篓」，说明下载到的是 **v0.5.0 或更早的未签名版本**，
+              请改用本 Release 的安装包；或在终端执行一次：
+              `xattr -dr com.apple.quarantine /Applications/WhaleDock.app`
+
             ## 重要平台边界
 
-            - macOS 构建未签名、未公证；首次启动通常需要右键 App 后选择“打开”。
             - Windows x64 构建未签名，且为实验性支持，尚未完成 Windows 真机验证；SmartScreen 拦截时可选择“更多信息 → 仍要运行”。遇到问题请提交 issue，并附鲸坞日志与完整资产名。
             - Intel x64 仅在 Apple Silicon + Rosetta 环境抽查，尚未完成 Intel Mac 真机验证。
           prerelease: ${{ contains(github.ref_name, '-') }}

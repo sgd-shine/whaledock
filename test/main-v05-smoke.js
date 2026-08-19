@@ -164,7 +164,8 @@ async function run() {
     assert.equal(upToLoad.includes('preload'), false);
     // 宠物包与主题包资源必须进入 electron-builder 的 files。
     const pkg = JSON.parse(source('package.json'));
-    assert.equal(pkg.version, '0.5.0');
+    // 版本按 0.5.x 线校验；补丁号会随分发修复（如 macOS 签名）递增，不写死。
+    assert.equal(/^0\.5\.\d+$/.test(pkg.version), true, pkg.version);
     for (const entry of ['pet.html', 'pet.js', 'preload-pet.js', 'assets/**/*']) {
       assert.equal(pkg.build.files.includes(entry), true, entry);
     }
