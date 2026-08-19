@@ -565,6 +565,21 @@ async function main() {
       result.status === 0 ? file : `${file} exit=${result.status}`);
   }
 
+  // v0.6 工作台包解析层：安全校验全部在这里拿证据，先于任何 UI。
+  for (const [file, label] of [
+    ['workbenches-smoke.js', '工作台包解析与 A-11 安全校验']
+  ]) {
+    const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
+      cwd: path.join(__dirname, '..'),
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024
+    });
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    check(`v0.6: ${label}直测纳入统一 smoke`, result.status === 0,
+      result.status === 0 ? file : `${file} exit=${result.status}`);
+  }
+
   // v0.5 宠物包与主题包解析同样必须由统一 smoke 真实执行。
   for (const [file, label] of [
     ['pets-themes-smoke.js', '宠物包与主题包解析'],
