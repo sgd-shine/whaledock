@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "name": "短视频创作台",
+  "summary": "选题、脚本、口播稿、封面标题、素材清单，一条龙",
+  "version": "1.0.0",
+  "author": "SGD",
+  "license": "MIT",
+  "homepage": "https://github.com/sgd-shine/whaledock",
+  "dshRange": "0.1.0-rc.6",
+  "accent": "#f97316"
+}

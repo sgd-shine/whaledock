@@ -282,8 +282,10 @@ async function run() {
 
   await test('主 Harness 仍无 preload/DOM 注入，capture 资源纳入 builder', async () => {
     const value = source('main.js');
-    const openMain = value.slice(value.indexOf('function openMainWindow()'), value.indexOf('function showApp()'));
-    assert(!/preload\s*:/.test(openMain));
+    const openMain = value.slice(value.indexOf('function openMainWindow()'), value.indexOf('function layoutMainWindow()'));
+    // dsh 仍然跑在一个没有 preload 的 WebContentsView 里；外壳页的 preload 只服务本地 file:// 页。
+    const viewBlock = openMain.slice(openMain.indexOf('const view = new WebContentsView('));
+    assert(!/preload\s*:/.test(viewBlock.slice(0, viewBlock.indexOf('});') + 3)));
     assert(!/(executeJavaScript|insertCSS|querySelector|innerHTML)/.test(openMain));
     const pkg = require('../package.json');
     // 版本号只在当前版本的直测里精确钉住；这里只保证形状合法。

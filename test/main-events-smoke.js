@@ -421,11 +421,23 @@ async function run() {
     assert.match(source, /restartBackend\(\{ allowBudgetResume: true \}\)/);
   });
 
-  await test('主窗口仍无 preload 且无 DOM 注入路径', async () => {
+  await test('承载 dsh 的视图仍无 preload，主窗也没有 DOM 注入路径', async () => {
     const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-    const openMain = source.slice(source.indexOf('function openMainWindow()'), source.indexOf('function showApp()'));
-    assert.match(openMain, /webPreferences:\s*\{\s*contextIsolation:\s*true,\s*nodeIntegration:\s*false\s*\}/);
-    assert(!/preload\s*:/.test(openMain));
+    const openMain = source.slice(source.indexOf('function openMainWindow()'), source.indexOf('function layoutMainWindow()'));
+    // v0.6 起主窗自己的 webContents 是本地外壳页（有 preload），
+    // dsh 的远程页面搬进了一个 WebContentsView —— 那个视图必须继续保持无 preload。
+    const viewBlock = openMain.slice(openMain.indexOf('const view = new WebContentsView('));
+    const viewOptions = viewBlock.slice(0, viewBlock.indexOf('});') + 3);
+    assert.match(viewOptions, /webPreferences:\s*\{\s*contextIsolation:\s*true,\s*nodeIntegration:\s*false\s*\}/);
+    assert(!/preload\s*:/.test(viewOptions), 'dsh 视图不得有 preload');
+    // 加载 dsh 的只能是这个视图，不能是主窗自己的 webContents。
+    assert.match(openMain, /view\.webContents\.loadURL\(baseUrl\(\)\)/);
+    assert(!/win\.loadURL\(baseUrl\(\)\)/.test(source), '主窗自己的 webContents 不得再加载 dsh');
+    // 外壳页的 preload 只挂在本地 file:// 页上。
+    assert.match(openMain, /preload: path\.join\(__dirname, 'preload-shell\.js'\)/);
+    assert.match(openMain, /void win\.loadFile\('shell\.html'\)/);
+    assert.match(openMain, /secureLocalWindow\(win, shellUrl\)/);
+    // 无论哪一侧，都不许往页面里注脚本或改 DOM。
     assert(!/(executeJavaScript|insertCSS|webFrame|querySelector|innerHTML)/.test(openMain));
   });
 

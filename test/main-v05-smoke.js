@@ -44,7 +44,8 @@ async function run() {
     assert.equal(main.themeCssFor('../evil.html', theme), null);
     const pages = Object.keys(main.THEME_VARIABLE_MAP).sort();
     assert.deepEqual(pages, [
-      'capture.html', 'dashboard.html', 'report-card.html', 'settings.html', 'splash.html'
+      'capture.html', 'dashboard.html', 'report-card.html',
+      'settings.html', 'shell.html', 'splash.html'
     ]);
     // 注入内容只能是本地色值，不允许出现 url()/远程引用/脚本。
     for (const page of pages) {
@@ -146,11 +147,17 @@ async function run() {
   await test('宠物 IPC 只接受宠物窗主帧，资源目录入口是固定枚举', async () => {
     const mainSource = source('main.js');
     assert.equal(mainSource.includes("if (!trustedLocalEvent(event, petWindow, expectedUrl)) {"), true);
-    // 打开资源目录只允许 pets/themes 两个受控子目录。
-    assert.equal(mainSource.includes("if (kind !== 'pets' && kind !== 'themes') return false;"), true);
+    // 打开资源目录只允许 pets/themes/workbenches 三个受控子目录，多一个都不行。
+    assert.equal(mainSource.includes(
+      "if (kind !== 'pets' && kind !== 'themes' && kind !== 'workbenches') return false;"
+    ), true);
     assert.equal(mainSource.includes("path.join(app.getPath('userData'), kind)"), true);
     const preloadSettings = source('preload-settings.js');
-    assert.equal(preloadSettings.includes("kind === 'themes' ? 'themes' : 'pets'"), true);
+    // 渲染层传进来的值必须被夹回固定枚举，不能原样透传。
+    assert.equal(preloadSettings.includes(
+      "const RESOURCE_DIRS = Object.freeze(['pets', 'themes', 'workbenches']);"
+    ), true);
+    assert.equal(preloadSettings.includes("RESOURCE_DIRS.includes(kind) ? kind : 'pets'"), true);
   });
 
   await test('宠物窗与主题都不触碰 dsh 私有目录，主 Harness 窗仍无 preload', async () => {
@@ -158,15 +165,27 @@ async function run() {
     assert.equal(/pets\.js[\s\S]{0,4000}\.dsh/.test(source('lib/pets.js')), false);
     assert.equal(source('lib/pets.js').includes('child_process'), false);
     assert.equal(source('lib/themes.js').includes('child_process'), false);
-    // 主 Harness 窗口的 webPreferences 不得出现 preload。
-    const mainWindowBlock = mainSource.slice(mainSource.indexOf('function createMainWindow'));
-    const upToLoad = mainWindowBlock.slice(0, mainWindowBlock.indexOf('loadURL'));
-    assert.equal(upToLoad.includes('preload'), false);
+    // 承载 dsh 的视图不得出现 preload。
+    // 注意：这条断言以前锚在并不存在的 createMainWindow 上，indexOf 返回 -1，整段被切成空串，
+    // 于是永远真空通过。这里改成真实锚点，并断言锚点本身存在。
+    const openMainIndex = mainSource.indexOf('function openMainWindow()');
+    assert.notEqual(openMainIndex, -1, 'openMainWindow 锚点必须存在');
+    const layoutIndex = mainSource.indexOf('function layoutMainWindow()');
+    assert.notEqual(layoutIndex, -1, 'layoutMainWindow 锚点必须存在');
+    const openMainBlock = mainSource.slice(openMainIndex, layoutIndex);
+    const viewIndex = openMainBlock.indexOf('const view = new WebContentsView(');
+    assert.notEqual(viewIndex, -1, 'dsh 视图创建点必须存在');
+    const viewOptions = openMainBlock.slice(viewIndex, openMainBlock.indexOf('});', viewIndex) + 3);
+    assert.equal(viewOptions.includes('preload'), false);
+    assert.equal(/contextIsolation: true/.test(viewOptions), true);
     // 宠物包与主题包资源必须进入 electron-builder 的 files。
     const pkg = JSON.parse(source('package.json'));
     // 版本按 0.5.x 线校验；补丁号会随分发修复（如 macOS 签名）递增，不写死。
     assert.equal(/^0\.5\.\d+$/.test(pkg.version), true, pkg.version);
-    for (const entry of ['pet.html', 'pet.js', 'preload-pet.js', 'assets/**/*']) {
+    for (const entry of [
+      'pet.html', 'pet.js', 'preload-pet.js', 'assets/**/*',
+      'shell.html', 'shell.js', 'preload-shell.js'
+    ]) {
       assert.equal(pkg.build.files.includes(entry), true, entry);
     }
   });

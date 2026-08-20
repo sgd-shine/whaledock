@@ -675,6 +675,54 @@ async function main() {
     assert.equal(workbenches.selectWorkbench(null, 'x'), null);
   });
 
+  await test('内置短视频创作台真实存在，零 issue 解析，五个按钮与四个文件夹都在', async () => {
+    const root = path.join(__dirname, '..');
+    const listed = workbenches.listWorkbenchPackages({
+      roots: [{ dir: path.join(root, 'assets', 'workbenches'), source: 'builtin' }]
+    });
+    assert.equal(listed.skipped.length, 0, '内置包一个都不许被跳过');
+    const pkg = listed.packages.find((item) => item.id === 'builtin:短视频创作台');
+    assert.notEqual(pkg, undefined);
+    assert.equal(pkg.issues.length, 0, '内置包必须零 issue');
+    assert.equal(pkg.unknownFieldCount, 0);
+    assert.equal(pkg.license, 'MIT');
+    assert.equal(pkg.heavy, true, '短视频台是重工作台');
+    assert.deepEqual(
+      pkg.workspace.folders.map((item) => item.path),
+      ['01_选题库', '02_脚本', '03_口播稿', '04_素材清单']
+    );
+    assert.deepEqual(
+      pkg.actions.map((item) => item.label),
+      ['今天做什么', '写脚本', '转口播稿', '出封面标题', '列素材清单']
+    );
+    // 五段提示词全文原样入包，且都远在 8 KiB 上限之内。
+    for (const action of pkg.actions) {
+      const bytes = Buffer.byteLength(action.prompt, 'utf8');
+      assert.ok(bytes > 800 && bytes <= workbenches.LIMITS.maxPromptBytes, `${action.id} 提示词长度异常：${bytes}`);
+      assert.ok(action.prompt.includes('第一步'), `${action.id} 提示词不像 B-4 原文`);
+      assert.equal(action.confirm, false);
+    }
+    // v0.6 先发空 skills 清单：没实测过第三方 skill 的安装命令就不写。
+    assert.deepEqual(pkg.skills, []);
+    // 故意不放 agent.cordis.yml，顺便验证缺字段回落走得通。
+    assert.equal(pkg.agentPreset, null);
+    assert.equal(fs.existsSync(path.join(pkg.dir, 'agent.cordis.yml')), false);
+    // theme/pet 素材后补，缺了就跟随全局，不阻塞发版。
+    assert.equal(pkg.theme, null);
+    assert.equal(pkg.pet, null);
+    // SGD 2026-08-19 补充：01_选题库 预置三份示例，避免第一个按钮撞上空选题库。
+    const topics = pkg.workspace.folders[0];
+    assert.equal(topics.files.length, 3);
+    for (const file of topics.files) {
+      assert.ok(file.name.startsWith('示例-'), '示例文件名必须以「示例-」开头');
+      assert.ok(file.content.includes('这是示例，可以直接删掉'), '示例文件必须自报是示例');
+    }
+    const plan = workbenches.workspacePlan(pkg);
+    assert.equal(plan.root, '短视频创作台');
+    assert.equal(plan.folders[0].files.length, 4, '说明.md + 三个示例');
+    assert.equal(plan.folders[0].files[0].name, workbenches.README_FILE_NAME);
+  });
+
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log(`\nWORKBENCHES ALL PASS (${passed})`);
 }

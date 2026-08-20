@@ -421,6 +421,7 @@
     <button id="tab-general" role="tab" aria-selected="true" aria-controls="panel-general" tabindex="0">通用</button>
     <button id="tab-backend" role="tab" aria-selected="false" aria-controls="panel-backend" tabindex="-1">后端</button>
     <button id="tab-usage" role="tab" aria-selected="false" aria-controls="panel-usage" tabindex="-1">用量与预算</button>
+    <button id="tab-workbench" role="tab" aria-selected="false" aria-controls="panel-workbench" tabindex="-1">工作台</button>
     <button id="tab-look" role="tab" aria-selected="false" aria-controls="panel-look" tabindex="-1">外观与宠物</button>
     <button id="tab-help" role="tab" aria-selected="false" aria-controls="panel-help" tabindex="-1">帮助</button>
   </nav>
@@ -628,6 +629,27 @@
           </div>
         </div>
         <div class="boundary-note"><strong>dsh 已观测用量，非账单。</strong>标题生成等旁路消耗可能无法观测；reasoning 已包含在输出 token 中，不会重复计算。</div>
+      </div>
+    </section>
+
+    <section id="panel-workbench" role="tabpanel" aria-labelledby="tab-workbench" hidden>
+      <div class="section">
+        <h2 class="section-title">已安装的工作台</h2>
+        <div class="card">
+          <div class="row">
+            <div>
+              <div class="row-label">怎么装</div>
+              <div class="row-note">把工作台文件夹直接拖进鲸坞主窗口就装好了。鲸坞只把它原样复制一份，不解压、不运行、不联网、不改你原来的文件夹。</div>
+            </div>
+            <div class="inline-actions">
+              <button id="open-workbenches-dir" class="button">打开工作台文件夹</button>
+              <button id="rescan-workbenches" class="button">重新扫描</button>
+            </div>
+          </div>
+          <div id="workbench-list"></div>
+          <div id="workbench-skipped"></div>
+          <div id="workbench-note" class="row-note"></div>
+        </div>
       </div>
     </section>
 
@@ -1020,6 +1042,198 @@
     await refreshLook();
   }
 
+  // ---------- v0.6 工作台 ----------
+  // 包里来的文字全部 textContent 写入；整页不做任何 HTML 字符串赋值。
+  const workbenchEls = {
+    list: document.getElementById('workbench-list'),
+    skipped: document.getElementById('workbench-skipped'),
+    note: document.getElementById('workbench-note')
+  };
+  let workbenchOpenId = null;
+
+  function wbNode(tag, value, className) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (value != null) node.textContent = String(value);
+    return node;
+  }
+
+  function wbClear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+
+  function wbDetailRows(pkg) {
+    const box = wbNode('div', null, 'row-note');
+    const meta = [];
+    if (pkg.version) meta.push(`版本 ${pkg.version}`);
+    if (pkg.author) meta.push(`作者 ${pkg.author}`);
+    // 没声明许可证必须明写出来，不含糊。
+    meta.push(pkg.license ? `许可证 ${pkg.license}` : '未声明许可证');
+    if (pkg.dshRange) meta.push(`声明适配 dsh ${pkg.dshRange}`);
+    box.appendChild(wbNode('div', meta.join(' · ')));
+    if (pkg.homepage) box.appendChild(wbNode('div', `主页：${pkg.homepage}`));
+
+    if (pkg.folders.length) {
+      box.appendChild(wbNode('div', `会建这些文件夹（已存在的不动、不覆盖任何文件）：${pkg.folders.join('、')}`));
+    } else {
+      box.appendChild(wbNode('div', '轻工作台：不建任何文件夹，切换瞬间完成，后端不重启。'));
+    }
+    if (pkg.actions.length) {
+      box.appendChild(wbNode('div', `左侧按钮：${pkg.actions.map((item) => item.label).join('、')}`));
+    }
+    // A-8：只说检测到，绝不说已支持；而且只在这一页说。
+    if (pkg.hasAgentPreset) {
+      box.appendChild(wbNode('div', '本工作台带了一份 agent 预设（agent.cordis.yml）：已检测到，尚未接通。'));
+    }
+    if (pkg.unknownFieldCount > 0) {
+      box.appendChild(wbNode('div', `这个包用了 ${pkg.unknownFieldCount} 个本版本不认识的字段，已忽略，不影响使用。`));
+    }
+    for (const issue of pkg.issues) {
+      const where = issue.file ? `${issue.file}：` : '';
+      const what = issue.detail ? `${issue.reason}（${issue.detail}）` : issue.reason;
+      box.appendChild(wbNode('div', `⚠ ${where}${what}`));
+    }
+    // SGD 2026-08-19：skills 为空数组时整栏隐藏，连一句占位文案都不出。
+    if (Array.isArray(pkg.skills) && pkg.skills.length) {
+      box.appendChild(wbNode('div', '装第三方 skill 之后，它在 dsh 进程里是全权限运行的。鲸坞不做也做不到隔离，请只装你信任的来源。'));
+      for (const skill of pkg.skills) {
+        const line = wbNode('div');
+        line.appendChild(wbNode('span', `${skill.name}${skill.why ? ` —— ${skill.why}` : ''}　`));
+        const command = wbNode('code', skill.install);
+        line.appendChild(command);
+        const copy = wbNode('button', '复制安装命令', 'button');
+        copy.addEventListener('click', () => {
+          void navigator.clipboard.writeText(skill.install)
+            .then(() => { copy.textContent = '已复制'; })
+            .catch(() => { copy.textContent = '复制失败'; });
+        });
+        line.appendChild(copy);
+        if (skill.url) line.appendChild(wbNode('span', `　${skill.url}`));
+        box.appendChild(line);
+      }
+    }
+    if (pkg.onboarding) {
+      const ob = wbNode('div');
+      // onboarding.md 按行纯文本显示：# 加粗、- 成条目，不解析 Markdown、不生成链接。
+      for (const raw of pkg.onboarding.split('\n')) {
+        const line = raw.replace(/\s+$/, '');
+        if (!line.trim()) { ob.appendChild(wbNode('div', ' ')); continue; }
+        if (line.startsWith('#')) {
+          const head = wbNode('div', line.replace(/^#+\s*/, ''));
+          head.style.fontWeight = '700';
+          ob.appendChild(head);
+        } else if (/^\s*-\s+/.test(line)) {
+          ob.appendChild(wbNode('div', `· ${line.replace(/^\s*-\s+/, '')}`));
+        } else {
+          ob.appendChild(wbNode('div', line));
+        }
+      }
+      box.appendChild(ob);
+    }
+    return box;
+  }
+
+  function renderWorkbenches(payload) {
+    if (!workbenchEls.list) return;
+    wbClear(workbenchEls.list);
+    wbClear(workbenchEls.skipped);
+    const currentId = payload.currentId || null;
+
+    const rows = [{
+      id: null, name: payload.defaultLabel || '默认工作台',
+      summary: '不启用任何工作台包', source: 'builtin', heavy: false,
+      version: null, author: null, license: null, homepage: null, dshRange: null,
+      folders: [], actions: [], skills: null, hasAgentPreset: false,
+      onboarding: null, issues: [], unknownFieldCount: 0
+    }].concat(payload.packages);
+
+    for (const pkg of rows) {
+      const row = wbNode('div', null, 'row');
+      const left = wbNode('div');
+      left.appendChild(wbNode('div', pkg.name, 'row-label'));
+      const subParts = [];
+      if (pkg.summary) subParts.push(pkg.summary);
+      if (pkg.id) subParts.push(pkg.heavy ? '重工作台 · 会建文件夹并重启后端' : '轻工作台 · 只换外观与按钮');
+      if (pkg.source === 'builtin' && pkg.id) subParts.push('随安装包自带');
+      left.appendChild(wbNode('div', subParts.join(' · '), 'row-note'));
+      row.appendChild(left);
+
+      const actions = wbNode('div', null, 'inline-actions');
+      if (currentId === pkg.id) {
+        actions.appendChild(wbNode('span', '当前使用中', 'row-note'));
+      } else {
+        const use = wbNode('button', '切到这个', 'button');
+        use.addEventListener('click', () => {
+          use.disabled = true;
+          void api.switchWorkbench(pkg.id).then((result) => {
+            if (result && result.kind === 'error') setStatus(result.text, 'error');
+            else setStatus('工作台已切换');
+            return refreshWorkbenches();
+          }).catch((error) => setStatus(messageOf(error, '切换失败'), 'error'))
+            .finally(() => { use.disabled = false; });
+        });
+        actions.appendChild(use);
+      }
+      if (pkg.id) {
+        const detail = wbNode('button', workbenchOpenId === pkg.id ? '收起' : '关于这个工作台', 'button');
+        detail.addEventListener('click', () => {
+          workbenchOpenId = workbenchOpenId === pkg.id ? null : pkg.id;
+          renderWorkbenches(payload);
+        });
+        actions.appendChild(detail);
+      }
+      if (pkg.id && pkg.source === 'user') {
+        const remove = wbNode('button', '移除', 'button');
+        remove.addEventListener('click', () => {
+          // 只删鲸坞复制的那一份副本；用户原来的文件夹一个字不动。
+          if (!window.confirm(`移除「${pkg.name}」？\n只删掉鲸坞复制的那一份副本，你原来的文件夹一个字都不会动。`)) return;
+          remove.disabled = true;
+          void api.removeWorkbench(pkg.id).then((result) => {
+            setStatus(result && result.text ? result.text : '已移除',
+              result && result.kind === 'error' ? 'error' : '');
+            return refreshWorkbenches();
+          }).catch((error) => setStatus(messageOf(error, '移除失败'), 'error'))
+            .finally(() => { remove.disabled = false; });
+        });
+        actions.appendChild(remove);
+      }
+      row.appendChild(actions);
+      workbenchEls.list.appendChild(row);
+
+      if (pkg.id && workbenchOpenId === pkg.id) {
+        const detailRow = wbNode('div', null, 'row');
+        detailRow.appendChild(wbDetailRows(pkg));
+        workbenchEls.list.appendChild(detailRow);
+      }
+    }
+
+    for (const item of payload.skipped) {
+      workbenchEls.skipped.appendChild(
+        wbNode('div', `⚠ ${item.id}　未加载：${item.reason}`, 'row-note')
+      );
+    }
+    workbenchEls.note.textContent = payload.capped
+      ? `工作台包超过 ${payload.maxPackages} 个上限，多出来的没有加载。`
+      : '';
+  }
+
+  async function refreshWorkbenches() {
+    if (!api || typeof api.listWorkbenches !== 'function') return;
+    try {
+      const payload = await api.listWorkbenches();
+      if (payload && Array.isArray(payload.packages)) renderWorkbenches(payload);
+    } catch (_error) { /* 只影响工作台区展示，不打断其他设置 */ }
+  }
+
+  function bindWorkbenches() {
+    const openDir = document.getElementById('open-workbenches-dir');
+    const rescan = document.getElementById('rescan-workbenches');
+    if (openDir) openDir.addEventListener('click', () => { void api.openResourceDir('workbenches'); });
+    if (rescan) {
+      rescan.addEventListener('click', () => {
+        void api.rescanWorkbenches().then(refreshWorkbenches).catch(() => {});
+      });
+    }
+  }
+
   async function refreshLook() {
     try {
       const payload = await api.get();
@@ -1229,6 +1443,8 @@
     setBusy(false);
   } else {
     bindLook();
+    bindWorkbenches();
+    void refreshWorkbenches();
     load();
   }
 })();

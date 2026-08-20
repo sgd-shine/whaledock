@@ -565,9 +565,10 @@ async function main() {
       result.status === 0 ? file : `${file} exit=${result.status}`);
   }
 
-  // v0.6 工作台包解析层：安全校验全部在这里拿证据，先于任何 UI。
+  // v0.6 工作台包解析层与 Electron 薄层：安全校验全部在这里拿证据。
   for (const [file, label] of [
-    ['workbenches-smoke.js', '工作台包解析与 A-11 安全校验']
+    ['workbenches-smoke.js', '工作台包解析与 A-11 安全校验'],
+    ['main-v06-smoke.js', 'Electron 工作台薄层与 unknown 不重试']
   ]) {
     const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
       cwd: path.join(__dirname, '..'),

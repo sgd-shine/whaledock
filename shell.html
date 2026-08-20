@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>鲸坞 WhaleDock</title>
+  <style>
+    /* 这一页是鲸坞自己的窗口外壳：左侧常驻工作台栏，右侧空出来给 dsh 的 WebContentsView。
+       主题 token 由主进程注入下面这些变量；页面源码不写死配色。 */
+    :root {
+      color-scheme: dark;
+      --bg:#090e17; --panel:#101a2c; --line:#1e2a5e;
+      --text:#e6edf7; --muted:#93a4bd; --accent:#22d3ee; --primary:#4f46e5;
+      --rail:132px;
+    }
+    * { box-sizing: border-box; }
+    html, body { height:100%; }
+    body {
+      margin:0; background:var(--bg); color:var(--text); overflow:hidden;
+      font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;
+      user-select:none; -webkit-user-select:none;
+    }
+    /* 左栏。右边整块留给 dsh 视图，这里绝不画任何东西。 */
+    #rail {
+      position:fixed; left:0; top:0; bottom:0; width:var(--rail);
+      display:flex; flex-direction:column; gap:6px; padding:10px 8px;
+      background:var(--panel); border-right:1px solid var(--line);
+    }
+    #switcher-button {
+      display:flex; align-items:center; gap:6px; width:100%;
+      padding:8px 9px; border:1px solid var(--line); border-radius:9px;
+      background:var(--bg); color:var(--text); font:inherit; font-weight:600;
+      cursor:pointer; text-align:left; line-height:1.25;
+    }
+    #switcher-button:hover { border-color:var(--accent); }
+    #switcher-button .ship { flex:none; }
+    #switcher-button .name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #switcher-button .caret { flex:none; color:var(--muted); }
+    #actions { display:flex; flex-direction:column; gap:5px; margin-top:4px; overflow-y:auto; }
+    #actions button {
+      width:100%; padding:8px 9px; border:1px solid var(--line); border-radius:9px;
+      background:var(--bg); color:var(--text); font:inherit; cursor:pointer;
+      text-align:left; line-height:1.25;
+    }
+    #actions button:hover:not(:disabled) { border-color:var(--accent); }
+    #actions button:disabled { opacity:.45; cursor:default; }
+    #rail-foot { margin-top:auto; display:flex; flex-direction:column; gap:5px; }
+    #rail-foot button {
+      width:100%; padding:7px 9px; border:1px solid transparent; border-radius:9px;
+      background:transparent; color:var(--muted); font:inherit; font-size:12px;
+      cursor:pointer; text-align:left;
+    }
+    #rail-foot button:hover { color:var(--text); border-color:var(--line); }
+    #action-note {
+      font-size:11px; line-height:1.45; color:var(--muted);
+      border-top:1px solid var(--line); padding-top:7px; white-space:pre-wrap;
+      overflow-wrap:anywhere; max-height:180px; overflow-y:auto;
+    }
+    #action-note:empty { display:none; }
+
+    /* 弹层统一在左栏右侧展开，不遮住 dsh 的主要内容区。 */
+    .layer { position:fixed; inset:0; display:none; z-index:20; }
+    .layer.open { display:block; }
+    .layer .scrim { position:absolute; inset:0; background:#0009; }
+    .panel {
+      position:absolute; border:1px solid var(--line); border-radius:12px;
+      background:var(--panel); box-shadow:0 24px 70px #000a; padding:12px;
+      max-height:calc(100% - 40px); overflow-y:auto;
+    }
+    #switcher-panel { left:8px; top:52px; width:300px; }
+    #switcher-list { display:flex; flex-direction:column; gap:3px; }
+    #switcher-list button {
+      display:flex; align-items:baseline; gap:8px; width:100%;
+      padding:7px 9px; border:1px solid transparent; border-radius:8px;
+      background:transparent; color:var(--text); font:inherit; cursor:pointer; text-align:left;
+    }
+    #switcher-list button:hover { background:var(--bg); border-color:var(--line); }
+    #switcher-list button .tick { flex:none; width:14px; color:var(--accent); }
+    #switcher-list button .body { flex:1; min-width:0; }
+    #switcher-list button .title { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #switcher-list button .sub { display:block; color:var(--muted); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #switcher-list button .key { flex:none; color:var(--muted); font-size:11px; }
+    .broken { color:var(--muted); font-size:12px; padding:6px 9px; overflow-wrap:anywhere; }
+    .divider { height:1px; background:var(--line); margin:6px 2px; }
+    .panel h2 { margin:0 0 8px; font-size:13px; letter-spacing:.02em; }
+    .panel .foot { display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
+    .panel .foot button {
+      padding:7px 14px; border:1px solid var(--line); border-radius:8px;
+      background:var(--bg); color:var(--text); font:inherit; cursor:pointer;
+    }
+    .panel .foot button.primary { border-color:var(--accent); color:var(--accent); }
+
+    /* 引导卡与确认卡都居中，但**不是模态遮罩全屏**——scrim 只吃点击，不弹系统窗。 */
+    #onboarding-panel, #confirm-panel { left:50%; top:50%; transform:translate(-50%,-50%); width:min(560px,80vw); }
+    #onboarding-body, #confirm-body { display:flex; flex-direction:column; gap:4px; }
+    /* onboarding.md 按行 textContent 写入：# 加大加粗、- 成条目，不解析 Markdown、不生成链接。 */
+    .ob-h { font-size:15px; font-weight:700; margin-top:10px; }
+    .ob-li { padding-left:14px; position:relative; }
+    .ob-li::before { content:"·"; position:absolute; left:4px; color:var(--accent); }
+    .ob-p { overflow-wrap:anywhere; }
+    .ob-blank { height:6px; }
+
+    /* 拖入安装：整窗高亮，只在真的拖进文件时出现。 */
+    #drop { position:fixed; inset:0; display:none; z-index:30; align-items:center; justify-content:center; }
+    #drop.open { display:flex; }
+    #drop .box {
+      border:2px dashed var(--accent); border-radius:16px; background:#0b1220e6;
+      padding:26px 34px; text-align:center; line-height:1.7;
+    }
+    #drop .box .big { font-size:17px; font-weight:700; }
+    #drop .box .small { color:var(--muted); font-size:12px; }
+    #toast {
+      position:fixed; left:calc(var(--rail) + 14px); bottom:14px; z-index:40;
+      max-width:min(520px,60vw); padding:10px 13px; border:1px solid var(--line);
+      border-radius:10px; background:var(--panel); box-shadow:0 14px 40px #0009;
+      font-size:12px; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; display:none;
+    }
+    #toast.open { display:block; }
+  </style>
+</head>
+<body>
+  <div id="rail">
+    <button id="switcher-button" type="button" title="切换工作台">
+      <span class="ship">🚢</span><span class="name" id="switcher-name">默认工作台</span><span class="caret">▾</span>
+    </button>
+    <div id="actions"></div>
+    <div id="action-note"></div>
+    <div id="rail-foot">
+      <button id="open-workspace" type="button">📁 打开工作区</button>
+      <button id="open-settings" type="button">⚙ 设置…</button>
+    </div>
+  </div>
+
+  <div class="layer" id="switcher-layer">
+    <div class="scrim" data-close="switcher"></div>
+    <div class="panel" id="switcher-panel">
+      <div id="switcher-list"></div>
+      <div class="divider"></div>
+      <div id="switcher-broken"></div>
+      <div class="foot">
+        <button type="button" id="manage-workbenches">管理工作台…</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="layer" id="onboarding-layer">
+    <div class="scrim" data-close="onboarding"></div>
+    <div class="panel" id="onboarding-panel">
+      <div id="onboarding-body"></div>
+      <div class="foot"><button type="button" class="primary" data-close="onboarding">知道了</button></div>
+    </div>
+  </div>
+
+  <div class="layer" id="confirm-layer">
+    <div class="scrim" data-close="confirm"></div>
+    <div class="panel" id="confirm-panel">
+      <h2 id="confirm-title">请确认</h2>
+      <div id="confirm-body"></div>
+      <div class="foot">
+        <button type="button" data-close="confirm">取消</button>
+        <button type="button" class="primary" id="confirm-ok">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="drop">
+    <div class="box">
+      <div class="big">松手即安装这个工作台</div>
+      <div class="small">只把文件夹复制一份进来，不会运行它、不解压、不联网</div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script src="shell.js"></script>
+</body>
+</html>

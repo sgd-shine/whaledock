@@ -5,7 +5,7 @@
 const MAIN_HELPER_TEST = process.env.WHALEDOCK_MAIN_HELPER_TEST === '1' && require.main !== module;
 const electron = MAIN_HELPER_TEST ? {} : require('electron');
 const {
-  app, BrowserWindow, Tray, Menu, globalShortcut,
+  app, BrowserWindow, WebContentsView, Tray, Menu, globalShortcut,
   shell, ipcMain, dialog, clipboard, nativeImage, Notification
 } = electron;
 const path = require('path');
@@ -21,6 +21,7 @@ const workspaces = require('./lib/workspaces');
 const imageInput = require('./lib/image-input');
 const pets = require('./lib/pets');
 const themes = require('./lib/themes');
+const workbenches = require('./lib/workbenches');
 const log = require('./lib/log');
 const update = require('./lib/update');
 
@@ -509,6 +510,10 @@ function backendStartAllowed(paused, explicitResume = false) {
 }
 
 let mainWindow = null;
+// v0.6：主窗自己的 webContents 换成本地外壳页（有 preload、URL 可精确校验、能接拖放），
+// dsh 的 Web UI 搬进这个**没有 preload** 的子视图——远程页面拿不到任何 IPC。
+let dshView = null;
+const SHELL_RAIL_WIDTH = 132;
 let splash = null;
 let settingsWindow = null;
 let dashboardWindow = null;
@@ -887,6 +892,7 @@ async function switchWorkspace(target) {
     if (mainWindow && !mainWindow.isDestroyed() && backendReady) {
       mainWindow.destroy();
       mainWindow = null;
+      dshView = null;
       openMainWindow();
     }
     return result;
@@ -1012,6 +1018,12 @@ const THEME_VARIABLE_MAP = Object.freeze({
     '--bg': c.background, '--glow': c.surface, '--text': c.text,
     '--muted': c.textMuted, '--subtle': c.textMuted,
     '--cyan': c.accent, '--indigo': c.primary
+  }),
+  // v0.6 主窗外壳：只有左侧工作台栏是鲸坞自己的像素，右侧 dsh 视图一个字节都不碰。
+  'shell.html': (c) => ({
+    '--bg': c.background, '--panel': c.surface, '--line': c.border,
+    '--text': c.text, '--muted': c.textMuted,
+    '--accent': c.accent, '--primary': c.primary
   })
 });
 
@@ -1031,6 +1043,9 @@ function listAvailableThemes() {
 }
 
 function currentTheme() {
+  // 工作台自带主题优先；包里没写就跟随全局主题，不变。
+  const active = currentWorkbench();
+  if (active && active.theme) return active.theme;
   const listed = listAvailableThemes();
   if (listed.skipped.length) {
     log.line('app', `跳过 ${listed.skipped.length} 个主题文件：${listed.skipped
@@ -1335,13 +1350,353 @@ async function applyPetSettings(patch) {
 
 // 只允许打开鲸坞自己在 userData 下的受控目录，不接受渲染层传入的任意路径。
 async function openUserResourceDir(kind) {
-  if (kind !== 'pets' && kind !== 'themes') return false;
+  if (kind !== 'pets' && kind !== 'themes' && kind !== 'workbenches') return false;
   let dir;
   try { dir = path.join(app.getPath('userData'), kind); } catch (_error) { return false; }
   try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch (_error) { /* 已存在即可 */ }
   try { await shell.openPath(dir); return true; } catch (error) {
     log.line('app', `打开 ${kind} 目录失败：${error && error.message || 'unknown'}`);
     return false;
+  }
+}
+
+// ---------- v0.6 工作台包 ----------
+// 包里只有数据。主进程只读 JSON / Markdown / PNG，**绝不 require、绝不 eval、绝不 spawn 包内任何东西**；
+// agent.cordis.yml 只在解析层做存在性与路径校验，内容一个字节都不读。
+// 解析全部在 lib/workbenches.js（纯 Node）里完成，这里只是 Electron 侧的薄层。
+
+const WORKBENCH_DEFAULT_LABEL = '默认工作台';
+// 拖入安装的硬上限：只复制、不解压、不执行、不联网，并且不给「一个文件夹拖垮硬盘」留口子。
+const WORKBENCH_INSTALL_LIMITS = Object.freeze({
+  maxEntries: 512, maxDepth: 5, maxTotalBytes: 32 * 1024 * 1024, maxFileBytes: 8 * 1024 * 1024
+});
+let workbenchCache = null;
+// 引导卡只在首次启用时弹一次；之后在「关于这个工作台」里能再看。
+const workbenchOnboardingSeen = new Set();
+
+function workbenchRoots() {
+  const roots = [{ dir: path.join(__dirname, 'assets', 'workbenches'), source: 'builtin' }];
+  try { roots.push({ dir: path.join(app.getPath('userData'), 'workbenches'), source: 'user' }); }
+  catch (_error) { /* userData 不可用时只用内置工作台 */ }
+  return roots;
+}
+
+function workbenchUserRoot() {
+  return path.join(app.getPath('userData'), 'workbenches');
+}
+
+function listAvailableWorkbenches(options = {}) {
+  if (!options.refresh && workbenchCache) return workbenchCache;
+  try {
+    workbenchCache = workbenches.listWorkbenchPackages({ roots: workbenchRoots() });
+  } catch (error) {
+    log.line('app', `工作台扫描失败：${error && error.message || 'unknown'}`);
+    workbenchCache = { packages: [], skipped: [], capped: false };
+  }
+  if (workbenchCache.skipped.length) {
+    log.line('app', `跳过 ${workbenchCache.skipped.length} 个工作台包：${workbenchCache.skipped
+      .map((item) => `${item.id}(${item.reason})`).join('、').slice(0, 300)}`);
+  }
+  return workbenchCache;
+}
+
+// 选不到就退回默认工作台并如实写日志——不留「主题生效了但按钮没加载」这种半启用中间态。
+function currentWorkbench() {
+  const wanted = config.get('workbenchId');
+  if (!wanted) return null;
+  const found = workbenches.selectWorkbench(listAvailableWorkbenches().packages, wanted);
+  if (!found) log.line('app', `工作台 ${wanted} 不可用，已退回默认工作台`);
+  return found || null;
+}
+
+function workbenchRow(pkg) {
+  return {
+    id: pkg.id,
+    name: pkg.name,
+    summary: pkg.summary,
+    source: pkg.source,
+    heavy: pkg.heavy,
+    unknownFieldCount: pkg.unknownFieldCount
+  };
+}
+
+// 下发给渲染层的状态。**提示词全文永远留在主进程**，渲染层只拿得到 id / 标题 / 悬浮说明。
+function shellStateSnapshot(extra = {}) {
+  const listed = listAvailableWorkbenches();
+  const active = currentWorkbench();
+  return {
+    defaultLabel: WORKBENCH_DEFAULT_LABEL,
+    packages: listed.packages.map(workbenchRow),
+    skipped: listed.skipped.map((item) => ({ id: String(item.id).slice(0, 120), reason: item.reason })),
+    current: active ? {
+      ...workbenchRow(active),
+      actions: active.actions.map((item) => ({
+        id: item.id, label: item.label, hint: item.hint, confirm: item.confirm
+      })),
+      onboarding: active.onboarding,
+      hasAgentPreset: Boolean(active.agentPreset)
+    } : null,
+    ...extra
+  };
+}
+
+function pushShellState(extra = {}) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send('shell:state', shellStateSnapshot(extra)); }
+  catch (_error) { /* 窗口正在销毁 */ }
+}
+
+function pushShellNotice(kind, text) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send('shell:notice', { kind, text }); }
+  catch (_error) { /* 窗口正在销毁 */ }
+}
+
+// 切换后要一起刷新的表面：主题、托盘菜单、应用菜单、外壳状态。
+function refreshWorkbenchSurfaces(extra = {}) {
+  refreshAllThemes();
+  refreshTrayMenu();
+  createAppMenu();
+  pushShellState(extra);
+}
+
+function heavyWorkbenchNotReady() {
+  return {
+    kind: 'error',
+    text: '这是一个「重工作台」，它要在硬盘上建文件夹并重启后端。这条路还没接通，先用轻工作台。'
+  };
+}
+
+async function applyWorkbench(workbenchId, options = {}) {
+  const wanted = typeof workbenchId === 'string' && workbenchId ? workbenchId : null;
+  const listed = listAvailableWorkbenches({ refresh: true });
+  const target = wanted ? workbenches.selectWorkbench(listed.packages, wanted) : null;
+  if (wanted && !target) {
+    const reason = (listed.skipped.find((item) => item.id === wanted) || {}).reason;
+    return {
+      kind: 'error',
+      text: reason ? `这个工作台没加载：${reason}。已经留在原来的工作台。` : '找不到这个工作台，已经留在原来的工作台。'
+    };
+  }
+  const previous = config.get('workbenchId') || null;
+  if (previous === wanted) { refreshWorkbenchSurfaces(); return { kind: 'ok' }; }
+
+  // 重工作台要停后端、改配置、建目录、重启后端，全程复用 v0.4 的工作区串行事务。
+  if (target && target.heavy) {
+    const heavy = await switchToHeavyWorkbench(target, previous, options);
+    if (heavy.kind !== 'ok') return heavy;
+  } else {
+    config.set({ workbenchId: wanted, lastWorkbenchId: previous });
+  }
+
+  const firstTime = Boolean(target && target.onboarding && !workbenchOnboardingSeen.has(target.id));
+  refreshWorkbenchSurfaces({ showOnboarding: firstTime });
+  log.line('app', `工作台切换：${previous || '默认工作台'} → ${wanted || '默认工作台'}`);
+  return { kind: 'ok' };
+}
+
+// P0-3 之前先明确拒绝，不做半启用。
+async function switchToHeavyWorkbench(_target, _previous, _options) {
+  return heavyWorkbenchNotReady();
+}
+
+// 按 ⌘⇧1..9 的顺序取第 index 个工作台（1 起）；⌘⇧0 回到上一个用过的。
+function workbenchByIndex(index) {
+  const list = listAvailableWorkbenches().packages;
+  return list[index - 1] || null;
+}
+
+async function switchWorkbenchByIndex(index) {
+  const pkg = workbenchByIndex(index);
+  if (!pkg) { pushShellNotice('error', `第 ${index} 个工作台不存在。`); return; }
+  const result = await applyWorkbench(pkg.id);
+  if (result.kind === 'error') pushShellNotice('error', result.text);
+}
+
+async function switchToPreviousWorkbench() {
+  const previous = config.get('lastWorkbenchId') || null;
+  const result = await applyWorkbench(previous);
+  if (result.kind === 'error') pushShellNotice('error', result.text);
+}
+
+// ---------- 拖入安装：原样复制一份，别的什么都不做 ----------
+
+// 只收普通文件与普通目录；符号链接一律拒（不跟着走，也不复制）。
+function collectInstallEntries(sourceDir) {
+  const files = [];
+  let totalBytes = 0;
+  const walk = (dir, relative, depth) => {
+    if (depth > WORKBENCH_INSTALL_LIMITS.maxDepth) {
+      throw new Error(`目录层级超过 ${WORKBENCH_INSTALL_LIMITS.maxDepth} 层，没有安装。`);
+    }
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (files.length >= WORKBENCH_INSTALL_LIMITS.maxEntries) {
+        throw new Error(`文件数超过 ${WORKBENCH_INSTALL_LIMITS.maxEntries} 个，没有安装。`);
+      }
+      if (entry.isSymbolicLink()) {
+        throw new Error(`包里有符号链接（${entry.name}），出于安全没有安装。`);
+      }
+      const full = path.join(dir, entry.name);
+      const rel = relative ? `${relative}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) { walk(full, rel, depth + 1); continue; }
+      if (!entry.isFile()) continue;
+      const stat = fs.lstatSync(full);
+      if (stat.size > WORKBENCH_INSTALL_LIMITS.maxFileBytes) {
+        throw new Error(`${rel} 超过单文件上限，没有安装。`);
+      }
+      totalBytes += stat.size;
+      if (totalBytes > WORKBENCH_INSTALL_LIMITS.maxTotalBytes) {
+        throw new Error('这个文件夹总体积超过 32 MiB，没有安装。');
+      }
+      files.push({ absolute: full, relative: rel });
+    }
+  };
+  walk(sourceDir, '', 1);
+  return files;
+}
+
+async function installWorkbenchFromPaths(paths) {
+  const list = Array.isArray(paths) ? paths.filter((item) => typeof item === 'string' && item) : [];
+  if (list.length !== 1) {
+    return { kind: 'error', text: '一次只能拖进一个工作台文件夹。' };
+  }
+  const source = path.resolve(list[0]);
+  let stat;
+  try { stat = fs.lstatSync(source); } catch (_error) {
+    return { kind: 'error', text: '读不到这个文件夹。' };
+  }
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    return { kind: 'error', text: '请拖一个真实的文件夹进来（不是文件，也不是快捷方式）。' };
+  }
+  const name = path.basename(source);
+  if (!workbenches.PACKAGE_ID_RE.test(name)) {
+    return { kind: 'error', text: '文件夹名不能用作工作台名（不能是 . / ..，不能含路径分隔符或控制字符，最长 64 字）。' };
+  }
+  // 先解析再复制：装不进来的包，一个字节都不落到用户目录里。
+  const parsed = workbenches.readWorkbenchPackage({ dir: source, id: name, source: 'user' });
+  if (!parsed.ok) {
+    return { kind: 'error', text: `这不是一个能用的工作台包（${parsed.reason}），没有安装。` };
+  }
+  let entries;
+  try { entries = collectInstallEntries(source); } catch (error) {
+    return { kind: 'error', text: error && error.message ? error.message : '安装失败。' };
+  }
+
+  const root = workbenchUserRoot();
+  const destination = path.join(root, name);
+  if (fs.existsSync(destination)) {
+    return { kind: 'error', text: `已经装过一个叫「${name}」的工作台了。先在切换器里移除它，再拖进来。` };
+  }
+  // 先写进同目录下的临时目录，全部写完再整体改名——中途失败不会留下半个包。
+  const staging = path.join(root, `.installing-${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
+  try {
+    fs.mkdirSync(staging, { recursive: true, mode: 0o700 });
+    for (const item of entries) {
+      const target = path.join(staging, ...item.relative.split('/'));
+      fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+      fs.copyFileSync(item.absolute, target);
+    }
+    fs.renameSync(staging, destination);
+  } catch (error) {
+    try { fs.rmSync(staging, { recursive: true, force: true }); } catch (_cleanup) { /* 尽力清理 */ }
+    log.line('app', `工作台安装失败：${error && error.message || 'unknown'}`);
+    return { kind: 'error', text: '复制文件时出错，没有安装。' };
+  }
+  log.line('app', `已安装工作台 user:${name}（${entries.length} 个文件）`);
+  listAvailableWorkbenches({ refresh: true });
+  refreshWorkbenchSurfaces();
+  return { kind: 'ok', text: `装好了：${parsed.package.name}。在左上角的工作台按钮里点一下就能切过去。` };
+}
+
+// 移除只删鲸坞自己复制的那一份副本，绝不碰用户原来的文件夹，也绝不删内置包。
+async function removeWorkbenchPack(workbenchId) {
+  if (typeof workbenchId !== 'string' || !workbenchId.startsWith('user:')) {
+    return { kind: 'error', text: '只有你自己装的工作台可以移除。' };
+  }
+  const name = workbenchId.slice('user:'.length);
+  if (!workbenches.PACKAGE_ID_RE.test(name)) {
+    return { kind: 'error', text: '工作台名不合法。' };
+  }
+  const root = workbenchUserRoot();
+  const target = path.join(root, name);
+  let real;
+  try { real = fs.realpathSync(target); } catch (_error) {
+    return { kind: 'error', text: '这个工作台已经不在了。' };
+  }
+  // 再确认一次：要删的东西必须真的落在 userData/workbenches/ 里面。
+  const realRoot = fs.realpathSync(root);
+  const relative = path.relative(realRoot, real);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    return { kind: 'error', text: '这个路径不在工作台目录里，没有删除。' };
+  }
+  if (config.get('workbenchId') === workbenchId) {
+    config.set({ workbenchId: null });
+  }
+  if (config.get('lastWorkbenchId') === workbenchId) {
+    config.set({ lastWorkbenchId: null });
+  }
+  try { fs.rmSync(real, { recursive: true, force: true }); } catch (error) {
+    log.line('app', `移除工作台失败：${error && error.message || 'unknown'}`);
+    return { kind: 'error', text: '删除副本失败。' };
+  }
+  log.line('app', `已移除工作台 ${workbenchId}`);
+  listAvailableWorkbenches({ refresh: true });
+  refreshWorkbenchSurfaces();
+  return { kind: 'ok', text: '已移除这份副本。你原来的文件夹一个字没动。' };
+}
+
+// 只发一次，就一次。
+// unknown 表示「已提交但没收到确认」，此时**绝不能**自动重试——重试的代价是重复排队，
+// 而重复排队对用户来说是真金白银。要不要再点一次由用户自己决定。
+async function submitPromptOnce(adapter, text) {
+  const listed = await adapter.listTargets();
+  if (!listed || listed.available !== true || !Array.isArray(listed.targets) || !listed.targets.length) {
+    return {
+      state: 'error',
+      text: listed && listed.reason === 'package-unproven'
+        ? '后端版本不可证明，没有发送。'
+        : '没有找到可用会话，先在右边开一个会话再点。'
+    };
+  }
+  // 发给最近更新过的那个会话；这是用户眼里「当前正在用的」那个。
+  const target = [...listed.targets].sort((a, b) => (
+    String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
+  ))[0];
+  const result = await adapter.submitText({ targetToken: target.targetToken, text });
+  return { state: result.state, reason: result.reason, target: target.label };
+}
+
+// ---------- actions 按钮：唯一通道是 v0.4 的 prompt 适配器 ----------
+// 仅 loopback + packageProven 精确等于锁定版本 + 单条纯文本 + unknown 绝不自动重试。
+// 提示词是死文本：这里只把包里那段原文交出去，不做变量替换、不与输入框内容合并。
+async function submitWorkbenchAction(actionId) {
+  const active = currentWorkbench();
+  if (!active) return { state: 'error', text: '当前没有启用工作台。' };
+  const action = active.actions.find((item) => item.id === actionId);
+  if (!action) return { state: 'error', text: '这个按钮没加载，去设置里看看原因。' };
+  if (!backendReady) return { state: 'error', text: '后端还没就绪，等它起来再点。' };
+
+  let adapter = null;
+  try {
+    adapter = backend.createDshPromptAdapter({
+      port: config.get('port'),
+      expectedHostVersion: config.DSH_CONTRACT.hostVersion,
+      packageVersionProof: spawnedByUs && backendState ? backendState.version : null
+    });
+  } catch (_error) {
+    return { state: 'error', text: '自动提交能力不可用，请手动把提示词贴进会话。' };
+  }
+  try {
+    const result = await submitPromptOnce(adapter, action.prompt);
+    if (result.state !== 'error') {
+      log.line('app', `工作台动作 ${active.id}/${action.id} → ${result.state}(${result.reason})`);
+    }
+    return result;
+  } catch (error) {
+    log.line('app', `工作台动作失败：${error && error.code || 'unknown'}`);
+    return { state: 'error', text: error && error.message ? String(error.message).slice(0, 200) : '发送失败。' };
+  } finally {
+    try { await adapter.close(); } catch (_error) { /* 关闭失败不影响结果 */ }
   }
 }
 
@@ -1862,6 +2217,7 @@ async function onReady() {
   registerEventIpc();
   registerCaptureIpc();
   registerPetIpc();
+  registerShellIpc();
   try { await imageInput.cleanupOwnedStaging({ stagingRoot: captureStagingRoot() }); }
   catch (error) { log.line('capture', `启动清理 staging 失败：${error && error.code || 'unknown'}`); }
   await recoverWorkspaceAtStartup();
@@ -2138,8 +2494,8 @@ function cancelBackendRecovery(reason) {
 
 function reloadMainWindowAfterRecovery() {
   const win = mainWindow;
-  if (!win || win.isDestroyed()) return;
-  void win.loadURL(baseUrl()).catch((e) => {
+  if (!win || win.isDestroyed() || !dshView || dshView.webContents.isDestroyed()) return;
+  void dshView.webContents.loadURL(baseUrl()).catch((e) => {
     log.line('app', '后台恢复后重载界面失败: ' + (e && e.message || e));
   });
 }
@@ -2390,20 +2746,39 @@ function openMainWindow() {
     show: false,
     title: workspaceWindowTitle(),
     backgroundColor: '#0b0f19',
-    webPreferences: { contextIsolation: true, nodeIntegration: false }
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-shell.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
   });
   mainWindow = win;
+  const shellUrl = pathToFileURL(path.join(__dirname, 'shell.html')).href;
+  secureLocalWindow(win, shellUrl);
+  registerThemedWindow(win, 'shell.html');
+  void win.loadFile('shell.html');
+
+  // dsh 的远程页面：独立 WebContentsView，**没有 preload**，拿不到 contextBridge，
+  // 也就不可能通过 IPC 碰到鲸坞的任何东西。
+  const view = new WebContentsView({
+    webPreferences: { contextIsolation: true, nodeIntegration: false }
+  });
+  dshView = view;
+  win.contentView.addChildView(view);
+  layoutMainWindow();
+  win.on('resize', layoutMainWindow);
 
   let attempts = 0;
   let retryTimer = null;
   const tryLoad = () => {
-    if (quitting || win.isDestroyed()) return;
+    if (quitting || win.isDestroyed() || view.webContents.isDestroyed()) return;
     retryTimer = null;
-    void win.loadURL(baseUrl()).catch(() => { /* did-fail-load 里处理 */ });
+    void view.webContents.loadURL(baseUrl()).catch(() => { /* did-fail-load 里处理 */ });
   };
   // 统一统计初次加载、后台恢复重载与用户手动刷新，避免直接 loadURL 时出现“第 0 次”。
-  win.webContents.on('did-start-loading', () => { attempts += 1; });
-  win.webContents.on('did-fail-load', (_e, code, desc, _url, isMainFrame) => {
+  view.webContents.on('did-start-loading', () => { attempts += 1; });
+  view.webContents.on('did-fail-load', (_e, code, desc, _url, isMainFrame) => {
     if (!isMainFrame || code === -3) return;
     log.line('app', `页面加载失败(${code} ${desc})，第 ${attempts} 次`);
     if (quitting) return;
@@ -2413,7 +2788,7 @@ function openMainWindow() {
       retryTimer = setTimeout(tryLoad, 1500);
     }
   });
-  win.webContents.on('did-finish-load', () => {
+  view.webContents.on('did-finish-load', () => {
     attempts = 0;
     if (retryTimer) clearTimeout(retryTimer);
     retryTimer = null;
@@ -2448,20 +2823,33 @@ function openMainWindow() {
   win.on('resized', saveBounds);
   win.on('moved', saveBounds);
 
-  // 站内新窗口允许；外链交给系统浏览器
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  // 站内新窗口允许；外链交给系统浏览器。这条只管 dsh 视图。
+  view.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith(baseUrl())) return { action: 'allow' };
     if (/^https?:/i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
-  win.webContents.on('will-navigate', (e, url) => {
+  view.webContents.on('will-navigate', (e, url) => {
     if (!url.startsWith(baseUrl())) {
       e.preventDefault();
       if (/^https?:/i.test(url)) shell.openExternal(url);
     }
   });
 
+  win.on('closed', () => {
+    if (dshView === view) dshView = null;
+  });
+
   tryLoad();
+}
+
+// 左栏常驻，右侧全部让给 dsh 视图。窗口很窄时优先保证 dsh 还看得见。
+function layoutMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed() || !dshView) return;
+  const [width, height] = mainWindow.getContentSize();
+  const rail = Math.max(0, Math.min(SHELL_RAIL_WIDTH, width - 320));
+  try { dshView.setBounds({ x: rail, y: 0, width: Math.max(0, width - rail), height }); }
+  catch (_error) { /* 窗口正在销毁 */ }
 }
 
 function showApp() {
@@ -3485,11 +3873,104 @@ function trustedSettingsHandler(handler) {
   };
 }
 
+// 设置页要看的完整信息：比切换器多出许可证、字段问题、skills 清单与 agent 预设检测结果。
+// 提示词全文仍然不下发——渲染层永远看不到它。
+function workbenchDetail(pkg) {
+  return {
+    ...workbenchRow(pkg),
+    version: pkg.version,
+    author: pkg.author,
+    license: pkg.license,
+    homepage: pkg.homepage,
+    dshRange: pkg.dshRange,
+    folders: pkg.workspace ? pkg.workspace.folders.map((item) => item.path) : [],
+    actions: pkg.actions.map((item) => ({
+      id: item.id, label: item.label, hint: item.hint, confirm: item.confirm
+    })),
+    // null = 包里没有 skills.json；[] = 作者明确声明「不推荐任何 skill」。
+    // 两种都不显示这一栏（SGD 2026-08-19：空清单整栏隐藏，不显示「没有推荐 skill」）。
+    skills: pkg.skills,
+    // A-8：只说「已检测到，尚未接通」，而且只在这一页说，不上切换器也不上主界面。
+    hasAgentPreset: Boolean(pkg.agentPreset),
+    onboarding: pkg.onboarding,
+    issues: pkg.issues.map((item) => ({
+      file: item.file || null,
+      reason: item.reason,
+      detail: item.detail == null ? null : String(item.detail).slice(0, 80)
+    }))
+  };
+}
+
+// 外壳页 IPC：与其他本地页同一套三重校验（同一 webContents + 主帧 + URL 精确匹配）。
+// dsh 的远程页面在另一个视图里且没有 preload，永远走不到这里。
+function trustedShellEvent(event) {
+  return trustedLocalEvent(event, mainWindow, pathToFileURL(path.join(__dirname, 'shell.html')).href);
+}
+
+function trustedShellHandler(handler) {
+  return async (event, ...args) => {
+    if (!trustedShellEvent(event)) throw new Error('拒绝非主窗外壳的 IPC 请求');
+    return handler(...args);
+  };
+}
+
+function registerShellIpc() {
+  const channels = [
+    'shell:get', 'shell:switch', 'shell:remove', 'shell:action',
+    'shell:install', 'shell:open-workspace', 'shell:open-settings', 'shell:onboarding-seen'
+  ];
+  for (const channel of channels) ipcMain.removeHandler(channel);
+
+  ipcMain.handle('shell:get', trustedShellHandler(async () => {
+    const active = currentWorkbench();
+    const firstTime = Boolean(active && active.onboarding && !workbenchOnboardingSeen.has(active.id));
+    return shellStateSnapshot({ showOnboarding: firstTime });
+  }));
+
+  ipcMain.handle('shell:switch', trustedShellHandler(async (workbenchId) => (
+    applyWorkbench(typeof workbenchId === 'string' ? workbenchId : null)
+  )));
+
+  ipcMain.handle('shell:remove', trustedShellHandler(async (workbenchId) => (
+    removeWorkbenchPack(typeof workbenchId === 'string' ? workbenchId : '')
+  )));
+
+  ipcMain.handle('shell:action', trustedShellHandler(async (actionId) => (
+    submitWorkbenchAction(typeof actionId === 'string' ? actionId : '')
+  )));
+
+  // 拖入安装：只复制文件夹，不解压、不执行、不联网、不改用户原来的文件夹。
+  ipcMain.handle('shell:install', trustedShellHandler(async (paths) => (
+    installWorkbenchFromPaths(paths)
+  )));
+
+  ipcMain.handle('shell:open-workspace', trustedShellHandler(async () => {
+    const target = currentWorkspaceSurface();
+    const dir = target && target.effectivePath ? target.effectivePath : null;
+    if (!dir) return { kind: 'error', text: '还没有工作区。' };
+    try { await shell.openPath(dir); return { kind: 'ok' }; } catch (_error) {
+      return { kind: 'error', text: '打不开工作区目录。' };
+    }
+  }));
+
+  ipcMain.handle('shell:open-settings', trustedShellHandler(async () => {
+    openSettingsWindow();
+    return { kind: 'ok' };
+  }));
+
+  ipcMain.handle('shell:onboarding-seen', trustedShellHandler(async (workbenchId) => {
+    if (typeof workbenchId === 'string' && workbenchId) workbenchOnboardingSeen.add(workbenchId);
+    return { kind: 'ok' };
+  }));
+}
+
 function registerSettingsIpc() {
   const channels = [
     'settings:get', 'settings:apply', 'settings:switch-workspace',
     'settings:restart-backend', 'settings:check-update',
-    'settings:rescan-pets', 'settings:reload-themes', 'settings:open-resource-dir'
+    'settings:rescan-pets', 'settings:reload-themes', 'settings:open-resource-dir',
+    'settings:list-workbenches', 'settings:switch-workbench',
+    'settings:remove-workbench', 'settings:rescan-workbenches'
   ];
   for (const channel of channels) ipcMain.removeHandler(channel);
 
@@ -3605,8 +4086,38 @@ function registerSettingsIpc() {
     const theme = refreshAllThemes();
     return { ok: true, themes: themesRuntimeSurface(), applied: theme.id };
   }));
+  ipcMain.handle('settings:list-workbenches', trustedSettingsHandler(async () => {
+    const listed = listAvailableWorkbenches();
+    return {
+      currentId: config.get('workbenchId') || null,
+      defaultLabel: WORKBENCH_DEFAULT_LABEL,
+      packages: listed.packages.map(workbenchDetail),
+      skipped: listed.skipped.map((item) => ({
+        id: String(item.id).slice(0, 120), reason: item.reason
+      })),
+      capped: listed.capped === true,
+      maxPackages: workbenches.LIMITS.maxPackages
+    };
+  }));
+
+  ipcMain.handle('settings:switch-workbench', trustedSettingsHandler(async (workbenchId) => (
+    applyWorkbench(typeof workbenchId === 'string' ? workbenchId : null)
+  )));
+
+  ipcMain.handle('settings:remove-workbench', trustedSettingsHandler(async (workbenchId) => (
+    removeWorkbenchPack(typeof workbenchId === 'string' ? workbenchId : '')
+  )));
+
+  ipcMain.handle('settings:rescan-workbenches', trustedSettingsHandler(async () => {
+    listAvailableWorkbenches({ refresh: true });
+    refreshWorkbenchSurfaces();
+    return { kind: 'ok' };
+  }));
+
+  // 参数在主进程再夹一次固定枚举，不信任 preload 的夹取结果。
   ipcMain.handle('settings:open-resource-dir', trustedSettingsHandler(async (kind) => {
-    const opened = await openUserResourceDir(kind === 'themes' ? 'themes' : 'pets');
+    const allowed = kind === 'themes' || kind === 'workbenches' ? kind : 'pets';
+    const opened = await openUserResourceDir(allowed);
     return { ok: opened };
   }));
 }
@@ -3943,6 +4454,7 @@ function trayMenuTemplate() {
     { label: '显示 / 隐藏窗口', click: () => toggleWindow() },
     { label: '任务与用量看板…', click: () => openDashboardWindow() },
     { label: '截图与图片…', click: () => openCaptureWindow({ source: 'drop' }) },
+    { label: '工作台', submenu: workbenchSubmenuTemplate() },
     { label: '工作区', submenu: workspaceSubmenuTemplate() },
     { label: '桌面宠物', submenu: petSubmenuTemplate() },
     { label: '设置…', click: () => openSettingsWindow() },
@@ -3954,6 +4466,35 @@ function trayMenuTemplate() {
     { label: '打开配置文件', click: () => shell.openPath(config.filePath()) },
     { type: 'separator' },
     { label: '退出鲸坞', click: () => { quitting = true; app.quit(); } }
+  ];
+}
+
+// 工作台切换的第二个入口：托盘。第三个是应用菜单里的快捷键。
+function workbenchSubmenuTemplate() {
+  const listed = listAvailableWorkbenches();
+  const activeId = config.get('workbenchId') || null;
+  const rows = listed.packages.map((pkg, index) => ({
+    label: index < 9 ? `${pkg.name}` : pkg.name,
+    type: 'checkbox',
+    checked: activeId === pkg.id,
+    click: () => { void applyWorkbench(pkg.id).then((r) => { if (r.kind === 'error') pushShellNotice('error', r.text); }); }
+  }));
+  const broken = listed.skipped.map((item) => ({
+    label: `⚠ ${String(item.id).slice(0, 40)}　未加载：${item.reason}`,
+    enabled: false
+  }));
+  return [
+    {
+      label: WORKBENCH_DEFAULT_LABEL,
+      type: 'checkbox',
+      checked: activeId === null,
+      click: () => { void applyWorkbench(null); }
+    },
+    ...(rows.length ? [{ type: 'separator' }, ...rows] : []),
+    ...(broken.length ? [{ type: 'separator' }, ...broken] : []),
+    { type: 'separator' },
+    { label: '打开工作台文件夹', click: () => { void openUserResourceDir('workbenches'); } },
+    { label: '管理工作台…', click: () => openSettingsWindow() }
   ];
 }
 
@@ -3993,6 +4534,44 @@ function createTray() {
   }
 }
 
+// 切换工作台的第三个入口：应用菜单里的快捷键。
+// 这里刻意**不用 globalShortcut**——那是系统级抢占，而切工作台是应用内动作；
+// 而且 macOS 的 ⌘⇧3/4/5 是系统截屏，抢不过来也不该抢。菜单加速键只在鲸坞在前台时生效。
+function workbenchMenuTemplate() {
+  const listed = listAvailableWorkbenches();
+  const activeId = config.get('workbenchId') || null;
+  const rows = listed.packages.slice(0, 9).map((pkg, index) => ({
+    label: pkg.name,
+    type: 'checkbox',
+    checked: activeId === pkg.id,
+    accelerator: `CommandOrControl+Shift+${index + 1}`,
+    click: () => { void switchWorkbenchByIndex(index + 1); }
+  }));
+  const rest = listed.packages.slice(9).map((pkg) => ({
+    label: pkg.name,
+    type: 'checkbox',
+    checked: activeId === pkg.id,
+    click: () => { void applyWorkbench(pkg.id); }
+  }));
+  return [
+    {
+      label: WORKBENCH_DEFAULT_LABEL,
+      type: 'checkbox',
+      checked: activeId === null,
+      click: () => { void applyWorkbench(null); }
+    },
+    ...(rows.length || rest.length ? [{ type: 'separator' }, ...rows, ...rest] : []),
+    { type: 'separator' },
+    {
+      label: '回到上一个工作台',
+      accelerator: 'CommandOrControl+Shift+0',
+      click: () => { void switchToPreviousWorkbench(); }
+    },
+    { label: '打开工作台文件夹', click: () => { void openUserResourceDir('workbenches'); } },
+    { label: '管理工作台…', click: () => openSettingsWindow() }
+  ];
+}
+
 function createAppMenu() {
   const template = [
     ...(isMac ? [{
@@ -4020,6 +4599,7 @@ function createAppMenu() {
         { label: '退出鲸坞', click: () => { quitting = true; app.quit(); } }
       ]
     }]),
+    { label: '工作台', submenu: workbenchMenuTemplate() },
     { label: '工作区', submenu: workspaceSubmenuTemplate() },
     {
       label: '编辑',
@@ -4036,7 +4616,13 @@ function createAppMenu() {
     {
       label: '视图',
       submenu: [
-        { label: '刷新界面', accelerator: 'CmdOrCtrl+R', click: () => mainWindow && mainWindow.reload() },
+        {
+          label: '刷新界面',
+          accelerator: 'CmdOrCtrl+R',
+          click: () => {
+            if (dshView && !dshView.webContents.isDestroyed()) dshView.webContents.reload();
+          }
+        },
         { role: 'toggleDevTools', label: '开发者工具' },
         { type: 'separator' },
         { role: 'resetZoom', label: '实际大小' },
@@ -4114,6 +4700,7 @@ async function restartBackend(options = {}) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.destroy();
     mainWindow = null;
+    dshView = null;
   }
   if (!splash || splash.isDestroyed()) createSplash();
   else splash.show();
@@ -4212,6 +4799,9 @@ if (MAIN_HELPER_TEST) {
     buildPetPayload,
     petWindowBounds,
     THEME_VARIABLE_MAP,
-    PET_PAYLOAD_MAX_BYTES
+    PET_PAYLOAD_MAX_BYTES,
+    submitPromptOnce,
+    workbenchDetail,
+    WORKBENCH_INSTALL_LIMITS
   };
 }
