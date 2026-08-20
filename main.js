@@ -1194,6 +1194,7 @@ function currentPetState() {
 
 function pushPetState() {
   const next = currentPetState();
+  refreshTrayState();
   if (next === petState && petWindow && !petWindow.isDestroyed()) return;
   petState = next;
   if (petWindow && !petWindow.isDestroyed()) {
@@ -2169,9 +2170,8 @@ async function handleEventTransportClosed(monitor, error) {
 
 function refreshAttentionSurface() {
   if (tray && !tray.isDestroyed()) {
-    tray.setToolTip(attentionCount > 0
-      ? `鲸坞 WhaleDock · ${attentionCount} 个任务待查看`
-      : `鲸坞 WhaleDock · 今日 ${currentDashboardSnapshot().today.tokens.toLocaleString('zh-CN')} tokens`);
+    // 托盘文案由五态统一给（C-3），这里只负责让它重算一次。
+    refreshTrayState();
     refreshTrayMenu();
   }
   if (isMac && app.dock) {
@@ -2183,6 +2183,7 @@ function refreshAttentionSurface() {
 function clearTaskAttention() {
   attentionCount = 0;
   lastNoticePayload = null;
+  noteUserActivity('待确认项已被查看或处理');
   refreshAttentionSurface();
   if (noticeWindow && !noticeWindow.isDestroyed()) noticeWindow.hide();
 }
@@ -2323,13 +2324,18 @@ async function handleEventEffects(value, monitor) {
       if (payload && eventLayerCurrent(monitor)) deliverTaskNotification(payload);
       notePetTerminal(effect.result);
     } else if (effect.type === 'waiting-human') {
-      deliverTaskNotification({
+      const waitingPayload = {
         kind: 'waiting',
         title: '有任务等待你确认',
         detail: effect.requestKind === 'question'
           ? '有一个问题等待你回答。' : '有一个操作等待你批准。',
         anonymousLabel: '匿名任务'
-      });
+      };
+      // 0 秒这一层：托盘换图标 + Dock 角标 + 系统通知 + 宠物切等待动作。
+      deliverTaskNotification(waitingPayload);
+      pushPetState();
+      // 8 秒 / 30 秒两层由阶梯接管。同一项只会走到这里一次（见 notificationLedger）。
+      startWakeLadder(waitingPayload);
     } else if (effect.type === 'budget-crossed') {
       if (!eventLayerCurrent(monitor)) return;
       await applyBudgetCrossed(effect, monitor);
@@ -2609,6 +2615,7 @@ async function ensureBackendAndShowOnce(generation, showWindow) {
 
     backendReady = true;
     launchEventLayer({ state: startedState, spawnedByUs: true });
+    void reconcileDshConfig();
     if (showWindow) {
       status('ready', '服务已就绪，正在打开窗口…');
       openMainWindow();
@@ -2630,6 +2637,19 @@ function cancelBackendRecovery(reason) {
   if (recoveringBackend && reason) log.line('app', `取消后台恢复：${reason}`);
   backendRecoveryGeneration += 1;
   recoveringBackend = false;
+}
+
+// 只读对账：把 dsh 自己报的配置形状记一行日志，供将来的 preset 侦察参考。
+// 它不参与任何决策，失败就当「没有这个信息」，绝不阻断启动。
+async function reconcileDshConfig() {
+  if (SMOKE) return;
+  let result;
+  try { result = await backend.probeDshConfig(config.get()); } catch (_error) { return; }
+  if (!result || result.available !== true) {
+    log.line('app', `dsh --dump-config 未取到（${result && result.reason || 'unknown'}），不影响启动`);
+    return;
+  }
+  log.line('app', `dsh --dump-config 已取到：profile=${result.profile} ${result.bytes}B ${result.shape}`);
 }
 
 function reloadMainWindowAfterRecovery() {
@@ -2962,6 +2982,8 @@ function openMainWindow() {
   };
   win.on('resized', saveBounds);
   win.on('moved', saveBounds);
+  // 窗口获得焦点 = 用户已经在看了，叫醒阶梯立刻全停。这里绝不反过来主动 focus。
+  win.on('focus', () => noteUserActivity('主窗获得焦点'));
 
   // 站内新窗口允许；外链交给系统浏览器。这条只管 dsh 视图。
   view.webContents.setWindowOpenHandler(({ url }) => {
@@ -4659,16 +4681,311 @@ function refreshTrayMenu() {
   tray.setContextMenu(Menu.buildFromTemplate(trayMenuTemplate()));
 }
 
+// ---------- v0.6 托盘五态 + 叫醒阶梯 ----------
+//
+// 托盘状态**直接消费 events.derivePetState() 的输出**，跟宠物窗用同一个数据源，
+// 从根上避免「宠物在跳、托盘还是空闲」这种不一致。
+// 口径要说清楚：五态推导 v0.5 就有了，这一批做的是「表达」，不是「感知」。
+//
+// 连不上事件流时是**第六种显示**（不是第六种状态）：图标变灰、提示写「连接不上，正在重试」。
+// 不猜、不装作空闲。
+const TRAY_STATE_TEXT = Object.freeze({
+  idle: '空闲',
+  busy: '正在干活',
+  waiting: '等你拍板',
+  celebrate: '刚完成一个任务',
+  error: '有任务没完成',
+  offline: '连接不上，正在重试'
+});
+// 思考中用 2 帧慢速摆尾：只切图片，不做动画渲染。
+const TRAY_BUSY_FPS = 2;
+// 事件流断了以后的只读兜底轮询：只为维持五态不卡死，不重放历史。
+const TRAY_FALLBACK_POLL_MS = 5000;
+const TRAY_FALLBACK_FAILURES_BEFORE_OFFLINE = 3;
+
+let trayBaseImage = null;
+const trayImageCache = new Map();
+let trayBusyTimer = null;
+let trayBusyFrame = 0;
+let trayDisplayState = null;
+let trayFallbackTimer = null;
+let trayFallbackFailures = 0;
+let trayForcedOffline = false;
+let wakeDockBounceId = null;
+
+// 用现有托盘图标 + 程序合成的角标做占位：直接在 BGRA 位图上画，不引入任何图片库，
+// 也不需要等 20 个正式 PNG 就能把逻辑与真机验收跑通。正式素材是单独一批。
+function composeTrayImage(state, frame) {
+  if (!trayBaseImage || trayBaseImage.isEmpty()) return null;
+  const size = trayBaseImage.getSize();
+  const bitmap = Buffer.from(trayBaseImage.toBitmap());
+  const width = size.width;
+  const height = size.height;
+  // 角标颜色（BGRA）。offline 不画角标，只整体压暗。
+  const badges = {
+    waiting: [0x44, 0x44, 0xff, 0xff],
+    celebrate: [0x6f, 0xd0, 0x4f, 0xff],
+    error: [0x4f, 0xbd, 0xf0, 0xff],
+    busy: [0xd6, 0xd3, 0x22, 0xff]
+  };
+  if (state === 'offline') {
+    for (let i = 3; i < bitmap.length; i += 4) bitmap[i] = Math.round(bitmap[i] * 0.4);
+  }
+  const badge = badges[state];
+  if (badge) {
+    const radius = Math.max(2, Math.round(Math.min(width, height) * 0.22));
+    // busy 的两帧只把角标上下挪一点，看起来就是慢速摆尾。
+    const centerX = width - radius - 1;
+    const centerY = state === 'busy' && frame === 1 ? radius + 1 : height - radius - 1;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const dx = x - centerX;
+        const dy = y - centerY;
+        if (dx * dx + dy * dy > radius * radius) continue;
+        const offset = (y * width + x) * 4;
+        bitmap[offset] = badge[0];
+        bitmap[offset + 1] = badge[1];
+        bitmap[offset + 2] = badge[2];
+        bitmap[offset + 3] = badge[3];
+      }
+    }
+  }
+  try {
+    return nativeImage.createFromBitmap(bitmap, { width, height, scaleFactor: 1 });
+  } catch (_error) {
+    return null;
+  }
+}
+
+function trayImageFor(state, frame) {
+  const key = `${state}:${state === 'busy' ? frame : 0}`;
+  if (trayImageCache.has(key)) return trayImageCache.get(key);
+  const image = composeTrayImage(state, frame);
+  if (image) {
+    // 只有干净的鲸鱼保持模板图；带彩色角标的状态必须关掉模板模式，否则 macOS 会把它涂成纯色。
+    try { image.setTemplateImage(isMac && state === 'idle'); } catch (_error) { /* 非 mac 无所谓 */ }
+    trayImageCache.set(key, image);
+  }
+  return image;
+}
+
+function trayTooltipFor(state) {
+  const suffix = state === 'waiting' && attentionCount > 0 ? `（${attentionCount} 项）` : '';
+  return `鲸坞 WhaleDock · ${TRAY_STATE_TEXT[state] || TRAY_STATE_TEXT.idle}${suffix}`;
+}
+
+// 纯函数：事件层不可用 = 第六种显示。不猜、不装作空闲。
+function trayStateFrom(availability, petStateValue, forcedOffline) {
+  if (forcedOffline === true) return 'offline';
+  if (!availability || availability === 'unavailable' || availability === 'disconnected') return 'offline';
+  return events.PET_STATES.includes(petStateValue) ? petStateValue : 'idle';
+}
+
+function trayEffectiveState() {
+  const snapshot = canonicalEventSnapshot();
+  const availability = snapshot && snapshot.availability ? snapshot.availability.state : null;
+  return trayStateFrom(availability, currentPetState(), trayForcedOffline);
+}
+
+function stopTrayBusyAnimation() {
+  if (trayBusyTimer) clearInterval(trayBusyTimer);
+  trayBusyTimer = null;
+  trayBusyFrame = 0;
+}
+
+function applyTrayState(state) {
+  if (!tray || tray.isDestroyed()) return;
+  const image = trayImageFor(state, trayBusyFrame);
+  if (image) { try { tray.setImage(image); } catch (_error) { /* 图标降级不影响其他表面 */ } }
+  try { tray.setToolTip(trayTooltipFor(state)); } catch (_error) { /* 同上 */ }
+}
+
+function refreshTrayState() {
+  if (!tray || tray.isDestroyed()) return;
+  const state = trayEffectiveState();
+  if (state === trayDisplayState) {
+    if (state === 'busy') applyTrayState(state);
+    return;
+  }
+  trayDisplayState = state;
+  stopTrayBusyAnimation();
+  applyTrayState(state);
+  if (state === 'busy') {
+    trayBusyTimer = setInterval(() => {
+      trayBusyFrame = trayBusyFrame === 0 ? 1 : 0;
+      applyTrayState('busy');
+    }, Math.round(1000 / TRAY_BUSY_FPS));
+  }
+}
+
+// 断流兜底：每 5 秒一次只读 session.list 轮询，连续 3 次失败转灰态。
+// 只为维持五态不卡死，不重放历史、不写任何东西。
+function startTrayFallbackPoll() {
+  if (trayFallbackTimer || SMOKE) return;
+  trayFallbackTimer = setInterval(() => { void pollTrayFallbackOnce(); }, TRAY_FALLBACK_POLL_MS);
+}
+
+function stopTrayFallbackPoll() {
+  if (trayFallbackTimer) clearInterval(trayFallbackTimer);
+  trayFallbackTimer = null;
+  trayFallbackFailures = 0;
+}
+
+async function pollTrayFallbackOnce() {
+  if (quitting || !backendReady) return;
+  const snapshot = canonicalEventSnapshot();
+  const availability = snapshot && snapshot.availability ? snapshot.availability.state : null;
+  if (availability === 'live') {
+    trayFallbackFailures = 0;
+    trayForcedOffline = false;
+    return;
+  }
+  let adapter = null;
+  try {
+    adapter = backend.createDshPromptAdapter({
+      port: config.get('port'),
+      expectedHostVersion: config.DSH_CONTRACT.hostVersion,
+      packageVersionProof: spawnedByUs && backendState ? backendState.version : null,
+      timeoutMs: 2000
+    });
+    const listed = await adapter.listTargets();
+    if (listed && listed.available === true) {
+      trayFallbackFailures = 0;
+      trayForcedOffline = false;
+    } else {
+      trayFallbackFailures += 1;
+    }
+  } catch (_error) {
+    trayFallbackFailures += 1;
+  } finally {
+    if (adapter) { try { await adapter.close(); } catch (_closeError) { /* 忽略 */ } }
+  }
+  if (trayFallbackFailures >= TRAY_FALLBACK_FAILURES_BEFORE_OFFLINE && !trayForcedOffline) {
+    trayForcedOffline = true;
+    log.line('events', '事件流连续 3 次只读探测失败，托盘转灰态');
+  }
+  refreshTrayState();
+}
+
+// ---------- 叫醒阶梯（C-4）----------
+//
+// **三件永远不做的事，写在这里，谁都别删：**
+// 1) 不抢焦点。绝不调用 win.focus() 打断用户正在敲的字。
+// 2) 不遮挡。不弹全屏、不弹模态窗。
+// 3) 不循环响铃。每个待确认项只走一遍阶梯——去重由 lib/events.js 的 notificationLedger 保证：
+//    同一个 approval/question 只会产生一次 waiting-human effect，
+//    所以轮询兜底重连、backfill 重新看到同一项时不会再叫。
+const WAKE_LADDER = Object.freeze({ nudgeMs: 8000, escalateMs: 30000 });
+let wakeLadderTimers = [];
+let wakeLadderPayload = null;
+
+function stopWakeLadder(reason) {
+  const running = wakeLadderTimers.length > 0 || wakeLadderPayload !== null;
+  for (const timer of wakeLadderTimers) clearTimeout(timer);
+  wakeLadderTimers = [];
+  wakeLadderPayload = null;
+  if (isMac && app.dock && typeof app.dock.cancelBounce === 'function' && wakeDockBounceId !== null) {
+    try { app.dock.cancelBounce(wakeDockBounceId); } catch (_error) { /* 停不掉也不再升级 */ }
+    wakeDockBounceId = null;
+  }
+  if (!isMac && mainWindow && !mainWindow.isDestroyed() && typeof mainWindow.flashFrame === 'function') {
+    try { mainWindow.flashFrame(false); } catch (_error) { /* 同上 */ }
+  }
+  if (running && reason) log.line('events', `叫醒阶梯停止：${reason}`);
+}
+
+// 纯函数：给一份设置，算出这次要排哪几层。安静模式一层都不排。
+function wakeLadderPlan(settings) {
+  const source = settings && typeof settings === 'object' ? settings : {};
+  if (source.quietMode === true) return [];
+  const layers = [];
+  // 8 秒：宠物窗临时置顶并摆动一次。不抢焦点、不夺输入。
+  if (source.wakeNudgeEnabled !== false) layers.push({ kind: 'nudge', at: WAKE_LADDER.nudgeMs });
+  // 30 秒：覆盖式二次通知 + Dock 持续弹跳 / 任务栏闪烁。默认开。
+  if (source.wakeEscalateEnabled !== false) layers.push({ kind: 'escalate', at: WAKE_LADDER.escalateMs });
+  return layers;
+}
+
+function startWakeLadder(payload) {
+  const layers = wakeLadderPlan(config.get());
+  stopWakeLadder(null);
+  if (!layers.length) return;
+  wakeLadderPayload = payload;
+  for (const layer of layers) {
+    wakeLadderTimers.push(setTimeout(
+      () => (layer.kind === 'nudge' ? nudgePetWindow() : escalateWake(payload)),
+      layer.at
+    ));
+  }
+}
+
+function nudgePetWindow() {
+  if (!petWindow || petWindow.isDestroyed()) return;
+  // 只在这一下临时置顶；不 focus、不 show()、不改变鼠标穿透设置。
+  const restoreTop = config.get('petAlwaysOnTop') === true;
+  try {
+    petWindow.setAlwaysOnTop(true, 'floating');
+    const bounds = petWindow.getBounds();
+    petWindow.setBounds({ ...bounds, x: bounds.x - 5 });
+    setTimeout(() => {
+      if (!petWindow || petWindow.isDestroyed()) return;
+      try {
+        petWindow.setBounds(bounds);
+        if (!restoreTop) petWindow.setAlwaysOnTop(false);
+      } catch (_error) { /* 摆动失败不影响其他层 */ }
+    }, 180);
+  } catch (_error) { /* 摆动失败不影响其他层 */ }
+}
+
+function escalateWake(payload) {
+  // 覆盖前一条，不刷屏：同 tag 的通知在系统里会替换掉上一条，而不是叠一条新的。
+  try {
+    if (Notification.isSupported()) {
+      const notice = new Notification({
+        title: '鲸坞还在等你拍板',
+        body: safeText(payload && payload.detail, '有一个任务在等你确认。', 100),
+        tag: 'whaledock-waiting'
+      });
+      notice.on('click', () => showApp());
+      notice.show();
+    }
+  } catch (_error) { /* 通知失败还有下面两条 */ }
+  if (isMac && app.dock && typeof app.dock.bounce === 'function') {
+    // critical 会一直跳到用户处理为止；用户一动我们就 cancelBounce。
+    try { wakeDockBounceId = app.dock.bounce('critical'); } catch (_error) { /* 忽略 */ }
+  }
+  if (!isMac && mainWindow && !mainWindow.isDestroyed() && typeof mainWindow.flashFrame === 'function') {
+    try { mainWindow.flashFrame(true); } catch (_error) { /* 忽略 */ }
+  }
+  // 提示音默认关，必须用户主动打开。
+  if (config.get('wakeSoundEnabled') === true) {
+    try { shell.beep(); } catch (_error) { /* 忽略 */ }
+  }
+}
+
+// 用户一动就全停：点通知、点托盘、窗口获得焦点、该项被处理，任意一个都算。
+function noteUserActivity(reason) {
+  stopWakeLadder(reason);
+}
+
 function createTray() {
   try {
     const iconName = isMac ? 'trayTemplate.png' : 'trayColor.png';
     const img = nativeImage.createFromPath(path.join(__dirname, 'assets', iconName));
     if (img.isEmpty()) return;
     img.setTemplateImage(isMac);
+    trayBaseImage = img;
     tray = new Tray(img);
     tray.setToolTip('鲸坞 WhaleDock');
     refreshTrayMenu();
-    if (!isMac) tray.on('click', () => toggleWindow());
+    refreshTrayState();
+    // 兜底轮询常驻：它自己会在后端没就绪或事件流 live 时早退，代价接近零。
+    startTrayFallbackPoll();
+    // 点托盘就算「用户动了」：叫醒阶梯立刻全停。
+    tray.on('click', () => {
+      noteUserActivity('用户点了托盘');
+      if (!isMac) toggleWindow();
+    });
   } catch (e) {
     log.line('app', 'tray 创建失败: ' + e.message);
   }
@@ -4896,6 +5213,10 @@ if (!MAIN_HELPER_TEST) {
     });
     // 宠物窗只是本地视觉层，退出时直接销毁并停掉瞬时态定时器。
     closePetWindow();
+    // 叫醒阶梯与托盘定时器全部停掉，绝不把 Dock 弹跳留在那里。
+    stopWakeLadder('App 正在退出');
+    stopTrayFallbackPoll();
+    stopTrayBusyAnimation();
   });
 
   app.on('will-quit', (e) => {
@@ -4942,6 +5263,13 @@ if (MAIN_HELPER_TEST) {
     PET_PAYLOAD_MAX_BYTES,
     submitPromptOnce,
     workbenchDetail,
+    trayStateFrom,
+    trayTooltipFor,
+    wakeLadderPlan,
+    WAKE_LADDER,
+    TRAY_BUSY_FPS,
+    TRAY_FALLBACK_POLL_MS,
+    TRAY_FALLBACK_FAILURES_BEFORE_OFFLINE,
     ensureWorkbenchWorkspace,
     heavyWorkbenchSwitchMessage,
     WORKBENCH_INSTALL_LIMITS

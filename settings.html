@@ -580,6 +580,58 @@
       </div>
 
       <div class="section">
+        <h2 class="section-title">卡住时怎么叫你</h2>
+        <div class="card">
+          <div class="row">
+            <div>
+              <div class="row-label">安静模式</div>
+              <div class="row-note">打开后只留托盘图标：不通知、不摆动、不弹跳。下面几项全部失效</div>
+            </div>
+            <label class="switch" aria-label="安静模式">
+              <input id="quietMode" type="checkbox">
+              <span class="track"></span>
+            </label>
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-label">8 秒：宠物窗摆一下</div>
+              <div class="row-note">临时置顶并轻轻摆动一次，不抢焦点、不夺输入；宠物没开就没有这一层</div>
+            </div>
+            <label class="switch" aria-label="8 秒宠物摆动">
+              <input id="wakeNudgeEnabled" type="checkbox">
+              <span class="track"></span>
+            </label>
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-label">30 秒：再叫一次并持续提醒</div>
+              <div class="row-note">覆盖前一条通知，macOS 上 Dock 持续弹跳、Windows 上任务栏闪烁；你一动就停</div>
+            </div>
+            <label class="switch" aria-label="30 秒持续提醒">
+              <input id="wakeEscalateEnabled" type="checkbox">
+              <span class="track"></span>
+            </label>
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-label">提示音</div>
+              <div class="row-note">默认关。声音最容易招人烦，要用再开</div>
+            </div>
+            <label class="switch" aria-label="提示音">
+              <input id="wakeSoundEnabled" type="checkbox">
+              <span class="track"></span>
+            </label>
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-note">这三层永远不会做的事：不抢焦点、不遮挡你正在看的东西、不循环响铃。
+                每个待确认项只叫一遍，处理掉或者你动一下就全停。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
         <h2 class="section-title">每日预算</h2>
         <div class="card">
           <div class="row">
@@ -785,11 +837,13 @@
     'screenshotHotkeyEnabled', 'screenshotHotkey',
     'port', 'dshVersion', 'preferBundled', 'command',
     'taskNotifications', 'budgetEnabled', 'dailyTokenBudget',
-    'priceInputPerMillion', 'priceCacheReadPerMillion', 'priceOutputPerMillion'
+    'priceInputPerMillion', 'priceCacheReadPerMillion', 'priceOutputPerMillion',
+    'quietMode', 'wakeNudgeEnabled', 'wakeEscalateEnabled', 'wakeSoundEnabled'
   ];
   const booleanFields = new Set([
     'openAtLogin', 'startMinimized', 'checkUpdates', 'preferBundled',
-    'screenshotHotkeyEnabled', 'taskNotifications', 'budgetEnabled'
+    'screenshotHotkeyEnabled', 'taskNotifications', 'budgetEnabled',
+    'quietMode', 'wakeNudgeEnabled', 'wakeEscalateEnabled', 'wakeSoundEnabled'
   ]);
   const numberFields = new Set([
     'port', 'dailyTokenBudget', 'priceInputPerMillion',
@@ -842,6 +896,12 @@
       command: (source && source.command) || null,
       taskNotifications: source && source.taskNotifications !== undefined
         ? Boolean(source.taskNotifications) : true,
+      quietMode: Boolean(source && source.quietMode),
+      wakeNudgeEnabled: source && source.wakeNudgeEnabled !== undefined
+        ? Boolean(source.wakeNudgeEnabled) : true,
+      wakeEscalateEnabled: source && source.wakeEscalateEnabled !== undefined
+        ? Boolean(source.wakeEscalateEnabled) : true,
+      wakeSoundEnabled: Boolean(source && source.wakeSoundEnabled),
       petEnabled: Boolean(source && source.petEnabled),
       petPackageId: String((source && source.petPackageId) || 'builtin:pixel-whale'),
       petAlwaysOnTop: source && source.petAlwaysOnTop !== undefined

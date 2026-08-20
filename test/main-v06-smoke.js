@@ -419,6 +419,204 @@ async function main06() {
     );
   });
 
+  await test('托盘五态与宠物同一个数据源，连不上时是第六种显示而不是装空闲', async () => {
+    const value = source('main.js');
+    // 托盘直接消费 derivePetState 的结果，不另算一套。
+    assert.match(value, /function trayEffectiveState\(\) \{[\s\S]*?currentPetState\(\)/);
+    assert.match(value, /function currentPetState\(\) \{\n  return events\.derivePetState\(/);
+    // 五态 + 第六种显示的文案齐全。
+    for (const key of ['idle', 'busy', 'waiting', 'celebrate', 'error', 'offline']) {
+      assert.ok(value.includes(`  ${key}: '`), key);
+    }
+    // 事件层不可用 / 断开时一律 offline，绝不回落成 idle。
+    assert.equal(main.trayStateFrom('unavailable', 'busy', false), 'offline');
+    assert.equal(main.trayStateFrom('disconnected', 'idle', false), 'offline');
+    assert.equal(main.trayStateFrom(null, 'celebrate', false), 'offline');
+    assert.equal(main.trayStateFrom('live', 'busy', true), 'offline', '兜底探测判定离线也要压过快照');
+    // 正常时原样透传五态。
+    for (const state of ['idle', 'busy', 'waiting', 'celebrate', 'error']) {
+      assert.equal(main.trayStateFrom('live', state, false), state);
+    }
+    // 不认识的状态回落 idle，而不是把脏值贴到托盘上。
+    assert.equal(main.trayStateFrom('live', '乱七八糟', false), 'idle');
+    assert.match(main.trayTooltipFor('offline'), /连接不上，正在重试/);
+    assert.match(main.trayTooltipFor('waiting'), /等你拍板/);
+  });
+
+  await test('思考中是 2 fps 图片切换，图标由程序合成，不需要新素材', async () => {
+    assert.equal(main.TRAY_BUSY_FPS, 2);
+    const value = source('main.js');
+    // 只切图片，不做动画渲染。
+    assert.match(value, /setInterval\(\(\) => \{\n      trayBusyFrame = trayBusyFrame === 0 \? 1 : 0;/);
+    assert.match(value, /Math\.round\(1000 \/ TRAY_BUSY_FPS\)/);
+    // 角标是在 BGRA 位图上直接画出来的占位图，没有引入任何图片库，也没有新增 PNG 资源。
+    assert.match(value, /nativeImage\.createFromBitmap\(bitmap/);
+    assert.equal(/require\(['"](?:sharp|jimp|canvas|pngjs)['"]\)/.test(value), false);
+    const assetsDir = path.join(ROOT, 'assets');
+    const trayAssets = fs.readdirSync(assetsDir).filter((name) => name.toLowerCase().startsWith('tray'));
+    assert.deepEqual(trayAssets.sort(), ['trayColor.png', 'trayTemplate.png', 'trayTemplate@2x.png']);
+  });
+
+  await test('断流兜底：5 秒只读轮询，连续 3 次失败才转灰态，且不写任何东西', async () => {
+    assert.equal(main.TRAY_FALLBACK_POLL_MS, 5000);
+    assert.equal(main.TRAY_FALLBACK_FAILURES_BEFORE_OFFLINE, 3);
+    const value = source('main.js');
+    const block = value.slice(
+      value.indexOf('async function pollTrayFallbackOnce()'),
+      value.indexOf('// ---------- 叫醒阶梯（C-4）----------')
+    );
+    assert.ok(block.length > 300);
+    // 只读：只调用 listTargets，绝不 submitText，也不写配置或文件。
+    assert.match(block, /await adapter\.listTargets\(\)/);
+    assert.equal(/submitText|config\.set|writeFileSync|mkdirSync/.test(block), false);
+    // 用完就关。
+    assert.match(block, /await adapter\.close\(\)/);
+    // 恢复 live 之后自己把状态清回来，不需要别人来复位。
+    assert.match(block, /availability === 'live'/);
+    assert.match(block, /trayForcedOffline = false/);
+  });
+
+  await test('叫醒阶梯：0/8/30 三层，每层可单独关，安静模式一层都不排', async () => {
+    assert.deepEqual(main.WAKE_LADDER, { nudgeMs: 8000, escalateMs: 30000 });
+    // 默认：8 秒摆一下 + 30 秒升级，都开着（SGD 2026-08-19 拍板 30 秒档默认开）。
+    assert.deepEqual(main.wakeLadderPlan({}), [
+      { kind: 'nudge', at: 8000 },
+      { kind: 'escalate', at: 30000 }
+    ]);
+    // 安静模式是总开关：一层都不排。
+    assert.deepEqual(main.wakeLadderPlan({ quietMode: true }), []);
+    assert.deepEqual(main.wakeLadderPlan({ quietMode: true, wakeEscalateEnabled: true }), []);
+    // 每层可单独关。
+    assert.deepEqual(main.wakeLadderPlan({ wakeNudgeEnabled: false }), [{ kind: 'escalate', at: 30000 }]);
+    assert.deepEqual(main.wakeLadderPlan({ wakeEscalateEnabled: false }), [{ kind: 'nudge', at: 8000 }]);
+    assert.deepEqual(main.wakeLadderPlan({ wakeNudgeEnabled: false, wakeEscalateEnabled: false }), []);
+    // 设置里四个开关都在，而且默认值与代码一致。
+    const settings = source('settings.html');
+    for (const id of ['quietMode', 'wakeNudgeEnabled', 'wakeEscalateEnabled', 'wakeSoundEnabled']) {
+      assert.ok(settings.includes(`id="${id}"`), id);
+    }
+    const defaults = require('../lib/config');
+    const patched = defaults.validateSettingsPatch({
+      quietMode: false, wakeNudgeEnabled: true, wakeEscalateEnabled: true, wakeSoundEnabled: false
+    });
+    assert.deepEqual(patched, {
+      quietMode: false, wakeNudgeEnabled: true, wakeEscalateEnabled: true, wakeSoundEnabled: false
+    });
+  });
+
+  await test('叫醒阶梯的三件永远不做：不抢焦点、不遮挡、不循环响铃', async () => {
+    const value = source('main.js');
+    const block = value.slice(
+      value.indexOf('// ---------- 叫醒阶梯（C-4）----------'),
+      value.indexOf('function createTray()')
+    );
+    assert.ok(block.length > 800);
+    // 三条写进代码注释，谁都别删。
+    assert.match(block, /不抢焦点/);
+    assert.match(block, /不遮挡/);
+    assert.match(block, /不循环响铃/);
+    // 1) 不抢焦点：整条阶梯的**代码**里不许出现 focus()/show()。
+    // 注释里写着「绝不调用 win.focus()」，所以断言前先把注释行去掉，只看真代码。
+    const code = block.split('\n').filter((line) => !line.trim().startsWith('//')).join('\n');
+    assert.equal(/\.focus\(\)/.test(code), false, '阶梯里不许抢焦点');
+    // 唯一允许的 show 是系统通知自己的 notice.show()。
+    const shows = code.match(/[\w.]+\.show\(\)/g) || [];
+    assert.deepEqual([...new Set(shows)], ['notice.show()']);
+    // 2) 不遮挡：不弹模态窗、不弹全屏。
+    assert.equal(/showMessageBox|setFullScreen|modal/.test(block), false);
+    // 3) 不循环响铃：升级层里没有任何 setInterval，提示音只响一次而且默认关。
+    assert.equal(/setInterval/.test(block), false);
+    assert.equal((block.match(/shell\.beep\(\)/g) || []).length, 1);
+    assert.match(block, /config\.get\('wakeSoundEnabled'\) === true/);
+    // 覆盖式二次通知：同 tag 替换，不叠一条新的。
+    assert.match(block, /tag: 'whaledock-waiting'/);
+    // 用户一动就全停，而且退出时也停。
+    assert.match(value, /win\.on\('focus', \(\) => noteUserActivity/);
+    assert.match(value, /noteUserActivity\('用户点了托盘'\)/);
+    assert.match(value, /noteUserActivity\('待确认项已被查看或处理'\)/);
+    assert.match(value, /stopWakeLadder\('App 正在退出'\)/);
+  });
+
+  await test('同一个待确认项只叫一遍：去重由事件层的通知账本保证', async () => {
+    // 阶梯只从 waiting-human effect 启动，而这个 effect 对同一个 requestKey 只会产生一次。
+    const value = source('main.js');
+    assert.equal((value.match(/startWakeLadder\(/g) || []).length, 2, '只有定义与那一处调用');
+    const handler = value.slice(
+      value.indexOf("} else if (effect.type === 'waiting-human') {"),
+      value.indexOf("} else if (effect.type === 'budget-crossed') {")
+    );
+    assert.match(handler, /startWakeLadder\(waitingPayload\)/);
+    // 事件层这一侧：账本命中就不再产生 effect，所以轮询重连看到同一项也不会再叫。
+    const eventsSource = source('lib/events.js');
+    assert.match(eventsSource, /const alreadyHandled = Object\.hasOwn\(state\.notificationLedger, ledgerKey\)/);
+    assert.match(eventsSource, /if \(!alreadyHandled\n\s*&& !event\.suppressNotifications/);
+  });
+
+  await test('--dump-config 只读探测：3 秒超时、只读 stdout、失败当没有这个信息', async () => {
+    const backend = require('../lib/backend');
+    assert.equal(backend.DUMP_CONFIG_LIMITS.timeoutMs, 3000);
+    // 非法 profile 直接拒，不起进程。
+    assert.deepEqual(
+      await backend.probeDshConfig({}, { profile: '../etc' }),
+      { available: false, reason: 'bad-profile' }
+    );
+    // 起不来就当没有这个信息，绝不抛错。
+    const failed = await backend.probeDshConfig({}, {
+      runtime: { findCommand: () => null }
+    });
+    assert.equal(failed.available, false);
+
+    // 正常路径：参数拼成 --profile <name> --dump-config，且 stdin/stderr 都是 ignore。
+    let seen = null;
+    const events = require('events');
+    const fakeSpawn = (file, args, options) => {
+      seen = { file, args, options };
+      const child = new events.EventEmitter();
+      child.stdout = new events.EventEmitter();
+      child.kill = () => {};
+      setTimeout(() => {
+        child.stdout.emit('data', Buffer.from(JSON.stringify({ port: 3080 })));
+        child.emit('close', 0);
+      }, 5);
+      return child;
+    };
+    const ok = await backend.probeDshConfig({ dshVersion: '0.1.0-rc.6' }, {
+      spawnImpl: fakeSpawn,
+      runtime: { findCommand: (name) => (name === 'dsh' ? '/usr/local/bin/dsh' : null) }
+    });
+    assert.equal(ok.available, true);
+    assert.equal(ok.profile, 'web');
+    assert.equal(ok.shape, 'object');
+    assert.deepEqual(seen.args, ['--profile', 'web', '--dump-config']);
+    assert.deepEqual(seen.options.stdio, ['ignore', 'pipe', 'ignore'], '只读 stdout');
+    assert.equal(seen.options.windowsHide, true);
+
+    // 非零退出、空输出都当「没有这个信息」。
+    const nonZero = await backend.probeDshConfig({}, {
+      spawnImpl: (file, args) => {
+        const child = new events.EventEmitter();
+        child.stdout = new events.EventEmitter();
+        child.kill = () => {};
+        setTimeout(() => child.emit('close', 1), 5);
+        return child;
+      },
+      runtime: { findCommand: (name) => (name === 'dsh' ? '/usr/local/bin/dsh' : null) }
+    });
+    assert.deepEqual(nonZero, { available: false, reason: 'non-zero-exit' });
+
+    // 硬约束 4：对 dsh 的假设（这里是子命令参数本身）只许写在 lib/backend.js。
+    // main.js 里可以在日志文案里提到这个 flag，但**不许把它拼进 argv**——
+    // 判据就是有没有出现带引号的字符串字面量。
+    assert.ok(/'--dump-config'/.test(source('lib/backend.js')));
+    assert.equal(/['"]--dump-config['"]/.test(source('main.js')), false, 'main 不得自己拼这个参数');
+    assert.equal(/spawn|execFile/.test(source('main.js').slice(
+      source('main.js').indexOf('async function reconcileDshConfig()'),
+      source('main.js').indexOf('function reloadMainWindowAfterRecovery()')
+    )), false, 'main 侧不起子进程，只调 backend 的探测');
+    // main 只是记一行日志，绝不因此阻断启动。
+    assert.match(source('main.js'), /不影响启动/);
+  });
+
   await test('内置工作台包进入 electron-builder 产物，且外壳三件套也在', async () => {
     const pkg = JSON.parse(source('package.json'));
     for (const entry of ['shell.html', 'shell.js', 'preload-shell.js', 'assets/**/*']) {
