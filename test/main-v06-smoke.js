@@ -10,9 +10,10 @@ const fs = require('fs');
 const path = require('path');
 const main = require('../main.js');
 
-// Windows checkout 会把 .js 换成 CRLF，所以所有跨行断言一律写 \r?\n，不写死 \n。
 const ROOT = path.join(__dirname, '..');
-const source = (name) => fs.readFileSync(path.join(ROOT, name), 'utf8');
+// Windows checkout 会把 .js 换成 CRLF。这里读进来就统一成 \n，
+// 后面所有结构断言与切片才不用各自去操心换行——上一版就是栽在 '\n}\n' 切不出来。
+const source = (name) => fs.readFileSync(path.join(ROOT, name), 'utf8').replace(/\r\n/g, '\n');
 
 let passed = 0;
 

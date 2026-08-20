@@ -270,14 +270,22 @@ async function main() {
     // 第二轮：字面路径干净、realpath 才落进受保护根。
     // 受保护根本身要用 realpath，否则 /var 与 /private/var 这类差异会让比较落空。
     fs.mkdirSync(path.join(tmp, '假装的dsh'), { recursive: true });
-    const realDsh = fs.realpathSync(path.join(tmp, '假装的dsh'));
+    // 必须用 realpathSync.native：Windows runner 的 tmpdir 是 8.3 短名，
+    // 只有 native 会展开成长名，而生产代码里的 nativeRealpathSync 走的正是 native。
+    // 用 JS 版取出来的根会和 native 解出来的候选路径对不上，第二轮就永远不会命中。
+    const realpathNative = fs.realpathSync.native || fs.realpathSync;
+    const lexicalDsh = path.join(tmp, '假装的dsh');
+    const realDsh = realpathNative(lexicalDsh);
+    // 生产代码里的 config.protectedWorkspaceRoots() 就是同时给出字面根与 realpath 根，
+    // 这里照抄这个口径，免得平台差异（8.3 短名、/var 与 /private/var）让断言落空。
+    const forbiddenDsh = realDsh === lexicalDsh ? [lexicalDsh] : [lexicalDsh, realDsh];
     const alias = path.join(tmp, '看起来无害');
     // Windows 上建目录符号链接要提权，junction 不用，而且它正是 Windows 侧的等价逃逸手段。
     fs.symlinkSync(realDsh, alias, process.platform === 'win32' ? 'junction' : undefined);
     // 先证明第一轮（字面）根本拦不住它——这正是为什么必须有第二轮。
-    assert.doesNotThrow(() => workspaces.assertWorkspaceNotForbidden(alias, { forbiddenRoots: [realDsh] }));
+    assert.doesNotThrow(() => workspaces.assertWorkspaceNotForbidden(alias, { forbiddenRoots: forbiddenDsh }));
     assert.throws(
-      () => workspaces.canonicalWorkspace(alias, { forbiddenRoots: [realDsh] }),
+      () => workspaces.canonicalWorkspace(alias, { forbiddenRoots: forbiddenDsh }),
       (error) => error.code === 'ERR_WORKSPACE_PROTECTED'
     );
   });
