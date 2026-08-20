@@ -293,6 +293,17 @@ async function main() {
   check('packaging: 公证前不运行 Gatekeeper spctl',
     notarizeStepOffset > 0
       && !releaseWorkflow.slice(0, notarizeStepOffset).includes('spctl -a'));
+  const checksumStepOffset = releaseWorkflow.indexOf(
+    '- name: Verify macOS artifact names and write checksums',
+    notarizeStepOffset
+  );
+  const notarizeStep = releaseWorkflow.slice(notarizeStepOffset, checksumStepOffset);
+  check('packaging: macOS 公证先提交后并行等待长队列',
+    checksumStepOffset > notarizeStepOffset
+      && notarizeStep.includes('--no-wait --output-format json')
+      && notarizeStep.includes('notarytool wait "$submission_id"')
+      && notarizeStep.includes('--timeout 2h --output-format json')
+      && !notarizeStep.includes('--wait --timeout 45m'));
 
   // PATH / which
   check('backend: fullPath 非空', backend.fullPath().split(path.delimiter).length > 3);

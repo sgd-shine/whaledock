@@ -148,20 +148,80 @@ jobs:
           key="$RUNNER_TEMP/notary.p8"
           printf '%s' "$MACOS_NOTARY_KEY" | base64 --decode > "$key"
           version="$(node -p "require('./package.json').version")"
-          for asset in \
+          assets=(
             "release/WhaleDock-${version}-arm64.dmg" \
             "release/WhaleDock-${version}-x64.dmg" \
             "release/WhaleDock-${version}-arm64-mac.zip" \
-            "release/WhaleDock-${version}-x64-mac.zip"; do
+            "release/WhaleDock-${version}-x64-mac.zip"
+          )
+          notary_dir="$RUNNER_TEMP/whaledock-notary"
+          submissions="$notary_dir/submissions.tsv"
+          mkdir -p "$notary_dir"
+          trap 'rm -f "$key"; rm -rf "$notary_dir"' EXIT
+
+          # Apple 偶尔会让单个提交排队超过 45 分钟。先上传全部成品，再并行等待，
+          # 避免四个串行 --wait 把正常的 In Progress 误判为发布失败。
+          index=0
+          for asset in "${assets[@]}"; do
+            index=$((index + 1))
+            submit_json="$notary_dir/submit-${index}.json"
             xcrun notarytool submit "$asset" \
               --key "$key" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER_ID" \
-              --wait --timeout 45m
-            # zip 不能 staple；ticket 由 Gatekeeper 联网校验。dmg 一律 staple 成离线可验。
+              --no-wait --output-format json > "$submit_json"
+            submission_id="$(node -e '
+              const fs = require("fs");
+              const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+              if (!data.id) throw new Error("notarytool submit did not return an id");
+              process.stdout.write(data.id);
+            ' "$submit_json")"
+            printf '%s\t%s\t%s\n' "$index" "$asset" "$submission_id" >> "$submissions"
+            echo "NOTARY_SUBMITTED asset=$(basename "$asset") id=$submission_id"
+          done
+
+          pids=()
+          while IFS=$'\t' read -r submission_index asset submission_id; do
+            (
+              wait_json="$notary_dir/wait-${submission_index}.json"
+              if ! xcrun notarytool wait "$submission_id" \
+                --key "$key" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER_ID" \
+                --timeout 2h --output-format json > "$wait_json"; then
+                echo "::error title=Notarization wait failed::$(basename "$asset") id=$submission_id"
+                exit 1
+              fi
+              node - "$wait_json" "$asset" "$submission_id" <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const data = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const asset = path.basename(process.argv[3]);
+          const id = process.argv[4];
+          if (data.status !== 'Accepted') {
+            throw new Error(`Notarization ${data.status || 'unknown'}: ${asset} id=${id}`);
+          }
+          console.log(`NOTARY_ACCEPTED asset=${asset} id=${id}`);
+          NODE
+            ) &
+            pids+=("$!")
+          done < "$submissions"
+
+          wait_failed=0
+          for pid in "${pids[@]}"; do
+            if ! wait "$pid"; then wait_failed=1; fi
+          done
+          if [[ "$wait_failed" -ne 0 ]]; then
+            echo "::error title=Notarization failed::至少一个 macOS 成品未通过 Apple 公证"
+            exit 1
+          fi
+
+          # zip 不能 staple；ticket 由 Gatekeeper 联网校验。dmg 一律 staple 成离线可验。
+          for asset in "${assets[@]}"; do
             case "$asset" in
               *.dmg) xcrun stapler staple "$asset"; xcrun stapler validate "$asset" ;;
             esac
           done
+
+          trap - EXIT
           rm -f "$key"
+          rm -rf "$notary_dir"
 
       - name: Verify macOS artifact names and write checksums
         shell: bash
