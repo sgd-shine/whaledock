@@ -345,8 +345,14 @@ async function main06() {
     }).package;
     const plan = workbenches.workspacePlan(pkg);
     // 第一轮：字面路径就落在受保护根里。
+    // 与生产口径一致：字面根与 native realpath 根都给出（Windows 的 8.3 短名会让两者不同）。
+    const realpathNative = fs.realpathSync.native || fs.realpathSync;
+    const forbidden = (value) => {
+      const real = realpathNative(value);
+      return real === value ? [value] : [value, real];
+    };
     assert.throws(
-      () => main.ensureWorkbenchWorkspace(plan, { documentsDir: tmp, forbiddenRoots: [fs.realpathSync(tmp)] }),
+      () => main.ensureWorkbenchWorkspace(plan, { documentsDir: tmp, forbiddenRoots: forbidden(tmp) }),
       (error) => error.code === 'ERR_WORKSPACE_PROTECTED'
     );
     assert.equal(fs.existsSync(path.join(tmp, '鲸坞工作台')), false, '拒绝时连父目录都不该建');
@@ -358,12 +364,12 @@ async function main06() {
     fs.mkdirSync(secret, { recursive: true });
     // Windows 上目录符号链接要提权，junction 不用，而且它正是 Windows 侧的等价逃逸手段。
     fs.symlinkSync(
-      fs.realpathSync(secret),
+      realpathNative(secret),
       path.join(docs, '鲸坞工作台'),
       process.platform === 'win32' ? 'junction' : undefined
     );
     assert.throws(
-      () => main.ensureWorkbenchWorkspace(plan, { documentsDir: docs, forbiddenRoots: [fs.realpathSync(secret)] }),
+      () => main.ensureWorkbenchWorkspace(plan, { documentsDir: docs, forbiddenRoots: forbidden(secret) }),
       (error) => error.code === 'ERR_WORKSPACE_PROTECTED'
     );
     assert.deepEqual(fs.readdirSync(secret), [], '被 realpath 拦下时目标目录里不许多出任何东西');

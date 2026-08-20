@@ -1478,7 +1478,9 @@ function ensureWorkbenchWorkspace(plan, options = {}) {
   workspaces.assertWorkspaceNotForbidden(documentsPath, { forbiddenRoots });
   let effectiveDocuments = documentsPath;
   try {
-    effectiveDocuments = fs.realpathSync(documentsPath);
+    // realpath 必须走 config 里那套 native 口径，跟 canonicalWorkspace 完全一致。
+    // Windows 上 8.3 短名只有 native 会展开；两边不一致时受保护根就可能对不上而漏过。
+    effectiveDocuments = config.normalizeRealPath(config.nativeRealpathSync(fs)(documentsPath));
     workspaces.assertWorkspaceNotForbidden(effectiveDocuments, { forbiddenRoots });
   } catch (error) {
     if (!error || error.code !== 'ENOENT') throw error;

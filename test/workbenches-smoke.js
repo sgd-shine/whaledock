@@ -461,7 +461,8 @@ async function main() {
   await test('Windows 大小写撞车：注入 platform 与假 fs 直测，同名只留先出现的那个', async () => {
     // 本机 macOS 的文件系统大小写不敏感，建不出 WorkbenchA 与 workbencha 两个目录，
     // 所以这里注入一个假 fs，让去重逻辑本身可被确定性地测到。
-    const root = '/fake/workbenches';
+    // 根要用平台原生分隔符：假 fs 用 path.normalize 查表，Windows 上 '/fake/x' 会变成 '\\fake\\x'。
+    const root = path.normalize('/fake/workbenches');
     const tree = {
       [root]: { type: 'dir', names: ['WorkbenchA', 'workbencha'] },
       [path.join(root, 'WorkbenchA')]: { type: 'dir', names: ['manifest.json'] },
