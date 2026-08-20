@@ -302,7 +302,9 @@ async function main() {
     checksumStepOffset > notarizeStepOffset
       && notarizeStep.includes('--no-wait --output-format json')
       && notarizeStep.includes('notarytool wait "$submission_id"')
-      && notarizeStep.includes('--timeout 2h --output-format json')
+      && notarizeStep.includes('--timeout 20m --output-format json')
+      && notarizeStep.includes('notarytool info "$submission_id"')
+      && notarizeStep.includes('notary_deadline_epoch')
       && !notarizeStep.includes('--wait --timeout 45m'));
 
   // PATH / which

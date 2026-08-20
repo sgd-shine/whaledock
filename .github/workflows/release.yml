@@ -181,24 +181,57 @@ jobs:
           pids=()
           while IFS=$'\t' read -r submission_index asset submission_id; do
             (
-              wait_json="$notary_dir/wait-${submission_index}.json"
-              if ! xcrun notarytool wait "$submission_id" \
-                --key "$key" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER_ID" \
-                --timeout 2h --output-format json > "$wait_json"; then
-                echo "::error title=Notarization wait failed::$(basename "$asset") id=$submission_id"
+              notary_status() {
+                node -e '
+                  const fs = require("fs");
+                  const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+                  process.stdout.write(data.status || "");
+                ' "$1"
+              }
+              notary_deadline_epoch=$(( $(date +%s) + 7200 ))
+              notary_attempt=0
+              notary_accepted=0
+              while [[ "$(date +%s)" -lt "$notary_deadline_epoch" ]]; do
+                notary_attempt=$((notary_attempt + 1))
+                wait_json="$notary_dir/wait-${submission_index}-${notary_attempt}.json"
+                if xcrun notarytool wait "$submission_id" \
+                  --key "$key" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER_ID" \
+                  --timeout 20m --output-format json > "$wait_json"; then
+                  status="$(notary_status "$wait_json")"
+                  if [[ "$status" == "Accepted" ]]; then
+                    notary_accepted=1
+                    break
+                  fi
+                  echo "::error title=Notarization rejected::$(basename "$asset") status=${status:-unknown} id=$submission_id"
+                  exit 1
+                else
+                  wait_rc=$?
+                fi
+
+                # notarytool 有时会在 Apple 仍处理时因单次 HTTP -1001 超时退出。
+                # 查询同一 submission id：已接受则结束，明确拒绝则失败，否则续查而不重传。
+                info_json="$notary_dir/info-${submission_index}-${notary_attempt}.json"
+                if xcrun notarytool info "$submission_id" \
+                  --key "$key" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER_ID" \
+                  --output-format json > "$info_json"; then
+                  status="$(notary_status "$info_json")"
+                  case "$status" in
+                    Accepted) notary_accepted=1; break ;;
+                    "In Progress") ;;
+                    *)
+                      echo "::error title=Notarization rejected::$(basename "$asset") status=${status:-unknown} id=$submission_id"
+                      exit 1
+                      ;;
+                  esac
+                fi
+                echo "::warning title=Notarization retry::$(basename "$asset") id=$submission_id wait_rc=$wait_rc attempt=$notary_attempt"
+                sleep 15
+              done
+              if [[ "$notary_accepted" -ne 1 ]]; then
+                echo "::error title=Notarization deadline exceeded::$(basename "$asset") id=$submission_id"
                 exit 1
               fi
-              node - "$wait_json" "$asset" "$submission_id" <<'NODE'
-          const fs = require('fs');
-          const path = require('path');
-          const data = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-          const asset = path.basename(process.argv[3]);
-          const id = process.argv[4];
-          if (data.status !== 'Accepted') {
-            throw new Error(`Notarization ${data.status || 'unknown'}: ${asset} id=${id}`);
-          }
-          console.log(`NOTARY_ACCEPTED asset=${asset} id=${id}`);
-          NODE
+              echo "NOTARY_ACCEPTED asset=$(basename "$asset") id=$submission_id"
             ) &
             pids+=("$!")
           done < "$submissions"
