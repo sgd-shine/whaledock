@@ -285,6 +285,15 @@ async function main() {
     macosCodesign.signingIdentity({}).identity === '-'
       && fs.existsSync(path.join(__dirname, '..', 'build', 'entitlements.mac.plist')));
 
+  const releaseWorkflow = fs.readFileSync(
+    path.join(__dirname, '..', '.github', 'workflows', 'release.yml'),
+    'utf8'
+  );
+  const notarizeStepOffset = releaseWorkflow.indexOf('- name: Notarize and staple macOS artifacts');
+  check('packaging: 公证前不运行 Gatekeeper spctl',
+    notarizeStepOffset > 0
+      && !releaseWorkflow.slice(0, notarizeStepOffset).includes('spctl -a'));
+
   // PATH / which
   check('backend: fullPath 非空', backend.fullPath().split(path.delimiter).length > 3);
   check('backend: which(node) 找得到', !!backend.which('node'), backend.which('node') || '');
