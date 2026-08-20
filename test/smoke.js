@@ -289,7 +289,9 @@ async function main() {
     path.join(__dirname, '..', '.github', 'workflows', 'release.yml'),
     'utf8'
   );
-  const notarizeStepOffset = releaseWorkflow.indexOf('- name: Notarize and staple macOS artifacts');
+  const submitStepOffset = releaseWorkflow.indexOf('- name: Submit macOS artifacts for notarization');
+  const preserveStepOffset = releaseWorkflow.indexOf('- name: Preserve signed macOS assets and notarization state');
+  const notarizeStepOffset = releaseWorkflow.indexOf('- name: Wait for notarization and staple macOS artifacts');
   check('packaging: 公证前不运行 Gatekeeper spctl',
     notarizeStepOffset > 0
       && !releaseWorkflow.slice(0, notarizeStepOffset).includes('spctl -a'));
@@ -297,15 +299,30 @@ async function main() {
     '- name: Verify macOS artifact names and write checksums',
     notarizeStepOffset
   );
+  const submitStep = releaseWorkflow.slice(submitStepOffset, preserveStepOffset);
   const notarizeStep = releaseWorkflow.slice(notarizeStepOffset, checksumStepOffset);
-  check('packaging: macOS 公证先提交后并行等待长队列',
+  const resumeWorkflow = fs.readFileSync(
+    path.join(__dirname, '..', '.github', 'workflows', 'resume-notarization.yml'),
+    'utf8'
+  );
+  check('packaging: macOS 公证提交后先保存成品与 submission id',
+    submitStepOffset > 0
+      && preserveStepOffset > submitStepOffset
+      && notarizeStepOffset > preserveStepOffset
+      && submitStep.includes('--no-wait --output-format json')
+      && submitStep.includes('release/notary-submissions.tsv')
+      && releaseWorkflow.slice(preserveStepOffset, notarizeStepOffset).includes('whaledock-mac-pending-${{ github.ref_name }}'));
+  check('packaging: macOS 公证并行等待且可按同一批 submission id 续跑',
     checksumStepOffset > notarizeStepOffset
-      && notarizeStep.includes('--no-wait --output-format json')
       && notarizeStep.includes('notarytool wait "$submission_id"')
-      && notarizeStep.includes('--timeout 20m --output-format json')
+      && notarizeStep.includes('--timeout 10m --output-format json')
       && notarizeStep.includes('notarytool info "$submission_id"')
       && notarizeStep.includes('notary_deadline_epoch')
-      && !notarizeStep.includes('--wait --timeout 45m'));
+      && !notarizeStep.includes('--wait --timeout 45m')
+      && resumeWorkflow.includes('whaledock-mac-pending-${{ inputs.release_tag }}')
+      && resumeWorkflow.includes('run-id: ${{ inputs.source_run_id }}')
+      && resumeWorkflow.includes('notarytool info "$submission_id"')
+      && !resumeWorkflow.includes('notarytool submit'));
 
   // PATH / which
   check('backend: fullPath 非空', backend.fullPath().split(path.delimiter).length > 3);

@@ -128,9 +128,9 @@ jobs:
           # A correctly signed but not-yet-notarized Developer ID app is expected to be rejected here.
           rm -rf "$workdir"
 
-      # 可选：配了 App Store Connect API Key 才执行。公证必须在算校验和之前完成，
-      # 因为 stapler 会改写 dmg 字节。没配 secrets 时整步跳过，产物仍是 ad-hoc 签名。
-      - name: Notarize and staple macOS artifacts (optional)
+      # 可选：配了 App Store Connect API Key 才执行。提交与等待分步，确保 Apple 长时间
+      # 排队时已签名成品和 submission id 会先作为私有 Actions artifact 保留下来。
+      - name: Submit macOS artifacts for notarization (optional)
         env:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
@@ -155,8 +155,9 @@ jobs:
             "release/WhaleDock-${version}-x64-mac.zip"
           )
           notary_dir="$RUNNER_TEMP/whaledock-notary"
-          submissions="$notary_dir/submissions.tsv"
+          submissions="release/notary-submissions.tsv"
           mkdir -p "$notary_dir"
+          rm -f "$submissions"
           trap 'rm -f "$key"; rm -rf "$notary_dir"' EXIT
 
           # Apple 偶尔会让单个提交排队超过 45 分钟。先上传全部成品，再并行等待，
@@ -178,6 +179,54 @@ jobs:
             echo "NOTARY_SUBMITTED asset=$(basename "$asset") id=$submission_id"
           done
 
+          trap - EXIT
+          rm -f "$key"
+          rm -rf "$notary_dir"
+
+      - name: Preserve signed macOS assets and notarization state
+        if: steps.mac-cert.outputs.identity == 'present'
+        uses: actions/upload-artifact@v4
+        with:
+          name: whaledock-mac-pending-${{ github.ref_name }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            release/WhaleDock-*.dmg
+            release/WhaleDock-*-mac.zip
+            release/notary-submissions.tsv
+
+      # 公证必须在算校验和之前完成，因为 stapler 会改写 dmg 字节。
+      # 本步若遇 Apple 长队列失败，上一私有 artifact 可由 Resume Notarization 原样续跑。
+      - name: Wait for notarization and staple macOS artifacts (optional)
+        env:
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        shell: bash
+        run: |
+          if [[ "${MACOS_SIGN_MODE:-ad-hoc}" != "developer-id" ]]; then
+            echo "未使用 Developer ID 签名，跳过公证。" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ -z "${MACOS_NOTARY_KEY:-}" || -z "${MACOS_NOTARY_KEY_ID:-}" || -z "${MACOS_NOTARY_ISSUER_ID:-}" ]]; then
+            echo "::error title=Notarization missing::已用 Developer ID 签名但未配置公证密钥"
+            exit 1
+          fi
+          key="$RUNNER_TEMP/notary.p8"
+          printf '%s' "$MACOS_NOTARY_KEY" | base64 --decode > "$key"
+          version="$(node -p "require('./package.json').version")"
+          assets=(
+            "release/WhaleDock-${version}-arm64.dmg" \
+            "release/WhaleDock-${version}-x64.dmg" \
+            "release/WhaleDock-${version}-arm64-mac.zip" \
+            "release/WhaleDock-${version}-x64-mac.zip"
+          )
+          notary_dir="$RUNNER_TEMP/whaledock-notary"
+          submissions="release/notary-submissions.tsv"
+          mkdir -p "$notary_dir"
+          test -s "$submissions"
+          trap 'rm -f "$key"; rm -rf "$notary_dir"' EXIT
+
           pids=()
           while IFS=$'\t' read -r submission_index asset submission_id; do
             (
@@ -188,7 +237,7 @@ jobs:
                   process.stdout.write(data.status || "");
                 ' "$1"
               }
-              notary_deadline_epoch=$(( $(date +%s) + 7200 ))
+              notary_deadline_epoch=$(( $(date +%s) + 1200 ))
               notary_attempt=0
               notary_accepted=0
               while [[ "$(date +%s)" -lt "$notary_deadline_epoch" ]]; do
@@ -196,7 +245,7 @@ jobs:
                 wait_json="$notary_dir/wait-${submission_index}-${notary_attempt}.json"
                 if xcrun notarytool wait "$submission_id" \
                   --key "$key" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER_ID" \
-                  --timeout 20m --output-format json > "$wait_json"; then
+                  --timeout 10m --output-format json > "$wait_json"; then
                   status="$(notary_status "$wait_json")"
                   if [[ "$status" == "Accepted" ]]; then
                     notary_accepted=1
@@ -419,15 +468,11 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
-            ## macOS 首次打开（必读）
+            ## macOS 安装
 
-            - macOS 构建带 **ad-hoc 代码签名**，但**没有 Apple 公证**。首次打开会提示“无法验证开发者”。
-            - 处理方式：把 App 拖进「应用程序」后双击 → 出现提示点「完成」→ 打开
-              **系统设置 → 隐私与安全性**，在底部点 **“仍要打开”** → 再次确认。之后可正常双击。
-            - macOS 15 起，**右键「打开」已不再能绕过 Gatekeeper**，请按上面的系统设置路径操作。
-            - 如果看到「文件已损坏，应移到废纸篓」，说明下载到的是 **v0.5.0 或更早的未签名版本**，
-              请改用本 Release 的安装包；或在终端执行一次：
-              `xattr -dr com.apple.quarantine /Applications/WhaleDock.app`
+            - macOS 安装包已使用 **Developer ID Application** 正式签名，并通过 Apple 公证；DMG 已附加离线公证票据。
+            - 下载与芯片对应的 DMG，把鲸坞拖入 **Applications（应用程序）** 后即可正常打开。
+            - 如果下载或安装异常，请先按本 Release 的 `SHA256SUMS-mac.txt` 核对文件，勿关闭 Gatekeeper 或移除系统隔离属性。
 
             ## 重要平台边界
 

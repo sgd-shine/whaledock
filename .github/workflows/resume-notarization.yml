@@ -1,0 +1,238 @@
+# 从 Release run 保存的私有 macOS artifact 续查同一批 Apple submission id。
+# 不重新构建、不重新签名、不重新提交；接受后 staple、生成最终校验和并走同一精确 G1 审批门。
+name: Resume Notarization
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Release workflow run ID containing pending macOS and Windows artifacts"
+        required: true
+        type: string
+      release_tag:
+        description: "Exact release tag, for example v0.6.0"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  finalize-mac:
+    runs-on: macos-15
+    timeout-minutes: 340
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+          cache: npm
+
+      - name: Download preserved signed macOS assets
+        uses: actions/download-artifact@v4
+        with:
+          name: whaledock-mac-pending-${{ inputs.release_tag }}
+          path: release
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source_run_id }}
+
+      - name: Validate preserved release and notarization manifest
+        shell: bash
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error title=Invalid release tag::$RELEASE_TAG"
+            exit 1
+          fi
+          version="$RELEASE_TAG"; version="${version#v}"
+          assets=(
+            "release/WhaleDock-${version}-arm64.dmg"
+            "release/WhaleDock-${version}-x64.dmg"
+            "release/WhaleDock-${version}-arm64-mac.zip"
+            "release/WhaleDock-${version}-x64-mac.zip"
+          )
+          for asset in "${assets[@]}"; do test -f "$asset"; done
+          test -s release/notary-submissions.tsv
+          count=0
+          while IFS=$'\t' read -r index asset submission_id; do
+            count=$((count + 1))
+            [[ "$index" == "$count" ]]
+            [[ "$asset" == "${assets[$((count - 1))]}" ]]
+            [[ "$submission_id" =~ ^[0-9a-fA-F-]{36}$ ]]
+          done < release/notary-submissions.tsv
+          [[ "$count" -eq 4 ]]
+
+      - name: Wait for the existing Apple submissions and staple
+        env:
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        shell: bash
+        run: |
+          if [[ -z "${MACOS_NOTARY_KEY:-}" || -z "${MACOS_NOTARY_KEY_ID:-}" || -z "${MACOS_NOTARY_ISSUER_ID:-}" ]]; then
+            echo "::error title=Notarization credentials missing::GitHub notarization secrets are incomplete"
+            exit 1
+          fi
+          key="$RUNNER_TEMP/notary-resume.p8"
+          state_dir="$RUNNER_TEMP/whaledock-notary-resume"
+          mkdir -p "$state_dir"
+          printf '%s' "$MACOS_NOTARY_KEY" | base64 --decode > "$key"
+          trap 'rm -f "$key"; rm -rf "$state_dir"' EXIT
+          deadline=$(( $(date +%s) + 18000 ))
+
+          while true; do
+            all_accepted=1
+            while IFS=$'\t' read -r index asset submission_id; do
+              if [[ -f "$state_dir/accepted-${index}" ]]; then continue; fi
+              all_accepted=0
+              info_json="$state_dir/info-${index}.json"
+              if ! xcrun notarytool info "$submission_id" \
+                --key "$key" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER_ID" \
+                --output-format json > "$info_json"; then
+                echo "::warning title=Notarization status retry::$(basename "$asset") id=$submission_id"
+                continue
+              fi
+              status="$(node -e '
+                const fs = require("fs");
+                const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+                process.stdout.write(data.status || "unknown");
+              ' "$info_json")"
+              echo "NOTARY_STATUS asset=$(basename "$asset") id=$submission_id status=$status"
+              case "$status" in
+                Accepted) touch "$state_dir/accepted-${index}" ;;
+                "In Progress") ;;
+                *)
+                  echo "::error title=Notarization rejected::$(basename "$asset") status=$status id=$submission_id"
+                  exit 1
+                  ;;
+              esac
+            done < release/notary-submissions.tsv
+
+            accepted_count="$(find "$state_dir" -name 'accepted-*' -type f | wc -l | tr -d ' ')"
+            if [[ "$all_accepted" -eq 1 || "$accepted_count" -eq 4 ]]; then break; fi
+            if [[ "$(date +%s)" -ge "$deadline" ]]; then
+              echo "::error title=Notarization still in progress::Apple did not finish within this five-hour continuation window"
+              exit 1
+            fi
+            sleep 60
+          done
+
+          version="$RELEASE_TAG"; version="${version#v}"
+          for dmg in "release/WhaleDock-${version}-arm64.dmg" "release/WhaleDock-${version}-x64.dmg"; do
+            xcrun stapler staple "$dmg"
+            xcrun stapler validate "$dmg"
+            spctl --assess --type install --verbose=2 "$dmg"
+          done
+          trap - EXIT
+          rm -f "$key"
+          rm -rf "$state_dir"
+
+      - name: Verify final macOS assets and write checksums
+        shell: bash
+        run: |
+          version="$RELEASE_TAG"; version="${version#v}"
+          cd release
+          assets=(
+            "WhaleDock-${version}-arm64.dmg"
+            "WhaleDock-${version}-arm64-mac.zip"
+            "WhaleDock-${version}-x64.dmg"
+            "WhaleDock-${version}-x64-mac.zip"
+          )
+          shasum -a 256 "${assets[@]}" > SHA256SUMS-mac.txt
+          node - "${assets[@]}" <<'NODE'
+          const fs = require('fs');
+          const update = require('../lib/update');
+          const sums = fs.readFileSync('SHA256SUMS-mac.txt', 'utf8');
+          for (const asset of process.argv.slice(2)) update.checksumForAsset(sums, asset);
+          NODE
+
+      - name: Upload finalized macOS release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: whaledock-mac-${{ inputs.release_tag }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            release/WhaleDock-*.dmg
+            release/WhaleDock-*-mac.zip
+            release/SHA256SUMS-mac.txt
+
+  publish-release:
+    needs: finalize-mac
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Download finalized macOS release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: whaledock-mac-${{ inputs.release_tag }}
+          path: release-assets
+
+      - name: Download Windows release assets from source run
+        uses: actions/download-artifact@v4
+        with:
+          name: whaledock-win-${{ inputs.release_tag }}
+          path: release-assets
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source_run_id }}
+
+      - name: Verify release set and enforce public release approval
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          WHALEDOCK_BUNDLED_COMPLIANCE_APPROVAL: ${{ vars.WHALEDOCK_BUNDLED_COMPLIANCE_APPROVAL }}
+        run: |
+          cd release-assets
+          sed 's/\r$//' SHA256SUMS-mac.txt SHA256SUMS-win.txt |
+            sed '/^[[:space:]]*$/d' |
+            LC_ALL=C sort > SHA256SUMS-all.txt
+          sha256sum --check SHA256SUMS-all.txt
+
+          release_set_sha="$(sha256sum SHA256SUMS-all.txt | awk '{print $1}')"
+          expected="release:${RELEASE_TAG}:sha256:${release_set_sha}"
+          if [[ "${WHALEDOCK_BUNDLED_COMPLIANCE_APPROVAL:-}" != "$expected" ]]; then
+            {
+              echo "## 公开 Release 已被审批门阻止"
+              echo
+              echo "公证成品与 Windows 成品已经回读，等待本次精确产物集审批。"
+              echo
+              echo "确认无 S1 且 G1、平台 inventory 与成品材料闭环后，将仓库变量临时设为："
+              echo
+              printf '    %s\n' "$expected"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=Public Release blocked::G1/compliance approval does not match this exact release set"
+            exit 1
+          fi
+
+      - name: Publish one GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          files: |
+            release-assets/WhaleDock-*.dmg
+            release-assets/WhaleDock-*-mac.zip
+            release-assets/WhaleDock-Setup-*.exe
+            release-assets/WhaleDock-*-portable.exe
+            release-assets/SHA256SUMS-mac.txt
+            release-assets/SHA256SUMS-win.txt
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            ## macOS 安装
+
+            - macOS 安装包已使用 **Developer ID Application** 正式签名，并通过 Apple 公证；DMG 已附加离线公证票据。
+            - 下载与芯片对应的 DMG，把鲸坞拖入 **Applications（应用程序）** 后即可正常打开。
+            - 如果下载或安装异常，请先按本 Release 的 `SHA256SUMS-mac.txt` 核对文件，勿关闭 Gatekeeper 或移除系统隔离属性。
+
+            ## 重要平台边界
+
+            - Windows x64 构建仍未签名，且为实验性支持，尚未完成 Windows 真机验证；SmartScreen 拦截时可选择“更多信息 → 仍要运行”。遇到问题请提交 issue，并附鲸坞日志与完整资产名。
+            - Intel x64 仅在 Apple Silicon + Rosetta 环境抽查，尚未完成 Intel Mac 真机验证。
+          prerelease: ${{ contains(inputs.release_tag, '-') }}
