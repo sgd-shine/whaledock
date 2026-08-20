@@ -1,0 +1,61 @@
+# 只查询既有 Apple 公证提交，不上传文件、不创建 Release。
+# 用于 Apple 长时间排队时确认真实状态，避免重复构建和重复提交。
+name: Notary Status
+
+on:
+  workflow_dispatch:
+    inputs:
+      submission_ids:
+        description: "Comma-separated Apple notarization submission IDs"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: macos-15
+    steps:
+      - name: Query existing Apple notarization submissions
+        env:
+          SUBMISSION_IDS: ${{ inputs.submission_ids }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        shell: bash
+        run: |
+          if [[ -z "${MACOS_NOTARY_KEY:-}" || -z "${MACOS_NOTARY_KEY_ID:-}" || -z "${MACOS_NOTARY_ISSUER_ID:-}" ]]; then
+            echo "::error title=Notarization credentials missing::GitHub notarization secrets are incomplete"
+            exit 1
+          fi
+
+          key="$RUNNER_TEMP/notary-status.p8"
+          ids="$RUNNER_TEMP/notary-submission-ids.txt"
+          printf '%s' "$MACOS_NOTARY_KEY" | base64 --decode > "$key"
+          printf '%s\n' "$SUBMISSION_IDS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;/^$/d' > "$ids"
+          trap 'rm -f "$key" "$ids" "$RUNNER_TEMP"/notary-info-*.json' EXIT
+
+          count=0
+          while IFS= read -r submission_id; do
+            if [[ ! "$submission_id" =~ ^[0-9a-fA-F-]{36}$ ]]; then
+              echo "::error title=Invalid submission ID::$submission_id"
+              exit 1
+            fi
+            count=$((count + 1))
+            info_json="$RUNNER_TEMP/notary-info-${count}.json"
+            xcrun notarytool info "$submission_id" \
+              --key "$key" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER_ID" \
+              --output-format json > "$info_json"
+            status="$(node -e '
+              const fs = require("fs");
+              const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+              process.stdout.write(data.status || "unknown");
+            ' "$info_json")"
+            echo "NOTARY_STATUS id=$submission_id status=$status"
+          done < "$ids"
+
+          if [[ "$count" -eq 0 ]]; then
+            echo "::error title=No submission IDs::At least one submission ID is required"
+            exit 1
+          fi
