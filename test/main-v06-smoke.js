@@ -295,6 +295,130 @@ async function main06() {
     assert.equal(Object.prototype.hasOwnProperty.call(detail.actions[0], 'prompt'), false);
   });
 
+  await test('重工作台建目录：只新建不覆盖，用户改过的文件一个字都不动', async () => {
+    const os = require('os');
+    const workbenches = require('../lib/workbenches');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-heavy-'));
+    const pkg = workbenches.readWorkbenchPackage({
+      dir: path.join(ROOT, 'assets', 'workbenches', '短视频创作台'),
+      id: '短视频创作台',
+      source: 'builtin'
+    }).package;
+    const plan = workbenches.workspacePlan(pkg);
+
+    // 先手工建好一个文件夹并写一份用户自己改过的说明，模拟「第二次启用」。
+    const mine = path.join(tmp, '鲸坞工作台', plan.root, '01_选题库');
+    fs.mkdirSync(mine, { recursive: true });
+    fs.writeFileSync(path.join(mine, '说明.md'), '我自己改过的说明，不许动。', 'utf8');
+
+    const first = main.ensureWorkbenchWorkspace(plan, { documentsDir: tmp, forbiddenRoots: [] });
+    assert.equal(
+      fs.readFileSync(path.join(mine, '说明.md'), 'utf8'),
+      '我自己改过的说明，不许动。',
+      '已存在的说明必须一个字都不动'
+    );
+    assert.ok(first.kept.includes('01_选题库/说明.md'));
+    // 其余文件夹与预置示例照建。
+    for (const folder of plan.folders) {
+      assert.equal(fs.existsSync(path.join(first.path, folder.path)), true, folder.path);
+    }
+    assert.ok(first.created.some((item) => item.startsWith('01_选题库/示例-')));
+    assert.equal(first.created.length, 6, '说明.md ×3 + 示例 ×3');
+
+    // 再跑一次：全部已存在，一个新文件都不该产生。
+    const second = main.ensureWorkbenchWorkspace(plan, { documentsDir: tmp, forbiddenRoots: [] });
+    assert.deepEqual(second.created, [], '第二次启用不该再建任何文件');
+    assert.equal(second.kept.length, 7);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  await test('重工作台落点被受保护目录拦下时，连一个文件夹都不建', async () => {
+    const os = require('os');
+    const workbenches = require('../lib/workbenches');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-forbid-'));
+    const pkg = workbenches.readWorkbenchPackage({
+      dir: path.join(ROOT, 'assets', 'workbenches', '短视频创作台'),
+      id: '短视频创作台',
+      source: 'builtin'
+    }).package;
+    const plan = workbenches.workspacePlan(pkg);
+    // 第一轮：字面路径就落在受保护根里。
+    assert.throws(
+      () => main.ensureWorkbenchWorkspace(plan, { documentsDir: tmp, forbiddenRoots: [fs.realpathSync(tmp)] }),
+      (error) => error.code === 'ERR_WORKSPACE_PROTECTED'
+    );
+    assert.equal(fs.existsSync(path.join(tmp, '鲸坞工作台')), false, '拒绝时连父目录都不该建');
+
+    // 第二轮：字面路径干净，realpath 才落进受保护根。
+    const docs = path.join(tmp, 'docs');
+    const secret = path.join(tmp, 'secret');
+    fs.mkdirSync(docs, { recursive: true });
+    fs.mkdirSync(secret, { recursive: true });
+    fs.symlinkSync(fs.realpathSync(secret), path.join(docs, '鲸坞工作台'));
+    assert.throws(
+      () => main.ensureWorkbenchWorkspace(plan, { documentsDir: docs, forbiddenRoots: [fs.realpathSync(secret)] }),
+      (error) => error.code === 'ERR_WORKSPACE_PROTECTED'
+    );
+    assert.deepEqual(fs.readdirSync(secret), [], '被 realpath 拦下时目标目录里不许多出任何东西');
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  await test('建目录这条路径上没有任何删除用户文件的代码', async () => {
+    const value = source('main.js');
+    const block = value.slice(
+      value.indexOf('function ensureWorkbenchWorkspace('),
+      value.indexOf('// A-3 的确认卡')
+    );
+    assert.ok(block.length > 600);
+    assert.equal(/\brmSync\b|\bunlinkSync\b|\brmdirSync\b|\brm\s*\(|\btrashItem\b/.test(block), false);
+    // 写文件一律 wx：同名存在直接 EEXIST，不覆盖。
+    assert.match(block, /flag: 'wx'/);
+    assert.match(block, /error\.code === 'EEXIST'/);
+    // 字面与 realpath 两轮都在。
+    assert.ok((block.match(/assertWorkspaceNotForbidden/g) || []).length >= 4);
+    assert.ok((block.match(/canonicalWorkspace/g) || []).length >= 3);
+  });
+
+  await test('重工作台切换复用 v0.4 事务，且提交后才写 workbenchId', async () => {
+    const value = source('main.js');
+    const block = value.slice(
+      value.indexOf('async function switchToHeavyWorkbench('),
+      value.indexOf('function heavyWorkbenchSwitchMessage(')
+    );
+    // 事务一行不新写：直接调用既有的 switchWorkspace。
+    assert.match(block, /await switchWorkspace\(ensured\.path\)/);
+    assert.equal(/createWorkspaceSwitchCoordinator|journal|writePrepared/.test(block), false);
+    // 顺序：先建目录 → 再切工作区 → 事务成功后才落 workbenchId。
+    const ensureIndex = block.indexOf('ensureWorkbenchWorkspace(plan');
+    const switchIndex = block.indexOf('await switchWorkspace(');
+    const configIndex = block.indexOf("config.set({ workbenchId: target.id");
+    assert.ok(ensureIndex > -1 && switchIndex > ensureIndex && configIndex > switchIndex);
+    // 切换期间界面必须显示在忙。
+    assert.match(block, /pushShellState\(\{ busy: true/);
+    // 确认卡只问一次。
+    assert.match(block, /workbenchHeavyConfirmed\.has\(target\.id\)/);
+  });
+
+  await test('外部 attach 拒绝切换时有专门的解释文案', async () => {
+    const target = { id: 'user:x', name: '短视频创作台' };
+    const external = main.heavyWorkbenchSwitchMessage({ code: 'ERR_WORKSPACE_EXTERNAL_ATTACH' }, target);
+    assert.match(external, /外部 dsh/);
+    assert.match(external, /不会去停别人的服务/);
+    assert.match(external, /短视频创作台/);
+    assert.match(
+      main.heavyWorkbenchSwitchMessage({ code: 'ERR_WORKSPACE_BUDGET_PAUSED' }, target),
+      /今日预算暂停中/
+    );
+    assert.match(
+      main.heavyWorkbenchSwitchMessage({ code: 'ERR_WORKSPACE_RUNTIME_UNKNOWN' }, target),
+      /fail-closed/
+    );
+    assert.match(
+      main.heavyWorkbenchSwitchMessage({ rolledBack: true }, target),
+      /已经回滚到原来的工作区/
+    );
+  });
+
   await test('内置工作台包进入 electron-builder 产物，且外壳三件套也在', async () => {
     const pkg = JSON.parse(source('package.json'));
     for (const entry of ['shell.html', 'shell.js', 'preload-shell.js', 'assets/**/*']) {

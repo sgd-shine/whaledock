@@ -22,7 +22,7 @@ const confirmOk = el('confirm-ok');
 const dropBox = el('drop');
 const toast = el('toast');
 
-let state = { current: null, packages: [], skipped: [], defaultLabel: '默认工作台' };
+let state = { current: null, packages: [], skipped: [], defaultLabel: '默认工作台', busy: false };
 let confirmHandler = null;
 let toastTimer = null;
 
@@ -51,7 +51,10 @@ function showToast(message, ms = 6000) {
 
 function renderRail() {
   const current = state.current;
-  railName.textContent = current ? current.name : state.defaultLabel;
+  // 重工作台切换要停后端、建目录、再重启，真机上几秒到十几秒；
+  // 这段时间左栏必须明确显示在忙，而不是看起来点了没反应。
+  railName.textContent = state.busy ? '正在切换…' : (current ? current.name : state.defaultLabel);
+  el('switcher-button').disabled = state.busy === true;
 
   clear(actionsBox);
   const actions = current && Array.isArray(current.actions) ? current.actions : [];
@@ -61,6 +64,7 @@ function renderRail() {
     button.textContent = action.label;
     if (action.hint) button.title = action.hint;
     button.dataset.actionId = action.id;
+    if (state.busy) button.disabled = true;
     button.addEventListener('click', () => {
       if (action.confirm) {
         askConfirm('要发出这个动作吗？', [
@@ -88,7 +92,10 @@ function submitAction(button, action) {
       return;
     }
     if (result.state === 'accepted') {
-      actionNote.textContent = `已发出「${action.label}」，去右边的会话里看结果。`;
+      // 说清楚发去了哪个会话：dsh 的会话不一定跟当前工作区是同一个目录，
+      // 发错了会话时 agent 会老实说找不到文件夹，但用户得知道去哪看。
+      actionNote.textContent = `已发出「${action.label}」→ ${result.target || '当前会话'}。`
+        + '\n如果 agent 说找不到文件夹，说明这个会话不在本工作台的工作区里，换一个会话再点。';
       return;
     }
     if (result.state === 'rejected') {
@@ -186,7 +193,8 @@ function applyState(next) {
     current: next.current || null,
     packages: Array.isArray(next.packages) ? next.packages : [],
     skipped: Array.isArray(next.skipped) ? next.skipped : [],
-    defaultLabel: next.defaultLabel || '默认工作台'
+    defaultLabel: next.defaultLabel || '默认工作台',
+    busy: next.busy === true
   };
   renderRail();
   if (switcherLayer.classList.contains('open')) renderSwitcher();

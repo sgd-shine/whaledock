@@ -1373,6 +1373,8 @@ const WORKBENCH_INSTALL_LIMITS = Object.freeze({
 let workbenchCache = null;
 // 引导卡只在首次启用时弹一次；之后在「关于这个工作台」里能再看。
 const workbenchOnboardingSeen = new Set();
+// 重工作台的确认卡也只问一次：之后再切回这个工作台，一下就过去，什么都不弹。
+const workbenchHeavyConfirmed = new Set();
 
 function workbenchRoots() {
   const roots = [{ dir: path.join(__dirname, 'assets', 'workbenches'), source: 'builtin' }];
@@ -1428,6 +1430,7 @@ function shellStateSnapshot(extra = {}) {
     defaultLabel: WORKBENCH_DEFAULT_LABEL,
     packages: listed.packages.map(workbenchRow),
     skipped: listed.skipped.map((item) => ({ id: String(item.id).slice(0, 120), reason: item.reason })),
+    busy: false,
     current: active ? {
       ...workbenchRow(active),
       actions: active.actions.map((item) => ({
@@ -1460,11 +1463,94 @@ function refreshWorkbenchSurfaces(extra = {}) {
   pushShellState(extra);
 }
 
-function heavyWorkbenchNotReady() {
-  return {
-    kind: 'error',
-    text: '这是一个「重工作台」，它要在硬盘上建文件夹并重启后端。这条路还没接通，先用轻工作台。'
+// 重工作台的落点：<文档目录>/鲸坞工作台/<root>/，跟 v0.4 的默认工作区同一个父目录。
+// 三条铁律在这里兑现：
+// 1) 只新建不覆盖——文件夹存在就跳过，文件已存在就一个字都不动；
+// 2) 全函数没有任何删除用户文件的代码路径；
+// 3) 落点过 assertWorkspaceNotForbidden + canonicalWorkspace，字面与 realpath 两轮，
+//    任何一轮落进 ~/.dsh 及其后代/链接目标一律拒绝，而且**拒绝时连文件夹都不建**。
+function ensureWorkbenchWorkspace(plan, options = {}) {
+  const forbiddenRoots = options.forbiddenRoots || config.protectedWorkspaceRoots();
+  const documentsPath = path.resolve(
+    options.documentsDir === undefined ? app.getPath('documents') : options.documentsDir
+  );
+  workspaces.assertWorkspaceNotForbidden(documentsPath, { forbiddenRoots });
+  let effectiveDocuments = documentsPath;
+  try {
+    effectiveDocuments = fs.realpathSync(documentsPath);
+    workspaces.assertWorkspaceNotForbidden(effectiveDocuments, { forbiddenRoots });
+  } catch (error) {
+    if (!error || error.code !== 'ENOENT') throw error;
+  }
+
+  const parent = path.join(effectiveDocuments, '鲸坞工作台');
+  workspaces.assertWorkspaceNotForbidden(parent, { forbiddenRoots });
+  fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
+  const canonicalParent = workspaces.canonicalWorkspace(parent, { forbiddenRoots });
+
+  const root = path.join(canonicalParent.path, plan.root);
+  workspaces.assertWorkspaceNotForbidden(root, { forbiddenRoots });
+  // 先把每个预定落点都做一轮字面校验，全过了才动手建，避免建到一半才发现越界。
+  for (const folder of plan.folders) {
+    workspaces.assertWorkspaceNotForbidden(path.join(root, ...folder.segments), { forbiddenRoots });
+  }
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  const canonicalRoot = workspaces.canonicalWorkspace(root, { forbiddenRoots });
+
+  const created = [];
+  const kept = [];
+  for (const folder of plan.folders) {
+    const dir = path.join(canonicalRoot.path, ...folder.segments);
+    workspaces.assertWorkspaceNotForbidden(dir, { forbiddenRoots });
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const canonicalDir = workspaces.canonicalWorkspace(dir, { forbiddenRoots });
+    for (const file of folder.files) {
+      const target = path.join(canonicalDir.path, file.name);
+      try {
+        // flag 'wx'：同名文件已存在就直接 EEXIST，绝不覆盖用户改过的内容。
+        fs.writeFileSync(target, file.content, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+        created.push(`${folder.path}/${file.name}`);
+      } catch (error) {
+        if (error && error.code === 'EEXIST') { kept.push(`${folder.path}/${file.name}`); continue; }
+        throw error;
+      }
+    }
+  }
+  return { path: canonicalRoot.path, created, kept };
+}
+
+// A-3 的确认卡：只在第一次启用某个重工作台时问一次，之后再切什么都不弹。
+async function confirmHeavyWorkbench(pkg, plan, targetLabel) {
+  const folders = plan.folders.map((item) => item.path).join('　');
+  const changes = ['左侧 ' + pkg.actions.length + ' 个按钮'];
+  if (pkg.theme) changes.unshift('配色');
+  if (pkg.pet) changes.push('桌面宠物');
+  const detail = [
+    `作者：${pkg.author || '未署名'}　许可证：${pkg.license || '未声明许可证'}　版本：${pkg.version || '未标注'}`,
+    '',
+    '它会在这里建文件夹（已存在的不动、不覆盖任何文件）：',
+    `　${targetLabel}`,
+    `　${folders}`,
+    '',
+    `它会换掉：${changes.join('、')}`,
+    `它推荐了 ${Array.isArray(pkg.skills) ? pkg.skills.length : 0} 个 skill`,
+    '',
+    '⚠ 启用需要重启后端，大约十几秒'
+  ].join('\n');
+  const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  const options = {
+    type: 'question',
+    message: `启用「${pkg.name}」？（只问这一次）`,
+    detail,
+    buttons: ['取消', '启用'],
+    defaultId: 1,
+    cancelId: 0,
+    noLink: true
   };
+  const result = parent
+    ? await dialog.showMessageBox(parent, options)
+    : await dialog.showMessageBox(options);
+  return result.response === 1;
 }
 
 async function applyWorkbench(workbenchId, options = {}) {
@@ -1484,7 +1570,7 @@ async function applyWorkbench(workbenchId, options = {}) {
   // 重工作台要停后端、改配置、建目录、重启后端，全程复用 v0.4 的工作区串行事务。
   if (target && target.heavy) {
     const heavy = await switchToHeavyWorkbench(target, previous, options);
-    if (heavy.kind !== 'ok') return heavy;
+    if (heavy.kind !== 'ok') { refreshWorkbenchSurfaces(); return heavy; }
   } else {
     config.set({ workbenchId: wanted, lastWorkbenchId: previous });
   }
@@ -1495,9 +1581,63 @@ async function applyWorkbench(workbenchId, options = {}) {
   return { kind: 'ok' };
 }
 
-// P0-3 之前先明确拒绝，不做半启用。
-async function switchToHeavyWorkbench(_target, _previous, _options) {
-  return heavyWorkbenchNotReady();
+// 重工作台：建目录 → 走 v0.4 工作区串行事务 → 事务提交后才写 workbenchId。
+// 事务代码一行都不新写；失败由 coordinator 自动回滚，而 workbenchId 因为写在最后，
+// 回滚后配置里也不会留下一个「启用了但其实没切成」的工作台。
+async function switchToHeavyWorkbench(target, previous, options = {}) {
+  const plan = workbenches.workspacePlan(target);
+  if (!plan) return { kind: 'error', text: '这个工作台的文件夹结构不可用，没有切换。' };
+
+  const targetLabel = path.join('文稿', '鲸坞工作台', plan.root);
+  if (!workbenchHeavyConfirmed.has(target.id) && options.confirm !== false) {
+    const agreed = await confirmHeavyWorkbench(target, plan, targetLabel);
+    if (!agreed) return { kind: 'cancelled' };
+    workbenchHeavyConfirmed.add(target.id);
+  }
+
+  let ensured;
+  try {
+    ensured = ensureWorkbenchWorkspace(plan);
+  } catch (error) {
+    if (error && error.code === 'ERR_WORKSPACE_PROTECTED') {
+      log.line('app', `工作台 ${target.id} 的落点被受保护目录拦下，没有建任何文件夹`);
+      return { kind: 'error', text: '这个工作台要建的文件夹落在鲸坞禁止使用的目录里，一个文件夹都没有建。' };
+    }
+    log.line('app', `工作台建目录失败：${error && error.message || 'unknown'}`);
+    return { kind: 'error', text: '建文件夹时出错，没有切换。' };
+  }
+  log.line('app', `工作台 ${target.id} 工作区就绪：新建 ${ensured.created.length} 个文件，保留 ${ensured.kept.length} 个已存在的`);
+
+  // 切换期间界面全程有明确状态：真机上这一步是几秒到十几秒。
+  pushShellState({ busy: true, notice: '正在切换工作台：停后端 → 建文件夹 → 重启后端，大约十几秒…' });
+  try {
+    await switchWorkspace(ensured.path);
+  } catch (error) {
+    pushShellState({ busy: false });
+    return { kind: 'error', text: heavyWorkbenchSwitchMessage(error, target) };
+  }
+  // 事务提交之后才认这个工作台。
+  config.set({ workbenchId: target.id, lastWorkbenchId: previous });
+  return { kind: 'ok' };
+}
+
+// 外部 attach 等拒绝场景要有专门解释，不能只丢一句「切换失败」。
+function heavyWorkbenchSwitchMessage(error, target) {
+  const code = error && error.code;
+  if (code === 'ERR_WORKSPACE_EXTERNAL_ATTACH') {
+    return `「${target.name}」要用自己的文件夹，这需要重启后端；但现在接的是你自己开的外部 dsh，`
+      + '鲸坞不会去停别人的服务，所以没有切换。想用它就先退出那个外部 dsh，再切一次。';
+  }
+  if (code === 'ERR_WORKSPACE_BUDGET_PAUSED') {
+    return '今日预算暂停中，没有切换。先在任务看板确认「今日继续」。';
+  }
+  if (code === 'ERR_WORKSPACE_RUNTIME_UNKNOWN') {
+    return '当前后端归属无法证明，已按 fail-closed 拒绝切换，工作区没有任何改动。';
+  }
+  if (error && error.rolledBack === true) {
+    return '切换没完成，已经回滚到原来的工作区。文件夹已经建好了，可以稍后再切一次。';
+  }
+  return '切换未完整提交，鲸坞已尽力恢复原工作区。请到设置里打开日志看一眼。';
 }
 
 // 按 ⌘⇧1..9 的顺序取第 index 个工作台（1 起）；⌘⇧0 回到上一个用过的。
@@ -4802,6 +4942,8 @@ if (MAIN_HELPER_TEST) {
     PET_PAYLOAD_MAX_BYTES,
     submitPromptOnce,
     workbenchDetail,
+    ensureWorkbenchWorkspace,
+    heavyWorkbenchSwitchMessage,
     WORKBENCH_INSTALL_LIMITS
   };
 }
