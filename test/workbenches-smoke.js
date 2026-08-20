@@ -249,7 +249,7 @@ async function main() {
     fs.mkdirSync(outside, { recursive: true });
     const dir = writePack(userRoot, '逃逸包', { 'manifest.json': JSON.stringify({ name: '逃逸包' }) });
     const escape = path.join(dir, '逃出去');
-    fs.symlinkSync(outside, escape);
+    fs.symlinkSync(outside, escape, process.platform === 'win32' ? 'junction' : undefined);
     assert.equal(pets.containedIn(dir, escape, fs), false, 'realpath 落在包外必须为 false');
     assert.equal(pets.containedIn(dir, path.join(dir, 'manifest.json'), fs), true);
   });
@@ -272,7 +272,8 @@ async function main() {
     fs.mkdirSync(path.join(tmp, '假装的dsh'), { recursive: true });
     const realDsh = fs.realpathSync(path.join(tmp, '假装的dsh'));
     const alias = path.join(tmp, '看起来无害');
-    fs.symlinkSync(realDsh, alias);
+    // Windows 上建目录符号链接要提权，junction 不用，而且它正是 Windows 侧的等价逃逸手段。
+    fs.symlinkSync(realDsh, alias, process.platform === 'win32' ? 'junction' : undefined);
     // 先证明第一轮（字面）根本拦不住它——这正是为什么必须有第二轮。
     assert.doesNotThrow(() => workspaces.assertWorkspaceNotForbidden(alias, { forbiddenRoots: [realDsh] }));
     assert.throws(

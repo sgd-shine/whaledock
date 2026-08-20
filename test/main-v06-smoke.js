@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const main = require('../main.js');
 
+// Windows checkout 会把 .js 换成 CRLF，所以所有跨行断言一律写 \r?\n，不写死 \n。
 const ROOT = path.join(__dirname, '..');
 const source = (name) => fs.readFileSync(path.join(ROOT, name), 'utf8');
 
@@ -74,7 +75,7 @@ async function main06() {
 
   await test('外壳 IPC 全部走三重校验，且通道集合与 preload 完全对上', async () => {
     const value = source('main.js');
-    assert.match(value, /function trustedShellEvent\(event\) \{\n\s*return trustedLocalEvent\(event, mainWindow, pathToFileURL/);
+    assert.match(value, /function trustedShellEvent\(event\) \{\r?\n\s*return trustedLocalEvent\(event, mainWindow, pathToFileURL/);
     const block = value.slice(value.indexOf('function registerShellIpc()'), value.indexOf('function registerSettingsIpc()'));
     const handled = [...block.matchAll(/ipcMain\.handle\('([^']+)'/g)].map((item) => item[1]).sort();
     assert.deepEqual(handled, [
@@ -250,7 +251,7 @@ async function main06() {
 
   await test('工作台自带主题优先，且只注入自有页面', async () => {
     const value = source('main.js');
-    assert.match(value, /const active = currentWorkbench\(\);\n  if \(active && active\.theme\) return active\.theme;/);
+    assert.match(value, /const active = currentWorkbench\(\);\r?\n  if \(active && active\.theme\) return active\.theme;/);
     // 外壳页在主题映射表里，dsh 页面永远不在。
     assert.ok(Object.prototype.hasOwnProperty.call(main.THEME_VARIABLE_MAP, 'shell.html'));
     assert.equal(main.themeCssFor('index.html', { colors: {}, base: 'dark' }), null);
@@ -354,7 +355,12 @@ async function main06() {
     const secret = path.join(tmp, 'secret');
     fs.mkdirSync(docs, { recursive: true });
     fs.mkdirSync(secret, { recursive: true });
-    fs.symlinkSync(fs.realpathSync(secret), path.join(docs, '鲸坞工作台'));
+    // Windows 上目录符号链接要提权，junction 不用，而且它正是 Windows 侧的等价逃逸手段。
+    fs.symlinkSync(
+      fs.realpathSync(secret),
+      path.join(docs, '鲸坞工作台'),
+      process.platform === 'win32' ? 'junction' : undefined
+    );
     assert.throws(
       () => main.ensureWorkbenchWorkspace(plan, { documentsDir: docs, forbiddenRoots: [fs.realpathSync(secret)] }),
       (error) => error.code === 'ERR_WORKSPACE_PROTECTED'
@@ -423,7 +429,7 @@ async function main06() {
     const value = source('main.js');
     // 托盘直接消费 derivePetState 的结果，不另算一套。
     assert.match(value, /function trayEffectiveState\(\) \{[\s\S]*?currentPetState\(\)/);
-    assert.match(value, /function currentPetState\(\) \{\n  return events\.derivePetState\(/);
+    assert.match(value, /function currentPetState\(\) \{\r?\n  return events\.derivePetState\(/);
     // 五态 + 第六种显示的文案齐全。
     for (const key of ['idle', 'busy', 'waiting', 'celebrate', 'error', 'offline']) {
       assert.ok(value.includes(`  ${key}: '`), key);
@@ -447,7 +453,7 @@ async function main06() {
     assert.equal(main.TRAY_BUSY_FPS, 2);
     const value = source('main.js');
     // 只切图片，不做动画渲染。
-    assert.match(value, /setInterval\(\(\) => \{\n      trayBusyFrame = trayBusyFrame === 0 \? 1 : 0;/);
+    assert.match(value, /setInterval\(\(\) => \{\r?\n      trayBusyFrame = trayBusyFrame === 0 \? 1 : 0;/);
     assert.match(value, /Math\.round\(1000 \/ TRAY_BUSY_FPS\)/);
     // 角标是在 BGRA 位图上直接画出来的占位图，没有引入任何图片库，也没有新增 PNG 资源。
     assert.match(value, /nativeImage\.createFromBitmap\(bitmap/);
@@ -549,7 +555,7 @@ async function main06() {
     // 事件层这一侧：账本命中就不再产生 effect，所以轮询重连看到同一项也不会再叫。
     const eventsSource = source('lib/events.js');
     assert.match(eventsSource, /const alreadyHandled = Object\.hasOwn\(state\.notificationLedger, ledgerKey\)/);
-    assert.match(eventsSource, /if \(!alreadyHandled\n\s*&& !event\.suppressNotifications/);
+    assert.match(eventsSource, /if \(!alreadyHandled\r?\n\s*&& !event\.suppressNotifications/);
   });
 
   await test('--dump-config 只读探测：3 秒超时、只读 stdout、失败当没有这个信息', async () => {
