@@ -323,6 +323,13 @@ async function main() {
       && resumeWorkflow.includes('run-id: ${{ inputs.source_run_id }}')
       && resumeWorkflow.includes('notarytool info "$submission_id"')
       && !resumeWorkflow.includes('notarytool submit'));
+  const dmgGatekeeperAssessment =
+    'spctl --assess --type open --context context:primary-signature --verbose=2';
+  check('packaging: 公证 DMG 使用 Gatekeeper open 语义验证',
+    notarizeStep.includes(dmgGatekeeperAssessment)
+      && resumeWorkflow.includes(dmgGatekeeperAssessment)
+      && !notarizeStep.includes('spctl --assess --type install')
+      && !resumeWorkflow.includes('spctl --assess --type install'));
 
   // PATH / which
   check('backend: fullPath 非空', backend.fullPath().split(path.delimiter).length > 3);

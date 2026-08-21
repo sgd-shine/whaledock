@@ -297,7 +297,11 @@ jobs:
           # zip 不能 staple；ticket 由 Gatekeeper 联网校验。dmg 一律 staple 成离线可验。
           for asset in "${assets[@]}"; do
             case "$asset" in
-              *.dmg) xcrun stapler staple "$asset"; xcrun stapler validate "$asset" ;;
+              *.dmg)
+                xcrun stapler staple "$asset"
+                xcrun stapler validate "$asset"
+                spctl --assess --type open --context context:primary-signature --verbose=2 "$asset"
+                ;;
             esac
           done
 

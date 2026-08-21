@@ -126,7 +126,10 @@ jobs:
           for dmg in "release/WhaleDock-${version}-arm64.dmg" "release/WhaleDock-${version}-x64.dmg"; do
             xcrun stapler staple "$dmg"
             xcrun stapler validate "$dmg"
-            spctl --assess --type install --verbose=2 "$dmg"
+            # Disk images are documents opened by DiskImageMounter. The
+            # "install" assessment type is for installer packages and reports
+            # a valid notarized DMG as having no usable installer signature.
+            spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
           done
           trap - EXIT
           rm -f "$key"
