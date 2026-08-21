@@ -898,6 +898,66 @@ async function run() {
     assert.equal(disconnectCalls, 2);
   });
 
+  await test('旧 session 未确认断开前禁止新代假绿，迟到 receipt 后才可重连', async () => {
+    const firstDisconnectRelease = deferred();
+    let connectCalls = 0;
+    let firstDisconnectCalls = 0;
+    let secondDisconnectCalls = 0;
+    const owner = harness({ operationTimeoutMs: 100, disconnectTimeoutMs: 20 });
+    owner.service.registerAdapter('web', {
+      async connect() {
+        connectCalls += 1;
+        if (connectCalls === 1) {
+          return session({
+            disconnect: async () => {
+              firstDisconnectCalls += 1;
+              await firstDisconnectRelease.promise;
+            }
+          });
+        }
+        return session({ disconnect: async () => { secondDisconnectCalls += 1; } });
+      }
+    });
+    await owner.service.setEnabled('web', true);
+    await assert.rejects(() => owner.service.setEnabled('web', false), /未确认断开/);
+    await owner.service.setEnabled('web', true);
+    let state = owner.service.snapshot().channels.web;
+    assert.equal(connectCalls, 1, '旧代未回收不得调新 connect');
+    assert.equal(firstDisconnectCalls, 1, '超时后必须继续等同一 receipt');
+    assert.equal(state.state, 'error');
+    assert.equal(state.reasonCode, 'disconnect-failed');
+    firstDisconnectRelease.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await owner.service.setEnabled('web', true);
+    state = owner.service.snapshot().channels.web;
+    assert.equal(connectCalls, 2);
+    assert.equal(state.state, 'connected');
+    assert.equal(firstDisconnectCalls, 1);
+    await owner.service.close();
+    assert.equal(secondDisconnectCalls, 1);
+  });
+
+  await test('close 显式断开拒绝后可重试同一代，不永久缓存失败', async () => {
+    let disconnectCalls = 0;
+    const owner = harness();
+    owner.service.registerAdapter('web', {
+      async connect() {
+        return session({
+          disconnect: async () => {
+            disconnectCalls += 1;
+            if (disconnectCalls === 1) throw new Error('transient disconnect');
+          }
+        });
+      }
+    });
+    await owner.service.setEnabled('web', true);
+    await assert.rejects(() => owner.service.close(), /关闭不完整/);
+    assert.equal(owner.service.snapshot().channels.web.reasonCode, 'disconnect-failed');
+    const snapshot = await owner.service.close();
+    assert.equal(disconnectCalls, 2);
+    assert.equal(snapshot.channels.web.state, 'disabled');
+  });
+
   await test('挂起 receive/approval sink 遇到断开失败时，停用和 close 都不会虚假成功', async () => {
     for (const kind of ['receive', 'approval']) {
       const sinkStarted = deferred();
@@ -963,6 +1023,34 @@ async function run() {
     await generations[1].onError('transport-error');
     assert.equal(owner.service.snapshot().channels.feishu.state, 'error');
     assert.ok(disconnectCalls >= 2);
+    await owner.service.close();
+  });
+
+  await test('adapter lifecycle 原始原因永不进快照或审计，只映射固定枚举', async () => {
+    const audit = [];
+    const states = [];
+    const hooks = {};
+    const owner = harness({
+      auditEvent: (value) => audit.push(value),
+      onStateChanged: (value) => states.push(value)
+    });
+    for (const id of ['feishu', 'dingtalk']) {
+      owner.service.registerAdapter(id, {
+        async connect(value) {
+          hooks[id] = value;
+          return session();
+        }
+      });
+      await owner.service.setEnabled(id, true);
+    }
+    await hooks.feishu.onError('appsecret1234567890');
+    await hooks.dingtalk.onClose('token-deadbeef12345678');
+    const snapshot = owner.service.snapshot();
+    assert.equal(snapshot.channels.feishu.reasonCode, 'transport-error');
+    assert.equal(snapshot.channels.dingtalk.reasonCode, 'remote-closed');
+    const publicEvidence = JSON.stringify({ snapshot, audit, states });
+    assert.equal(publicEvidence.includes('appsecret1234567890'), false);
+    assert.equal(publicEvidence.includes('token-deadbeef12345678'), false);
     await owner.service.close();
   });
 
