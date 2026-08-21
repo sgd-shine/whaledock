@@ -1,10 +1,20 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-16（v0.5.0 已正式发布，第二阶段收尾）
+更新：2026-08-20（v0.6.0 已正式签名、Apple 公证并公开发布）
 
 ## 阶段结论
 
-**v0.2.0 / v0.3.0 / v0.4.0 的工程、合规与发布闭环保留为历史证据；v0.5.0 批次 13 的桌面宠物与皮肤主题已完成实现、本地验证、三平台 CI 与公开发布，当前为 released。公开稳定版是 v0.5.0。第二阶段（v0.3→v0.5）到此收尾。**
+**v0.6.0 工作台包已实现、通过三平台 CI，macOS arm64/x64 成品已用 Developer ID Application 正式签名、开启 Hardened Runtime 并获 Apple 公证；公开稳定版已是 v0.6.0。**
+
+- 当前稳定版：[`v0.6.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.6.0)；非 draft、非 prerelease，`releases/latest` 已命中 v0.6.0，正式 tag 指向 `7ae619d8b7cbad81412e098706737d7e1490b9e8`。
+- 正式 tag 的 [main CI 32413185966](https://github.com/sgd-shine/whaledock/actions/runs/32413185966) 三平台全绿。源 [Release run 32413319416](https://github.com/sgd-shine/whaledock/actions/runs/32413319416) 构建并保存已签名成品；[Resume run 32440079107](https://github.com/sgd-shine/whaledock/actions/runs/32440079107) 续用同一批成品和 Apple submission id 完成 staple、Gatekeeper 与公开发布，没有重新构建或重复提交。
+- 4 份 macOS 成品均回读 Apple `Accepted`。公开 Release 有 8 项资产：`SHA256SUMS-mac.txt` 372 B、`SHA256SUMS-win.txt` 189 B、arm64 ZIP/DMG 207,138,248 / 187,568,944 B、x64 ZIP/DMG 212,053,773 / 192,382,327 B、Windows Setup/portable 161,526,040 / 161,338,194 B。两份 Actions artifact 已独立下载并通过 6 份成品校验和。
+- v0.6.0 与 v0.5.1 比较没有 `package-lock.json` 或 `compliance/` 变化；源 run 的三平台 inventory、已提交与包内合规材料均成功，没有新增再分发闭包，未触发 S1。
+- 精确批准值 `release:v0.6.0:sha256:1d72764798f78f070a12277f822e04ae5bc103d381cea8bed08ec883e3091832` 只在 publish attempt 2 期间存在；Release 和 8 项资产回读成功后立即删除，仓库变量当前不存在。
+- 官方 arm64 DMG 已从 Release 重新下载，通过 SHA-256、Developer ID、Hardened Runtime、stapler 与 Gatekeeper，已安装并启动 `/Applications/WhaleDock.app`；Spotlight 只回读这一份正式安装。
+- Windows 仍未签名且只有 CI 证据；Intel x64 只有 Apple Silicon + Rosetta/云端构建证据，不得写成 Windows 或 Intel 真机已通过。
+
+以下 v0.2–v0.5 记录保留为历史证据：
 
 - PR [#1](https://github.com/sgd-shine/whaledock/pull/1) 已合并；正式 tag 指向 main 提交 `d8a8a774…`。
 - 批次 7 审计修复：`591f6c1`
@@ -26,7 +36,7 @@
 - 精确批准值 `release:v0.3.0:sha256:8a7e9f14cfdaee35eb5baaa016547ec0a5d32d110876436185f186a3257407ad` 仅用于本次 publish；Release 回读后已删除，仓库变量回读不存在。
 - 2026-08-15 SGD 决定：不发 beta；Windows 以“实验性支持（未真机验证）”发布；Intel 仅保留 Rosetta 抽查边界；无 S1 且 G1/成品材料闭环后，由 Codex 执行正式发布并临时设置、随即清除精确审批变量。
 
-Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不阻断本次发布，但不得改写为已经通过。
+Windows/Intel 真机、Windows 签名与线上更新仍是独立证据边界。它们不阻断本次发布，但不得改写为已经通过。
 
 ## v0.5 批次 13 已实现并发布
 
@@ -177,12 +187,12 @@ Windows/Intel 真机、签名与线上更新仍是独立证据边界。它们不
 
 ## 尚未完成
 
-1. v0.4 的三平台 tag CI、正式 tag、Release 成品回读与公开发布已完成；本机安装版尚未升级到 0.4.0，也未真机点过 v0.4 的「检查更新」。
+1. v0.6.0 正式签名、Apple 公证、Release、官方 arm64 安装与唯一安装回读已完成；线上「检查更新」按钮仍未做本轮人工点击验收。
 2. v0.4 未对真实会话提交 prompt，未走完图片保存→OCR→复制/提交的全量 GUI 链；Windows.Media.Ocr、Windows `Win+Shift+S`/剪贴板、macOS 屏幕录制权限和安装包 GUI 仍待真机。
 3. v0.4 并行多开保留为 P2；官方视觉 API 与 vision 插件只保留可探测槽位。
 4. v0.3 Electron 系统通知权限及 Notification→Dock/托盘/banner 可见降级链尚未真机；真实 managed backend 跨预算线后的进程树停止、App 重启 latch 和“今日继续”恢复也未做 GUI+真进程闭环。
 5. 现有深/浅战报为对比度修复前样张；修复后色彩、对比度、中文排版与剪贴板真实读回仍需最终人工验收。
 6. Windows 全线真机与 Intel 真机均未做；Intel 仍只有 Apple Silicon + Rosetta，未签名 x64 成品回读也不是 Intel 真机；Windows 仍是未签名、未真机的实验性支持。
-7. macOS/Windows 签名与 Apple 公证未做，属于 S3，本次明确不执行。
+7. macOS 签名与 Apple 公证已在 v0.6.0 完成；Windows 签名仍未做。
 
 详细发布证据与人工体验边界见 `HANDOFF.md`。

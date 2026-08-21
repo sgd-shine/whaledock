@@ -1,22 +1,21 @@
-# HANDOFF.md — WhaleDock v0.5.0 已发布交接（第二阶段收尾）
+# HANDOFF.md — WhaleDock v0.6.0 正式签名、公证与发布交接
 
-更新：2026-08-16 · v0.5.0 已正式公开发布；第二阶段 v0.3→v0.5 全部完成
+更新：2026-08-20 · v0.6.0 已正式签名、Apple 公证并公开发布
 
 ## 当前结论
 
-v0.2 工程/macOS 验收/G1 与 v0.3.0 公开发布保留为历史证据。v0.4 的单工作区管理、安全截图/图片入口、本地 OCR 与 rc.6 prompt/复制降级已实现并**正式发布**，当前公开稳定版是 v0.4.0。
+v0.6.0 工作台包、内置短视频创作台、托盘五态与叫醒阶梯已完成实现和发布。当前公开稳定版是 [`v0.6.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.6.0)；macOS arm64/x64 已正式签名并通过 Apple 公证。
 
 - PR [#1](https://github.com/sgd-shine/whaledock/pull/1) 已合并。
 - 批次 7 审计修复：`591f6c1`
 - 批次 9 合规与构建可见性：`4e0c04c`
-- 当前稳定版：[`v0.4.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.4.0)。[`v0.3.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0) 的 tag 对象 `8af8f86a527a105c9dbe5a204e75afcdd9dba409` → `fe2d4def7bb7ef1d9339b71b1e28236fd9e1eabf` 保留为历史证据。
-- v0.4.0 已正式公开发布：[Release v0.4.0](https://github.com/sgd-shine/whaledock/releases/tag/v0.4.0)，非 draft、非 prerelease，`releases/latest` 回读为 `v0.4.0`。正式注解 tag 对象 `4cd0a1f0e33201ba8b478a9869730a6177bbbcdd` 指向提交 `3a8913be6900dc8a1b64ee0a61bc03c8ba256443`。
-- 该提交的 main CI [31930571815](https://github.com/sgd-shine/whaledock/actions/runs/31930571815) 三平台全绿；[Release run 31930662943](https://github.com/sgd-shine/whaledock/actions/runs/31930662943) 的 build-mac / build-windows 一次通过，publish job 首次按预期被审批门 fail-closed 阻止，设置精确批准值后重跑成功。
-- 八项资产与精确字节数：`SHA256SUMS-mac.txt` 372 B、`SHA256SUMS-win.txt` 189 B、`WhaleDock-0.4.0-arm64-mac.zip` 204,794,555 B、`WhaleDock-0.4.0-arm64.dmg` 185,282,665 B、`WhaleDock-0.4.0-x64-mac.zip` 207,776,496 B、`WhaleDock-0.4.0-x64.dmg` 188,209,037 B、`WhaleDock-Setup-0.4.0.exe` 161,480,303 B、`WhaleDock-0.4.0-portable.exe` 161,292,453 B。发布前已把两个 Actions artifact 下载到本地，`shasum -a 256 -c` 六项产物全部 OK，这是独立于 CI 的成品回读。
-- 三平台 vendor 闭包与包数同 v0.3 完全一致（arm64 `9f5613cb…` 526 包、x64 `928f3fd6…` 526 包、win32/x64 `47ad1d95…` 525 包），没有新增包，因此按预授权直接发布，没有触发 S1。
-- 精确批准值 `release:v0.4.0:sha256:d9ed43878b3bb8c3aa4167c3c176d26c18d13dffa21b1bb9bdd3a549bd00a301` 只在本次 publish 期间存在；Release 与八项资产回读后立即删除，仓库变量回读 `total_count=0`。
-- v0.3 main CI [31893926627](https://github.com/sgd-shine/whaledock/actions/runs/31893926627) 三平台全绿；v0.3 Release run [31894036652](https://github.com/sgd-shine/whaledock/actions/runs/31894036652) 成功，attempt 2 publish job [95035294975](https://github.com/sgd-shine/whaledock/actions/runs/31894036652/job/95035294975) 已发布八项资产。
-- 本机 `/Applications/WhaleDock.app` 为 v0.2.0 arm64；Spotlight 只发现这一份正式安装。
+- 正式 tag `v0.6.0` 指向 `7ae619d8b7cbad81412e098706737d7e1490b9e8`；[main CI 32413185966](https://github.com/sgd-shine/whaledock/actions/runs/32413185966) 三平台全绿。
+- 源 [Release run 32413319416](https://github.com/sgd-shine/whaledock/actions/runs/32413319416) 的 macOS 签名、两架构 inventory、包内合规材料、4 项 Apple 提交和待续跑 artifact 成功；Windows 构建、inventory、包内材料、校验和与 Actions artifact 成功。
+- Apple 排队超过首个 5 小时窗口后，[Resume run 32440079107](https://github.com/sgd-shine/whaledock/actions/runs/32440079107) 使用同一批成品和 submission id，4 项全部 `Accepted`；未重新构建、重新签名或重复提交 Apple。DMG 已 staple，挂载后的 App 通过 `codesign` 与 Gatekeeper。
+- 公开 Release 为非 draft、非 prerelease，`releases/latest` 回读 v0.6.0，8 项资产齐全。arm64 ZIP/DMG 为 207,138,248 / 187,568,944 B，x64 ZIP/DMG 为 212,053,773 / 192,382,327 B，Windows Setup/portable 为 161,526,040 / 161,338,194 B，两份校验和为 372 / 189 B。
+- v0.6.0 没有修改 `package-lock.json` 或 `compliance/`，三平台 inventory 过门且没有新增再分发包，未触发 S1。精确批准值 `release:v0.6.0:sha256:1d72764798f78f070a12277f822e04ae5bc103d381cea8bed08ec883e3091832` 只用于 publish attempt 2；Release 和 8 项资产回读后已立即删除，仓库变量不存在。
+- 本机从官方 Release 重新下载 arm64 DMG，通过 SHA-256、Developer ID、Hardened Runtime、stapler、Gatekeeper 并安装启动 `/Applications/WhaleDock.app`；Spotlight 只回读这一份正式安装。替换前的旧 App 已移到废纸篓，可恢复。
+- Windows 仍未签名、未真机；Intel 仍未真机，只有 Apple Silicon + Rosetta/云端 x64 证据。
 
 2026-08-15 SGD 的发布决定已覆盖旧的 beta-first 流程：不发 beta；Windows 真机验收不再阻断发布，改为“实验性支持（未真机验证）”；Intel 只保留 Rosetta 抽查边界；在没有 S1 冲突且 G1/成品材料闭环时，Codex 获预授权临时设置精确审批值、发布并立即删除变量。
 
