@@ -662,6 +662,55 @@ async function run() {
     await secondOwner.service.close();
   });
 
+  await test('迟到旧 approval receipt 只能未知转已知，不得覆盖后续权威回读', async () => {
+    const firstReceipt = deferred();
+    let targetCalls = 0;
+    const targetToken = 'late-monotonic-target';
+    const owner = harness({
+      operationTimeoutMs: 20,
+      initialBindings: { web: 'owner' },
+      applyApproval: async (request) => {
+        if (request.requestToken === targetToken) {
+          targetCalls += 1;
+          if (targetCalls === 1) return firstReceipt.promise;
+          return { status: 'duplicate', decision: 'adopt' };
+        }
+        return { status: 'applied', decision: request.decision };
+      }
+    });
+    const loopback = remote.createLoopbackAdapter();
+    owner.service.registerAdapter('web', loopback.adapter);
+    await owner.service.setEnabled('web', true);
+    const first = await loopback.emitDecision({
+      actorId: 'owner', requestToken: targetToken, reply: '1'
+    });
+    assert.equal(first.reasonCode, 'approval-uncertain');
+
+    // 超过有界本地 ledger，迫使 target 下次回到权威层对账。
+    for (let index = 0; index < 10_000; index += 1) {
+      const filler = await loopback.emitDecision({
+        actorId: 'owner', requestToken: `ledger-filler-${index}`, reply: '1'
+      });
+      assert.equal(filler.accepted, true);
+    }
+    const reconciled = await loopback.emitDecision({
+      actorId: 'owner', requestToken: targetToken, reply: '1'
+    });
+    assert.equal(reconciled.accepted, true);
+    assert.equal(reconciled.duplicate, true);
+    assert.equal(targetCalls, 2);
+
+    firstReceipt.reject(new Error('old receipt lost'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const afterLateFailure = await loopback.emitDecision({
+      actorId: 'owner', requestToken: targetToken, reply: '1'
+    });
+    assert.equal(afterLateFailure.accepted, true);
+    assert.equal(afterLateFailure.duplicate, true);
+    assert.equal(targetCalls, 2);
+    await owner.service.close();
+  });
+
   await test('receive/approval sink 原始异常被净化并亮固定故障灯', async () => {
     const receiveOwner = harness({
       receiveSink: async () => { throw new Error('APP_SECRET=top-secret /Users/private/raw 正文'); }
@@ -1051,6 +1100,95 @@ async function run() {
     const publicEvidence = JSON.stringify({ snapshot, audit, states });
     assert.equal(publicEvidence.includes('appsecret1234567890'), false);
     assert.equal(publicEvidence.includes('token-deadbeef12345678'), false);
+    await owner.service.close();
+  });
+
+  await test('lifecycle 状态回调同步要求重连时，也必须先回收精确旧代', async () => {
+    const active = new Set();
+    const disconnects = [];
+    const hooks = [];
+    let service;
+    let reconnectPromise = null;
+    let reconnectRequested = false;
+    const owner = harness({
+      onStateChanged: (snapshot) => {
+        if (!reconnectRequested && service
+            && snapshot.channels.web.state === 'disconnected') {
+          reconnectRequested = true;
+          reconnectPromise = service.setEnabled('web', true);
+        }
+      }
+    });
+    service = owner.service;
+    service.registerAdapter('web', {
+      async connect(value) {
+        const id = hooks.length + 1;
+        hooks.push(value);
+        active.add(id);
+        return session({
+          disconnect: async () => {
+            disconnects.push(id);
+            active.delete(id);
+          }
+        });
+      }
+    });
+    await service.setEnabled('web', true);
+    const lifecycle = hooks[0].onClose('platform-input-is-ignored');
+    await lifecycle;
+    await reconnectPromise;
+    assert.deepEqual(disconnects, [1]);
+    assert.deepEqual([...active], [2]);
+    assert.equal(service.snapshot().channels.web.state, 'connected');
+    await service.close();
+    assert.deepEqual(disconnects, [1, 2]);
+    assert.deepEqual([...active], []);
+  });
+
+  await test('lifecycle 前已排队的 enable 意图会失效，迟后 cleanup 不得误杀新 session', async () => {
+    const sinkStarted = deferred();
+    const active = new Set();
+    const disconnects = [];
+    const hooks = [];
+    let connectCalls = 0;
+    const owner = harness({
+      initialBindings: { web: 'owner' },
+      receiveSink: async () => {
+        sinkStarted.resolve();
+        return new Promise(() => {});
+      }
+    });
+    owner.service.registerAdapter('web', {
+      async connect(value) {
+        connectCalls += 1;
+        const id = connectCalls;
+        hooks.push(value);
+        active.add(id);
+        return session({
+          disconnect: async () => {
+            disconnects.push(id);
+            active.delete(id);
+          }
+        });
+      }
+    });
+    await owner.service.setEnabled('web', true);
+    const receiving = hooks[0].onReceive({
+      actorId: 'owner', kind: 'text', content: '在途收件'
+    });
+    await sinkStarted.promise;
+    const queuedEnable = owner.service.setEnabled('web', true);
+    const lifecycle = hooks[0].onClose('platform-input-is-ignored');
+    const results = await within(Promise.allSettled([
+      receiving, queuedEnable, lifecycle
+    ]), 300);
+    assert.equal(results[0].status, 'rejected');
+    assert.equal(results[1].status, 'fulfilled');
+    assert.equal(results[2].status, 'fulfilled');
+    assert.equal(connectCalls, 1, '事件前排队的 enable 不得跨 lifecycle 生效');
+    assert.deepEqual(disconnects, [1]);
+    assert.deepEqual([...active], []);
+    assert.notEqual(owner.service.snapshot().channels.web.state, 'connected');
     await owner.service.close();
   });
 
