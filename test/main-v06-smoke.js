@@ -65,7 +65,7 @@ async function main06() {
     const channels = [...preload.matchAll(/ipcRenderer\.(?:invoke|on)\('([^']+)'/g)]
       .map((item) => item[1]).sort();
     assert.deepEqual([...new Set(channels)], [
-      'shell:action', 'shell:get', 'shell:install', 'shell:notice',
+      'shell:action', 'shell:cockpit-view', 'shell:get', 'shell:install', 'shell:notice',
       'shell:onboarding-seen', 'shell:open-settings', 'shell:open-workspace',
       'shell:remove', 'shell:state', 'shell:switch'
     ]);
@@ -80,7 +80,7 @@ async function main06() {
     const block = value.slice(value.indexOf('function registerShellIpc()'), value.indexOf('function registerSettingsIpc()'));
     const handled = [...block.matchAll(/ipcMain\.handle\('([^']+)'/g)].map((item) => item[1]).sort();
     assert.deepEqual(handled, [
-      'shell:action', 'shell:get', 'shell:install', 'shell:onboarding-seen',
+      'shell:action', 'shell:cockpit-view', 'shell:get', 'shell:install', 'shell:onboarding-seen',
       'shell:open-settings', 'shell:open-workspace', 'shell:remove', 'shell:switch'
     ]);
     // 每一个 handle 都必须裹在 trustedShellHandler 里，一个都不能漏。

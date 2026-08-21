@@ -514,6 +514,12 @@ let mainWindow = null;
 // dsh 的 Web UI 搬进这个**没有 preload** 的子视图——远程页面拿不到任何 IPC。
 let dshView = null;
 const SHELL_RAIL_WIDTH = 132;
+const COCKPIT_PANEL_MIN_WIDTH = 340;
+const COCKPIT_PANEL_MAX_WIDTH = 420;
+const COCKPIT_PANEL_RATIO = 0.31;
+const COCKPIT_DSH_TOP = 228;
+let cockpitNativeMode = false;
+let cockpitChatCollapsed = false;
 let splash = null;
 let settingsWindow = null;
 let dashboardWindow = null;
@@ -987,6 +993,8 @@ function currentDashboardSnapshot() {
 function pushDashboardState() {
   // 宠物与看板共用同一个事件层快照，这里统一刷新，避免两套状态来源。
   pushPetState();
+  // 视频驾驶舱任务条只消费 shellStateSnapshot 里的匿名最小投影。
+  pushShellState();
   if (!dashboardWindow || dashboardWindow.isDestroyed()) return;
   dashboardWindow.webContents.send('dashboard:state', currentDashboardSnapshot());
 }
@@ -1374,6 +1382,90 @@ const WORKBENCH_INSTALL_LIMITS = Object.freeze({
 let workbenchCache = null;
 const WORKBENCH_REMEMBERED_LIMIT = 64;
 
+// 主 dsh 视图的唯一布局函数。经典台和「退出驾驶舱」精确沿用 v0.6 的 132px 左栏；
+// 视频驾驶舱只把原视图缩进右侧面板，折叠时隐藏而不是销毁/重载。
+function mainViewLayout(options = {}) {
+  const width = Number.isSafeInteger(options.width) && options.width >= 0 ? options.width : 0;
+  const height = Number.isSafeInteger(options.height) && options.height >= 0 ? options.height : 0;
+  const cockpitActive = options.cockpit === 'video' && options.cockpitMode === 'cockpit';
+  if (!cockpitActive) {
+    const rail = Math.max(0, Math.min(SHELL_RAIL_WIDTH, width - 320));
+    return {
+      mode: 'classic',
+      visible: true,
+      bounds: { x: rail, y: 0, width: Math.max(0, width - rail), height }
+    };
+  }
+  const proportional = Math.round(width * COCKPIT_PANEL_RATIO);
+  const panelWidth = Math.max(
+    0,
+    Math.min(
+      COCKPIT_PANEL_MAX_WIDTH,
+      Math.max(COCKPIT_PANEL_MIN_WIDTH, proportional),
+      Math.max(0, width - 520)
+    )
+  );
+  const top = Math.min(height, COCKPIT_DSH_TOP);
+  return {
+    mode: 'cockpit',
+    visible: options.chatCollapsed !== true && panelWidth > 0 && height > top,
+    bounds: {
+      x: Math.max(0, width - panelWidth),
+      y: top,
+      width: panelWidth,
+      height: Math.max(0, height - top)
+    }
+  };
+}
+
+function cockpitTaskFlow(snapshot, options = {}) {
+  const source = isPlainObject(snapshot) ? snapshot : {};
+  const availability = isPlainObject(source.availability) ? source.availability.state : null;
+  const waitingSource = isPlainObject(source.waiting) ? source.waiting : {};
+  const activitySource = isPlainObject(source.activity) ? source.activity : {};
+  const approvals = boundedInteger(waitingSource.approvals, 1_000_000) || 0;
+  const questions = boundedInteger(waitingSource.questions, 1_000_000) || 0;
+  const active = boundedInteger(activitySource.openTurns, 1_000_000) || 0;
+  const resultMap = {
+    completed: 'completed', error: 'failed', blocked: 'failed', 'max-tokens': 'failed',
+    incomplete: 'failed', unknown: 'failed', cancelled: 'cancelled',
+    aborted: 'cancelled', interrupted: 'cancelled'
+  };
+  const recent = (Array.isArray(source.recentTasks) ? source.recentTasks : [])
+    .filter(isPlainObject)
+    .slice(0, 6)
+    .map((task, index) => ({
+      label: safeText(task.label, `任务 ${String(index + 1).padStart(2, '0')}`, 32),
+      result: resultMap[task.result] || 'failed',
+      completedAt: typeof task.completedAt === 'string' ? task.completedAt.slice(0, 64) : null
+    }));
+  let state = 'idle';
+  if (!['live', 'probing', 'backfilling'].includes(availability)) state = 'offline';
+  else if (approvals + questions > 0) state = 'waiting';
+  else if (active > 0) state = 'busy';
+  else if (recent.length) {
+    const when = Date.parse(recent[0].completedAt || '');
+    const now = Number.isFinite(options.now) ? options.now : Date.now();
+    if (Number.isFinite(when) && Math.abs(now - when) <= 8000) {
+      state = recent[0].result === 'completed' ? 'celebrate'
+        : (recent[0].result === 'failed' ? 'error' : 'idle');
+    }
+  }
+  const labels = {
+    idle: '空闲靠岸', busy: '正在推进', waiting: '等你拍板',
+    celebrate: '刚刚完成', error: '刚刚遇阻', offline: '事件未接通'
+  };
+  return {
+    activity: { state, label: labels[state] },
+    counts: {
+      active,
+      waiting: approvals + questions,
+      completed: recent.filter((item) => item.result === 'completed').length
+    },
+    recent
+  };
+}
+
 // 首次引导与重工作台确认要跨 App 重启记住。纯函数保持 NFD/NFC 原样，不做 Unicode 归一化；
 // 真正落盘由 lib/config.js 校验，最多记住与扫描上限相同的 64 个 id。
 function workbenchIdRemembered(ids, id) {
@@ -1430,6 +1522,35 @@ function currentWorkbench() {
   return found || null;
 }
 
+function focusCockpitChat() {
+  const active = currentWorkbench();
+  if (!active || active.cockpit !== 'video' || !dshView || dshView.webContents.isDestroyed()) {
+    return false;
+  }
+  cockpitNativeMode = false;
+  cockpitChatCollapsed = false;
+  layoutMainWindow();
+  // 安全边界：这里只让远程 WebContentsView 获焦；不注入 DOM，也不伪称光标已进输入框。
+  dshView.webContents.focus();
+  pushShellState();
+  return true;
+}
+
+function cockpitViewRequest(value) {
+  if (!isPlainObject(value)) throw new Error('驾驶舱视图请求必须是 plain object');
+  const allowed = new Set(['mode', 'chatCollapsed', 'focusChat']);
+  const keys = Object.keys(value);
+  if (!keys.length || keys.some((key) => !allowed.has(key))) throw new Error('驾驶舱视图请求含未批准字段');
+  const mode = value.mode === undefined ? null : value.mode;
+  if (mode !== null && mode !== 'cockpit' && mode !== 'native') throw new Error('驾驶舱模式无效');
+  const chatCollapsed = value.chatCollapsed === undefined ? null : value.chatCollapsed;
+  if (chatCollapsed !== null && typeof chatCollapsed !== 'boolean') throw new Error('对话折叠状态无效');
+  const focusChat = value.focusChat === undefined ? false : value.focusChat;
+  if (value.focusChat !== undefined && value.focusChat !== true) throw new Error('聚焦动作只能显式为 true');
+  if (mode === null && chatCollapsed === null && !focusChat) throw new Error('驾驶舱请求为空');
+  return { mode, chatCollapsed, focusChat };
+}
+
 function workbenchRow(pkg) {
   return {
     id: pkg.id,
@@ -1437,6 +1558,7 @@ function workbenchRow(pkg) {
     summary: pkg.summary,
     source: pkg.source,
     heavy: pkg.heavy,
+    cockpit: pkg.cockpit,
     unknownFieldCount: pkg.unknownFieldCount
   };
 }
@@ -1457,6 +1579,12 @@ function shellStateSnapshot(extra = {}) {
       })),
       onboarding: active.onboarding,
       hasAgentPreset: Boolean(active.agentPreset)
+    } : null,
+    cockpit: active && active.cockpit === 'video' ? {
+      kind: 'video',
+      mode: cockpitNativeMode ? 'native' : 'cockpit',
+      chatCollapsed: cockpitChatCollapsed,
+      taskFlow: cockpitTaskFlow(canonicalEventSnapshot())
     } : null,
     ...extra
   };
@@ -1480,6 +1608,7 @@ function refreshWorkbenchSurfaces(extra = {}) {
   refreshTrayMenu();
   createAppMenu();
   pushShellState(extra);
+  layoutMainWindow();
 }
 
 // 重工作台的落点：<文档目录>/鲸坞工作台/<root>/，跟 v0.4 的默认工作区同一个父目录。
@@ -1596,6 +1725,8 @@ async function applyWorkbench(workbenchId, options = {}) {
     config.set({ workbenchId: wanted, lastWorkbenchId: previous });
   }
 
+  cockpitNativeMode = false;
+  cockpitChatCollapsed = false;
   const firstTime = shouldShowWorkbenchOnboarding(
     target,
     config.get('workbenchOnboardingSeenIds')
@@ -3040,12 +3171,23 @@ function openMainWindow() {
   tryLoad();
 }
 
-// 左栏常驻，右侧全部让给 dsh 视图。窗口很窄时优先保证 dsh 还看得见。
+// 经典台维持 v0.6 左栏；视频驾驶舱把同一个 dsh 视图停靠进右侧面板。
+// 折叠只 setVisible(false)，不 destroy/reload，原会话与草稿留在原 WebContents 中。
 function layoutMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed() || !dshView) return;
   const [width, height] = mainWindow.getContentSize();
-  const rail = Math.max(0, Math.min(SHELL_RAIL_WIDTH, width - 320));
-  try { dshView.setBounds({ x: rail, y: 0, width: Math.max(0, width - rail), height }); }
+  const active = currentWorkbench();
+  const layout = mainViewLayout({
+    width,
+    height,
+    cockpit: active && active.cockpit,
+    cockpitMode: cockpitNativeMode ? 'native' : 'cockpit',
+    chatCollapsed: cockpitChatCollapsed
+  });
+  try {
+    dshView.setBounds(layout.bounds);
+    if (typeof dshView.setVisible === 'function') dshView.setVisible(layout.visible);
+  }
   catch (_error) { /* 窗口正在销毁 */ }
 }
 
@@ -4114,7 +4256,8 @@ function trustedShellHandler(handler) {
 function registerShellIpc() {
   const channels = [
     'shell:get', 'shell:switch', 'shell:remove', 'shell:action',
-    'shell:install', 'shell:open-workspace', 'shell:open-settings', 'shell:onboarding-seen'
+    'shell:cockpit-view', 'shell:install', 'shell:open-workspace',
+    'shell:open-settings', 'shell:onboarding-seen'
   ];
   for (const channel of channels) ipcMain.removeHandler(channel);
 
@@ -4138,6 +4281,24 @@ function registerShellIpc() {
   ipcMain.handle('shell:action', trustedShellHandler(async (actionId) => (
     submitWorkbenchAction(typeof actionId === 'string' ? actionId : '')
   )));
+
+  ipcMain.handle('shell:cockpit-view', trustedShellHandler(async (value) => {
+    const request = cockpitViewRequest(value);
+    const active = currentWorkbench();
+    if (!active || active.cockpit !== 'video') {
+      return { kind: 'error', text: '当前工作台没有视频驾驶舱。' };
+    }
+    if (request.focusChat) {
+      return focusCockpitChat()
+        ? { kind: 'ok', focus: 'dsh-view' }
+        : { kind: 'error', text: '对话视图还没准备好。' };
+    }
+    if (request.mode) cockpitNativeMode = request.mode === 'native';
+    if (request.chatCollapsed !== null) cockpitChatCollapsed = request.chatCollapsed;
+    layoutMainWindow();
+    pushShellState();
+    return { kind: 'ok' };
+  }));
 
   // 拖入安装：只复制文件夹，不解压、不执行、不联网、不改用户原来的文件夹。
   ipcMain.handle('shell:install', trustedShellHandler(async (paths) => (
@@ -5041,6 +5202,7 @@ function createTray() {
 function workbenchMenuTemplate() {
   const listed = listAvailableWorkbenches();
   const activeId = config.get('workbenchId') || null;
+  const active = workbenches.selectWorkbench(listed.packages, activeId);
   const rows = listed.packages.slice(0, 9).map((pkg, index) => ({
     label: pkg.name,
     type: 'checkbox',
@@ -5068,6 +5230,24 @@ function workbenchMenuTemplate() {
       accelerator: 'CommandOrControl+Shift+0',
       click: () => { void switchToPreviousWorkbench(); }
     },
+    ...(active && active.cockpit === 'video' ? [
+      { type: 'separator' },
+      {
+        label: '聚焦驾驶舱对话',
+        accelerator: 'CommandOrControl+K',
+        click: () => { focusCockpitChat(); }
+      },
+      {
+        label: cockpitNativeMode ? '返回视频驾驶舱' : '退出驾驶舱看原生 dsh',
+        click: () => {
+          cockpitNativeMode = !cockpitNativeMode;
+          layoutMainWindow();
+          pushShellState();
+          createAppMenu();
+        }
+      }
+    ] : []),
+    { type: 'separator' },
     { label: '打开工作台文件夹', click: () => { void openUserResourceDir('workbenches'); } },
     { label: '管理工作台…', click: () => openSettingsWindow() }
   ];
@@ -5311,6 +5491,9 @@ if (MAIN_HELPER_TEST) {
     rememberWorkbenchId,
     forgetWorkbenchId,
     shouldShowWorkbenchOnboarding,
+    mainViewLayout,
+    cockpitTaskFlow,
+    cockpitViewRequest,
     trayStateFrom,
     trayTooltipFor,
     wakeLadderPlan,

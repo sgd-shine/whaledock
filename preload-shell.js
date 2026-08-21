@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld('whaleShell', Object.freeze({
   switchTo: (workbenchId) => ipcRenderer.invoke('shell:switch', workbenchId),
   removePack: (workbenchId) => ipcRenderer.invoke('shell:remove', workbenchId),
   runAction: (actionId) => ipcRenderer.invoke('shell:action', actionId),
+  setCockpitView: (request) => ipcRenderer.invoke('shell:cockpit-view', request),
   openWorkspace: () => ipcRenderer.invoke('shell:open-workspace'),
   openSettings: () => ipcRenderer.invoke('shell:open-settings'),
   markOnboardingSeen: (workbenchId) => ipcRenderer.invoke('shell:onboarding-seen', workbenchId),

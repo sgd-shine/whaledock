@@ -618,7 +618,8 @@ async function main() {
   // v0.6 工作台包解析层与 Electron 薄层：安全校验全部在这里拿证据。
   for (const [file, label] of [
     ['workbenches-smoke.js', '工作台包解析与 A-11 安全校验'],
-    ['main-v06-smoke.js', 'Electron 工作台薄层与 unknown 不重试']
+    ['main-v06-smoke.js', 'Electron 工作台薄层与 unknown 不重试'],
+    ['main-v07-smoke.js', '视频驾驶舱壳、匿名任务条与停靠布局']
   ]) {
     const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
       cwd: path.join(__dirname, '..'),
