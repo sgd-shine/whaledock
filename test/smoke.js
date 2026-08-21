@@ -618,8 +618,7 @@ async function main() {
   // v0.6 工作台包解析层与 Electron 薄层：安全校验全部在这里拿证据。
   for (const [file, label] of [
     ['workbenches-smoke.js', '工作台包解析与 A-11 安全校验'],
-    ['main-v06-smoke.js', 'Electron 工作台薄层与 unknown 不重试'],
-    ['main-v07-smoke.js', '视频驾驶舱壳、匿名任务条与停靠布局']
+    ['main-v06-smoke.js', 'Electron 工作台薄层与 unknown 不重试']
   ]) {
     const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
       cwd: path.join(__dirname, '..'),
@@ -629,6 +628,25 @@ async function main() {
     if (result.stdout) process.stdout.write(result.stdout);
     if (result.stderr) process.stderr.write(result.stderr);
     check(`v0.6: ${label}直测纳入统一 smoke`, result.status === 0,
+      result.status === 0 ? file : `${file} exit=${result.status}`);
+  }
+
+  // v0.7 视频驾驶舱：文件合约、拍摄状态机与纯本地窗口全部进统一 smoke。
+  for (const [file, label] of [
+    ['main-v07-smoke.js', '视频驾驶舱壳、匿名任务条与停靠布局'],
+    ['main-video-runtime-smoke.js', '视频驾驶舱 token、发布灯、拍摄与写回薄层'],
+    ['video-cockpit-smoke.js', '驾驶舱文件契约与 proposal CAS'],
+    ['video-shooting-smoke.js', '拍摄 session 状态机与收工计划'],
+    ['shooting-window-smoke.js', '纯本地提词器窗口与 IPC 白名单']
+  ]) {
+    const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
+      cwd: path.join(__dirname, '..'),
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024
+    });
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    check(`v0.7: ${label}直测纳入统一 smoke`, result.status === 0,
       result.status === 0 ? file : `${file} exit=${result.status}`);
   }
 

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'none'; font-src 'none'; media-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <meta name="whaledock-window-policy" content="contextIsolation:true; nodeIntegration:false; sandbox:true">
+  <title>拍摄现场 · 鲸坞 WhaleDock</title>
+  <link rel="stylesheet" href="shooting.css">
+  <script src="shooting.js" defer></script>
+</head>
+<body>
+  <div class="studio" id="studio" data-mode="checklist" data-playing="false" data-font="medium" data-phase="loading">
+    <header class="topbar">
+      <div class="identity">
+        <span class="record-mark" aria-hidden="true"></span>
+        <div>
+          <p class="eyebrow">WhaleDock · 本地拍摄现场</p>
+          <h1 id="shooting-title">正在准备拍摄现场</h1>
+        </div>
+      </div>
+
+      <div class="topbar-center">
+        <div class="mode-switch" role="group" aria-label="拍摄模式">
+          <button class="mode-button" id="mode-checklist" type="button" data-mode-value="checklist" aria-pressed="true">清单</button>
+          <button class="mode-button" id="mode-teleprompter" type="button" data-mode-value="teleprompter" aria-pressed="false">提词</button>
+        </div>
+      </div>
+
+      <div class="session-state" aria-live="polite">
+        <span class="state-dot" aria-hidden="true"></span>
+        <span id="session-status">载入中</span>
+      </div>
+    </header>
+
+    <main class="stage" id="stage">
+      <section class="checklist-view" id="checklist-view" aria-labelledby="checklist-heading">
+        <div class="progress-stage">
+          <div class="progress-ring" role="img" id="progress-ring" aria-label="拍摄进度 0%">
+            <svg viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+              <circle class="progress-track" cx="60" cy="60" r="52"></circle>
+              <circle class="progress-value" id="progress-value" cx="60" cy="60" r="52"></circle>
+            </svg>
+            <div class="progress-copy">
+              <strong id="progress-percent">0%</strong>
+              <span id="progress-count">0 / 0 镜</span>
+            </div>
+          </div>
+          <div class="progress-caption">
+            <p class="eyebrow">今日拍摄</p>
+            <h2 id="checklist-heading">一镜一镜，拍完就打勾</h2>
+            <p id="source-label">等待口播稿。</p>
+          </div>
+        </div>
+
+        <div class="shot-list-shell">
+          <ol class="shot-list" id="shot-list" aria-label="镜头清单"></ol>
+          <div class="empty-state" id="empty-state" role="status">
+            <span class="empty-line" aria-hidden="true"></span>
+            <strong id="empty-title">正在读取镜头</strong>
+            <p id="empty-detail">拍摄清单准备好后会出现在这里。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="teleprompter-view" id="teleprompter-view" aria-labelledby="prompt-shot-label" hidden>
+        <div class="prompt-meta">
+          <span class="shot-index" id="prompt-shot-label">当前镜头</span>
+          <span class="shot-duration" id="prompt-duration"></span>
+          <span class="retake-count" id="prompt-retakes" hidden></span>
+        </div>
+
+        <div class="prompt-frame">
+          <div class="focus-line" aria-hidden="true"></div>
+          <div class="prompt-scroll" id="prompt-scroll" tabindex="0" aria-label="当前镜头提词正文">
+            <p class="prompt-copy" id="prompt-copy">先在清单里选择一个镜头。</p>
+          </div>
+          <progress class="prompt-progress" id="prompt-progress" max="1" value="0" aria-label="当前镜头滚动进度"></progress>
+        </div>
+
+        <p class="prompt-state" id="prompt-state" role="status" aria-live="polite">已暂停</p>
+      </section>
+    </main>
+
+    <footer class="control-deck">
+      <div class="teleprompter-settings" id="teleprompter-settings" hidden>
+        <fieldset class="control-group speed-group">
+          <legend>速度</legend>
+          <div class="choice-row" id="speed-choices">
+            <button type="button" data-speed="0.6" aria-pressed="false">0.6</button>
+            <button type="button" data-speed="0.8" aria-pressed="false">0.8</button>
+            <button type="button" data-speed="1" aria-pressed="true">1.0</button>
+            <button type="button" data-speed="1.2" aria-pressed="false">1.2</button>
+            <button type="button" data-speed="1.5" aria-pressed="false">1.5</button>
+          </div>
+        </fieldset>
+
+        <fieldset class="control-group font-group">
+          <legend>字号</legend>
+          <div class="choice-row" id="font-choices">
+            <button type="button" data-font-size="small" aria-pressed="false">小</button>
+            <button type="button" data-font-size="medium" aria-pressed="true">中</button>
+            <button type="button" data-font-size="large" aria-pressed="false">大</button>
+          </div>
+        </fieldset>
+      </div>
+
+      <div class="keyboard-help" id="keyboard-help" hidden aria-label="键盘快捷键">
+        <span><kbd>空格</kbd> 暂停 / 继续</span>
+        <span><kbd>R</kbd> 这镜重来</span>
+      </div>
+
+      <div class="primary-controls">
+        <button class="retry-button" id="retry-shot" type="button" aria-keyshortcuts="R" hidden>
+          <span aria-hidden="true">↺</span> 这镜重来
+        </button>
+        <button class="playback-button" id="toggle-playback" type="button" aria-keyshortcuts="Space" hidden>
+          <span class="play-symbol" id="play-symbol" aria-hidden="true">▶</span>
+          <span id="play-label">开始提词</span>
+        </button>
+        <button class="finish-button" id="finish-shooting" type="button" disabled>收工并写回</button>
+      </div>
+    </footer>
+
+    <section class="finish-preview" id="finish-preview" aria-live="polite" hidden>
+      <div>
+        <p class="eyebrow">收工前最后核对</p>
+        <h2>这次拍摄记成这样</h2>
+        <p id="finish-summary">正在汇总。</p>
+        <small>此时还没有写文件。若要返回修改，点任意镜头或设置；确认无误后再点“确认收工并写回”。</small>
+      </div>
+    </section>
+
+    <div class="toast" id="toast" role="alert" aria-live="assertive" hidden></div>
+    <div class="visually-hidden" id="announcer" aria-live="polite" aria-atomic="true"></div>
+  </div>
+</body>
+</html>

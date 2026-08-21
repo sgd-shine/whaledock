@@ -62,12 +62,19 @@ async function main06() {
     assert.match(preload, /contextBridge\.exposeInMainWorld\('whaleShell'/);
     assert.equal(/exposeInMainWorld\([^,]+,\s*ipcRenderer/.test(preload), false);
     assert.equal(/require\(['"](?:fs|child_process|shell|clipboard|path)['"]\)/.test(preload), false);
-    const channels = [...preload.matchAll(/ipcRenderer\.(?:invoke|on)\('([^']+)'/g)]
+    const invoked = [...preload.matchAll(/ipcRenderer\.invoke\s*\(\s*['"]([^'"]+)['"]/g)]
       .map((item) => item[1]).sort();
-    assert.deepEqual([...new Set(channels)], [
-      'shell:action', 'shell:cockpit-view', 'shell:get', 'shell:install', 'shell:notice',
+    const listened = [...preload.matchAll(/ipcRenderer\.on\s*\(\s*['"]([^'"]+)['"]/g)]
+      .map((item) => item[1]).sort();
+    assert.deepEqual([...new Set(invoked)], [
+      'shell:action', 'shell:cockpit-view', 'shell:get', 'shell:install',
       'shell:onboarding-seen', 'shell:open-settings', 'shell:open-workspace',
-      'shell:remove', 'shell:state', 'shell:switch'
+      'shell:remove', 'shell:switch', 'shell:video:block-action', 'shell:video:document',
+      'shell:video:get', 'shell:video:project-action', 'shell:video:proposal-decision',
+      'shell:video:scene-action', 'shell:video:shoot', 'shell:video:undo'
+    ]);
+    assert.deepEqual([...new Set(listened)], [
+      'shell:notice', 'shell:state', 'shell:video-state'
     ]);
     // 拖入的路径只由 webUtils 解析后交给主进程；webUtils 本身绝不暴露给页面。
     assert.match(preload, /webUtils\.getPathForFile\(file\)/);
@@ -81,10 +88,14 @@ async function main06() {
     const handled = [...block.matchAll(/ipcMain\.handle\('([^']+)'/g)].map((item) => item[1]).sort();
     assert.deepEqual(handled, [
       'shell:action', 'shell:cockpit-view', 'shell:get', 'shell:install', 'shell:onboarding-seen',
-      'shell:open-settings', 'shell:open-workspace', 'shell:remove', 'shell:switch'
+      'shell:open-settings', 'shell:open-workspace', 'shell:remove', 'shell:switch',
+      'shell:video:block-action', 'shell:video:document', 'shell:video:get',
+      'shell:video:project-action', 'shell:video:proposal-decision', 'shell:video:scene-action',
+      'shell:video:shoot', 'shell:video:undo'
     ]);
     // 每一个 handle 都必须裹在 trustedShellHandler 里，一个都不能漏。
-    const guarded = (block.match(/trustedShellHandler\(/g) || []).length;
+    const guarded = (block.match(/trustedShellHandler\(/g) || []).length
+      + (block.match(/trustedVideoShellHandler\(/g) || []).length;
     assert.equal(guarded, handled.length);
     // 注册前先清旧 handler，跟其他窗口一个套路。
     assert.match(block, /for \(const channel of channels\) ipcMain\.removeHandler\(channel\);/);
@@ -674,9 +685,13 @@ async function main06() {
 
   await test('内置工作台包进入 electron-builder 产物，且外壳三件套也在', async () => {
     const pkg = JSON.parse(source('package.json'));
-    for (const entry of ['shell.html', 'shell.js', 'preload-shell.js', 'assets/**/*']) {
+    for (const entry of [
+      'shell.html', 'shell.js', 'preload-shell.js', 'preload-shooting.js',
+      'shooting.html', 'shooting.css', 'shooting.js', 'assets/**/*'
+    ]) {
       assert.ok(pkg.build.files.includes(entry), entry);
     }
+    assert.deepEqual(pkg.dependencies || {}, {});
     assert.ok(fs.existsSync(path.join(ROOT, 'assets', 'workbenches', '短视频创作台', 'manifest.json')));
   });
 
