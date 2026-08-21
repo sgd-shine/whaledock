@@ -24,6 +24,7 @@ const themes = require('./lib/themes');
 const workbenches = require('./lib/workbenches');
 const videoCockpit = require('./lib/video-cockpit');
 const videoShooting = require('./lib/video-shooting');
+const remote = require('./lib/remote');
 const log = require('./lib/log');
 const update = require('./lib/update');
 
@@ -613,6 +614,10 @@ let captureShutdownPromise = null;
 let captureShutdownComplete = false;
 let captureEpoch = 0;
 let captureShuttingDown = false;
+// v0.7 远程板块生命周期。平台 adapter 后续逐批注册；骨架阶段未配置时必须显示 unavailable。
+let remoteService = null;
+let remoteShutdownPromise = null;
+let remoteShutdownComplete = false;
 
 // ---------- 单实例 ----------
 if (!MAIN_HELPER_TEST) {
@@ -996,6 +1001,96 @@ function eventConfigSnapshot(value = config.get()) {
     priceOutputPerMillion: current.priceOutputPerMillion,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
   };
+}
+
+function remoteConfigSnapshot(value = config.get()) {
+  const current = value || {};
+  return {
+    channels: {
+      feishu: current.remoteFeishuEnabled === true,
+      dingtalk: current.remoteDingtalkEnabled === true,
+      web: current.remoteWebEnabled === true
+    },
+    policy: {
+      allowApprovals: current.remoteImApprovals !== false,
+      allowTaskCompletions: current.remoteImTaskCompletions !== false,
+      allowReports: current.remoteImReports !== false,
+      notificationsEnabled: current.taskNotifications !== false,
+      quietMode: current.quietMode === true
+    }
+  };
+}
+
+function remoteAuditEvent(event) {
+  if (!isPlainObject(event)) return;
+  const eventName = typeof event.event === 'string' && /^[a-z0-9-]{1,64}$/.test(event.event)
+    ? event.event : 'unknown';
+  const channel = remote.CHANNELS.includes(event.channelId) ? event.channelId : 'unknown';
+  const count = Number.isSafeInteger(event.count) && event.count >= 0 ? event.count : 0;
+  const reason = typeof event.reasonCode === 'string' && /^[a-z0-9-]{1,64}$/.test(event.reasonCode)
+    ? event.reasonCode : null;
+  log.line('remote', channel + ':' + eventName + ':count=' + count
+    + (reason ? ':reason=' + reason : ''));
+}
+
+function initRemoteService() {
+  remoteService = remote.createRemoteService({
+    auditEvent: remoteAuditEvent,
+    onStateChanged: () => {
+      if (settingsWindow && !settingsWindow.isDestroyed()) {
+        settingsWindow.webContents.send('settings:runtime', { remote: remoteRuntimeSnapshot() });
+      }
+    }
+  });
+  remoteShutdownPromise = null;
+  remoteShutdownComplete = false;
+}
+
+function remoteRuntimeSnapshot() {
+  if (remoteService) return remoteService.snapshot();
+  const desired = remoteConfigSnapshot().channels;
+  const channels = {};
+  for (const id of remote.CHANNELS) {
+    channels[id] = {
+      enabled: desired[id],
+      state: desired[id] ? 'unavailable' : 'disabled',
+      binding: 'unbound',
+      reasonCode: desired[id] ? 'service-unavailable' : null,
+      counters: {
+        received: 0, pushed: 0, approved: 0,
+        unauthorizedDropped: 0, policyDropped: 0, errors: 0
+      }
+    };
+  }
+  return { channels };
+}
+
+async function syncRemoteConfig(value = config.get()) {
+  if (!remoteService) return remoteRuntimeSnapshot();
+  const next = remoteConfigSnapshot(value);
+  await remoteService.configurePolicy(next.policy);
+  await Promise.all(remote.CHANNELS.map((id) => (
+    remoteService.setEnabled(id, next.channels[id])
+  )));
+  return remoteService.snapshot();
+}
+
+async function disconnectAllRemote() {
+  if (!remoteService) return remoteRuntimeSnapshot();
+  return remoteService.disconnectAll();
+}
+
+function beginRemoteShutdown() {
+  if (remoteShutdownComplete) return Promise.resolve();
+  if (remoteShutdownPromise) return remoteShutdownPromise;
+  remoteShutdownPromise = (remoteService ? remoteService.close() : Promise.resolve())
+    .then(() => { remoteShutdownComplete = true; })
+    .catch((error) => {
+      remoteShutdownComplete = true;
+      log.line('remote', 'close-failed:' + (error && error.code || 'unknown'));
+      throw error;
+    });
+  return remoteShutdownPromise;
 }
 
 function initEventService() {
@@ -4435,6 +4530,8 @@ async function onReady() {
   });
   await initializeWorkspaceConfig();
   log.init(path.join(app.getPath('userData'), 'logs'));
+  initRemoteService();
+  await syncRemoteConfig(config.get());
   initEventService();
   initializeWorkspaceCoordinator();
   log.line('app', `鲸坞 WhaleDock v${app.getVersion()} 启动 (${process.platform}/${process.arch})`);
@@ -6081,7 +6178,8 @@ function settingsRuntime() {
     logsUrl: pathToFileURL(log.dirPath()).href,
     workspace: currentWorkspaceSurface(),
     pets: petsRuntimeSurface(),
-    themes: themesRuntimeSurface()
+    themes: themesRuntimeSurface(),
+    remote: remoteRuntimeSnapshot()
   };
 }
 
@@ -6308,7 +6406,8 @@ function registerSettingsIpc() {
     'settings:restart-backend', 'settings:check-update',
     'settings:rescan-pets', 'settings:reload-themes', 'settings:open-resource-dir',
     'settings:list-workbenches', 'settings:switch-workbench',
-    'settings:remove-workbench', 'settings:rescan-workbenches'
+    'settings:remove-workbench', 'settings:rescan-workbenches',
+    'settings:remote-disconnect-all'
   ];
   for (const channel of channels) ipcMain.removeHandler(channel);
 
@@ -6337,6 +6436,13 @@ function registerSettingsIpc() {
       'priceInputPerMillion', 'priceCacheReadPerMillion', 'priceOutputPerMillion'
     ]);
     const eventConfigChanged = Object.keys(normalized).some((key) => eventFields.has(key));
+    const remoteFields = new Set([
+      'remoteFeishuEnabled', 'remoteDingtalkEnabled', 'remoteWebEnabled',
+      'remoteImApprovals', 'remoteImTaskCompletions', 'remoteImReports',
+      'taskNotifications', 'quietMode'
+    ]);
+    const remoteConfigChanged = Object.keys(normalized).some((key) => remoteFields.has(key));
+    let remoteWarning = '';
 
     if (hotkeyChanged) {
       hotkeyTransaction = applyHotkeyBindings(before, { ...before, ...normalized }, electronHotkeyRuntime());
@@ -6375,6 +6481,14 @@ function registerSettingsIpc() {
 
     if (hotkeyTransaction) hotkeyTransaction.commit();
 
+    if (remoteConfigChanged) {
+      try { await syncRemoteConfig(config.get()); }
+      catch (error) {
+        remoteWarning = '远程偏好已保存，但通道状态更新失败；请查看状态灯';
+        log.line('remote', 'config-sync-failed:' + (error && error.code || 'unknown'));
+      }
+    }
+
     // 宠物与主题都是即时生效项：config 落盘成功后才动窗口。
     if (['petEnabled', 'petPackageId', 'petAlwaysOnTop', 'petClickThrough']
       .some((key) => Object.prototype.hasOwnProperty.call(normalized, key))) {
@@ -6391,7 +6505,9 @@ function registerSettingsIpc() {
       settings: settingsSnapshot(),
       restartRequired: needsRestart,
       message: needsRestart ? '已保存，重启后端生效' : '设置已保存',
-      loginItem: login
+      loginItem: login,
+      remote: remoteRuntimeSnapshot(),
+      warning: remoteWarning || null
     };
   }));
 
@@ -6413,6 +6529,33 @@ function registerSettingsIpc() {
 
   ipcMain.handle('settings:check-update', trustedSettingsHandler(async () => {
     return runUpdateCheck(true);
+  }));
+
+  ipcMain.handle('settings:remote-disconnect-all', trustedSettingsHandler(async () => {
+    const disabled = config.validateSettingsPatch({
+      remoteFeishuEnabled: false,
+      remoteDingtalkEnabled: false,
+      remoteWebEnabled: false
+    });
+    // 先持久化“全关”这个安全期望；即使 adapter 随后拒绝确认断开，重启也不会重连。
+    config.set(disabled);
+    try {
+      const snapshot = await disconnectAllRemote();
+      return {
+        ok: true,
+        settings: settingsSnapshot(),
+        remote: snapshot,
+        message: '全部远程通道已断开'
+      };
+    } catch (error) {
+      log.line('remote', 'disconnect-all-failed:' + (error && error.code || 'unknown'));
+      return {
+        ok: false,
+        settings: settingsSnapshot(),
+        remote: remoteRuntimeSnapshot(),
+        message: '开关已关闭，但有通道未确认断开；退出鲸坞可强制结束本进程内连接'
+      };
+    }
   }));
 
   // 重新扫描只重读受控目录，不接受渲染层传入路径。
@@ -7411,6 +7554,9 @@ if (!MAIN_HELPER_TEST) {
     void beginCaptureShutdown().catch((error) => {
       log.line('capture', `图片资源退出清理失败：${error && error.code || 'unknown'}`);
     });
+    void beginRemoteShutdown().catch((error) => {
+      log.line('remote', 'shutdown-failed:' + (error && error.code || 'unknown'));
+    });
     // 宠物窗只是本地视觉层，退出时直接销毁并停掉瞬时态定时器。
     closePetWindow();
     // 叫醒阶梯与托盘定时器全部停掉，绝不把 Dock 弹跳留在那里。
@@ -7431,7 +7577,8 @@ if (!MAIN_HELPER_TEST) {
       ...pendingBackendStops,
       ...pendingWorkspaceOperations,
       ...(!eventShutdownComplete && eventShutdownPromise ? [eventShutdownPromise] : []),
-      ...(!captureShutdownComplete && captureShutdownPromise ? [captureShutdownPromise] : [])
+      ...(!captureShutdownComplete && captureShutdownPromise ? [captureShutdownPromise] : []),
+      ...(!remoteShutdownComplete && remoteShutdownPromise ? [remoteShutdownPromise] : [])
     ];
     if (pending.length) {
       e.preventDefault();

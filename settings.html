@@ -89,13 +89,17 @@
   .tabs {
     display: flex;
     gap: 5px;
+    overflow-x: auto;
+    scrollbar-width: none;
     padding: 9px 24px 8px;
     background: rgba(9, 14, 23, .78);
     border-bottom: 1px solid var(--line);
   }
+  .tabs::-webkit-scrollbar { display: none; }
 
   [role="tab"] {
     position: relative;
+    flex: 0 0 auto;
     min-width: 72px;
     padding: 7px 14px 8px;
     border: 0;
@@ -322,6 +326,129 @@
   }
   .boundary-note strong { color: #f7d99c; }
 
+  .remote-state {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 7px;
+    min-width: 116px;
+    color: var(--muted);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .remote-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--faint);
+    box-shadow: 0 0 0 3px rgba(101, 118, 138, .12);
+  }
+  .remote-state[data-state="connected"] { color: var(--success); }
+  .remote-state[data-state="connected"] .remote-dot {
+    background: var(--success);
+    box-shadow: 0 0 0 3px rgba(99, 210, 155, .13);
+  }
+  .remote-state[data-state="connecting"],
+  .remote-state[data-state="unavailable"] { color: var(--warning); }
+  .remote-state[data-state="connecting"] .remote-dot,
+  .remote-state[data-state="unavailable"] .remote-dot {
+    background: var(--warning);
+    box-shadow: 0 0 0 3px rgba(243, 197, 106, .13);
+  }
+  .remote-state[data-state="error"] { color: var(--error); }
+  .remote-state[data-state="error"] .remote-dot {
+    background: var(--error);
+    box-shadow: 0 0 0 3px rgba(255, 133, 133, .13);
+  }
+  .remote-channel-actions { display: flex; align-items: center; gap: 12px; }
+  #panel-remote .switch {
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+  }
+  #panel-remote .track {
+    position: relative;
+    width: 38px;
+    height: 22px;
+  }
+  .remote-guide-intro {
+    display: grid;
+    grid-template-columns: 54px minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+    padding: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .remote-guide-intro svg {
+    width: 50px;
+    height: 50px;
+    padding: 8px;
+    border: 1px solid rgba(91, 212, 230, .22);
+    border-radius: 14px;
+    background: rgba(20, 54, 68, .26);
+  }
+  .remote-guide-intro p {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.55;
+  }
+  .remote-guides details { border-top: 1px solid var(--line); }
+  .remote-guides details:first-of-type { border-top: 0; }
+  .remote-guides summary {
+    position: relative;
+    padding: 13px 38px 13px 14px;
+    color: var(--text);
+    cursor: pointer;
+    list-style: none;
+  }
+  .remote-guides summary::-webkit-details-marker { display: none; }
+  .remote-guides summary::after {
+    content: "+";
+    position: absolute;
+    top: 10px;
+    right: 14px;
+    color: var(--accent);
+    font-size: 19px;
+    font-weight: 300;
+  }
+  .remote-guides details[open] summary::after { content: "−"; }
+  .remote-guide-steps {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0;
+    padding: 0 14px 14px;
+    list-style: none;
+  }
+  .remote-guide-step {
+    min-width: 0;
+    padding: 11px;
+    border: 1px solid rgba(38, 53, 72, .82);
+    border-radius: 9px;
+    background: rgba(12, 20, 32, .72);
+  }
+  .remote-guide-step svg {
+    display: block;
+    width: 25px;
+    height: 25px;
+    margin-bottom: 8px;
+    color: var(--accent);
+  }
+  .remote-guide-step strong { display: block; color: var(--text); font-size: 12px; }
+  .remote-guide-step p { margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+  .remote-guide-option {
+    margin: 0 14px 14px;
+    padding: 10px 11px;
+    border: 1px dashed rgba(91, 212, 230, .28);
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.55;
+  }
+  .remote-guide-option strong { color: var(--accent); }
+
   .faq details { border-top: 1px solid var(--line); }
   .faq details:first-child { border-top: 0; }
   .faq summary {
@@ -397,6 +524,7 @@
 
   @media (max-width: 620px) {
     .price-grid { grid-template-columns: 1fr; }
+    .remote-guide-steps { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -422,6 +550,7 @@
     <button id="tab-backend" role="tab" aria-selected="false" aria-controls="panel-backend" tabindex="-1">后端</button>
     <button id="tab-usage" role="tab" aria-selected="false" aria-controls="panel-usage" tabindex="-1">用量与预算</button>
     <button id="tab-workbench" role="tab" aria-selected="false" aria-controls="panel-workbench" tabindex="-1">工作台</button>
+    <button id="tab-remote" role="tab" aria-selected="false" aria-controls="panel-remote" tabindex="-1">远程</button>
     <button id="tab-look" role="tab" aria-selected="false" aria-controls="panel-look" tabindex="-1">外观与宠物</button>
     <button id="tab-help" role="tab" aria-selected="false" aria-controls="panel-help" tabindex="-1">帮助</button>
   </nav>
@@ -705,6 +834,195 @@
       </div>
     </section>
 
+    <section id="panel-remote" role="tabpanel" aria-labelledby="tab-remote" hidden>
+      <div class="section">
+        <h2 class="section-title">远程通道</h2>
+        <div class="card">
+          <div class="row">
+            <div>
+              <div class="row-label">飞书</div>
+              <div id="remote-feishu-note" class="row-note" role="status" aria-live="polite" aria-atomic="true">自建应用 · 官方长连接 · 已关闭 · 未绑定</div>
+            </div>
+            <div class="remote-channel-actions">
+              <div id="remote-feishu-state" class="remote-state" data-state="disabled" aria-hidden="true">
+                <span class="remote-dot" aria-hidden="true"></span><span>已关闭</span>
+              </div>
+              <label class="switch" aria-label="启用飞书远程通道">
+                <input id="remoteFeishuEnabled" type="checkbox">
+                <span class="track"></span>
+              </label>
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-label">钉钉</div>
+              <div id="remote-dingtalk-note" class="row-note" role="status" aria-live="polite" aria-atomic="true">企业内部应用 · Stream 模式 · 已关闭 · 未绑定</div>
+            </div>
+            <div class="remote-channel-actions">
+              <div id="remote-dingtalk-state" class="remote-state" data-state="disabled" aria-hidden="true">
+                <span class="remote-dot" aria-hidden="true"></span><span>已关闭</span>
+              </div>
+              <label class="switch" aria-label="启用钉钉远程通道">
+                <input id="remoteDingtalkEnabled" type="checkbox">
+                <span class="track"></span>
+              </label>
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-label">随身网页</div>
+              <div id="remote-web-note" class="row-note" role="status" aria-live="polite" aria-atomic="true">同一 Wi-Fi 即用，不经过第三方服务器 · 已关闭 · 未绑定</div>
+            </div>
+            <div class="remote-channel-actions">
+              <div id="remote-web-state" class="remote-state" data-state="disabled" aria-hidden="true">
+                <span class="remote-dot" aria-hidden="true"></span><span>已关闭</span>
+              </div>
+              <label class="switch" aria-label="启用随身网页通道">
+                <input id="remoteWebEnabled" type="checkbox">
+                <span class="track"></span>
+              </label>
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-label">立即停止全部远程连接</div>
+              <div class="row-note">会同时关闭三个开关并请求每条连接断开；若有通道未确认，会提示你退出鲸坞彻底结束</div>
+            </div>
+            <button id="remote-disconnect-all" class="button">全部断开</button>
+          </div>
+        </div>
+        <div class="boundary-note"><strong>状态以真实连接为准。</strong>没有平台凭据或通道尚未接线时只会显示“未配置”，不会假装在线。</div>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">第一次连接：照着三步做</h2>
+        <div class="card remote-guides">
+          <div class="remote-guide-intro">
+            <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+              <path d="M11 9h21a5 5 0 0 1 5 5v25H16a5 5 0 0 1-5-5V9Z" stroke="#5BD4E6" stroke-width="2"/>
+              <path d="M16 14h15M16 20h15M16 26h10" stroke="#EAFBFD" stroke-width="2" stroke-linecap="round"/>
+              <circle cx="35" cy="35" r="8" fill="#102837" stroke="#63D29B" stroke-width="2"/>
+              <path d="m31.5 35 2.2 2.2 4.4-4.6" stroke="#63D29B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <div>
+              <div class="row-label">这是给每位鲸坞用户的自助向导</div>
+              <p>你在自己的平台后台建应用，把凭据只交给本机鲸坞，再用自己的账号发首条消息完成绑定。鲸坞官方永远不经手任何用户凭据。</p>
+            </div>
+          </div>
+
+          <details id="remote-guide-feishu">
+            <summary><strong>飞书：</strong>自建应用 → 本机保存凭据 → 绑定本人</summary>
+            <ol class="remote-guide-steps">
+              <li class="remote-guide-step">
+                <svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><rect x="4" y="5" width="20" height="18" rx="3" stroke="currentColor" stroke-width="2"/><path d="M9 10h10M9 14h10M9 18h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <strong>1. 建自建应用</strong>
+                <p>在你自己的飞书开发者后台创建企业自建应用，启用机器人和官方长连接事件。</p>
+              </li>
+              <li class="remote-guide-step">
+                <svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><circle cx="9" cy="14" r="5" stroke="currentColor" stroke-width="2"/><path d="M14 14h10M20 14v4M17 14v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <strong>2. 抄 App ID / Secret</strong>
+                <p>平台接通后，这里会出现本机凭据框；密钥不会写进普通设置、日志或公开仓库。</p>
+              </li>
+              <li class="remote-guide-step">
+                <svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><rect x="7" y="3" width="14" height="22" rx="3" stroke="currentColor" stroke-width="2"/><path d="m10 15 3 3 6-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <strong>3. 发消息并确认</strong>
+                <p>用本人飞书发首条消息，再回桌面确认绑定；其他账号的消息会静默丢弃。</p>
+              </li>
+            </ol>
+          </details>
+
+          <details id="remote-guide-dingtalk">
+            <summary><strong>钉钉：</strong>内部应用 → 本机保存凭据 → 绑定本人</summary>
+            <ol class="remote-guide-steps">
+              <li class="remote-guide-step">
+                <svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><rect x="4" y="5" width="20" height="18" rx="3" stroke="currentColor" stroke-width="2"/><path d="M9 10h10M9 14h10M9 18h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <strong>1. 建内部应用</strong>
+                <p>在你自己的钉钉开发者后台创建企业内部应用，启用机器人和 Stream 模式。</p>
+              </li>
+              <li class="remote-guide-step">
+                <svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><circle cx="9" cy="14" r="5" stroke="currentColor" stroke-width="2"/><path d="M14 14h10M20 14v4M17 14v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <strong>2. 抄 Client ID / Secret</strong>
+                <p>平台接通后，这里会出现本机凭据框；凭据只留在你的电脑上，鲸坞官方看不到。</p>
+              </li>
+              <li class="remote-guide-step">
+                <svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><rect x="7" y="3" width="14" height="22" rx="3" stroke="currentColor" stroke-width="2"/><path d="m10 15 3 3 6-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <strong>3. 发消息并确认</strong>
+                <p>用本人钉钉发首条消息，再回桌面确认绑定；绑定前不会收进工作区。</p>
+              </li>
+            </ol>
+          </details>
+
+          <details id="remote-guide-web">
+            <summary><strong>随身网页：</strong>同一 Wi-Fi 默认可用，出门再选 Tailscale</summary>
+            <ol class="remote-guide-steps">
+              <li class="remote-guide-step">
+                <svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><path d="M4 11a15 15 0 0 1 20 0M8 15a9 9 0 0 1 12 0M12 19a3 3 0 0 1 4 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="14" cy="23" r="1.5" fill="currentColor"/></svg>
+                <strong>1. 连同一 Wi-Fi</strong>
+                <p>手机和电脑在同一个可信局域网，无需安装其他 App。</p>
+              </li>
+              <li class="remote-guide-step">
+                <svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><rect x="4" y="6" width="20" height="16" rx="3" stroke="currentColor" stroke-width="2"/><path d="m9 14 3 3 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <strong>2. 开启并扫码</strong>
+                <p>网页通道接通后会生成带随机令牌的二维码/一次性链接，只绑定局域网接口。</p>
+              </li>
+              <li class="remote-guide-step">
+                <svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><path d="M14 3 5 7v6c0 6 3.8 10.2 9 12 5.2-1.8 9-6 9-12V7l-9-4Z" stroke="currentColor" stroke-width="2"/><path d="M10 14h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <strong>3. 用完随时断开</strong>
+                <p>令牌鉴权；“全部断开”会关闭开关并请求停止监听，未确认时会明确提示。</p>
+              </li>
+            </ol>
+            <div class="remote-guide-option"><strong>可选：Tailscale。</strong>它会把你的手机和电脑拉进同一个虚拟局域网，出门也像在家里连。网页通道可检测并引导本机安装；注册、登录和设备授权必须由你本人在官方页面完成。</div>
+          </details>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">允许走 IM 的内容</h2>
+        <div class="card">
+          <div class="row">
+            <div>
+              <div class="row-label">等你确认的事项</div>
+              <div class="row-note">只推已有确认项；远程回复仍要映射回既有确认机制</div>
+            </div>
+            <label class="switch" aria-label="允许确认事项走 IM">
+              <input id="remoteImApprovals" type="checkbox">
+              <span class="track"></span>
+            </label>
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-label">任务完成</div>
+              <div class="row-note">只发匿名任务结果，不发送完整对话正文</div>
+            </div>
+            <label class="switch" aria-label="允许任务完成走 IM">
+              <input id="remoteImTaskCompletions" type="checkbox">
+              <span class="track"></span>
+            </label>
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-label">报告类产物已生成</div>
+              <div class="row-note">只推受控工作区里的报告产物，不接受任意路径</div>
+            </div>
+            <label class="switch" aria-label="允许报告产物走 IM">
+              <input id="remoteImReports" type="checkbox">
+              <span class="track"></span>
+            </label>
+          </div>
+          <div class="row">
+            <div>
+              <div class="row-label">客服工作区内容</div>
+              <div class="row-note">固定禁止走飞书/钉钉，只允许私网随身网页；此安全边界不可在设置里放宽</div>
+            </div>
+            <div class="remote-state" data-state="unavailable" aria-label="客服工作区仅限私网">
+              <span class="remote-dot" aria-hidden="true"></span><span>仅私网</span>
+            </div>
+          </div>
+        </div>
+        <div class="boundary-note"><strong>第三方边界。</strong>飞书、钉钉消息会经过对应平台服务器；随身网页默认只在同一 Wi-Fi 的可信局域网内提供只读视图和既有投递入口。需要外出访问时才选 Tailscale。</div>
+      </div>
+    </section>
+
     <section id="panel-look" role="tabpanel" aria-labelledby="tab-look" hidden>
       <div class="section">
         <h2 class="section-title">外观</h2>
@@ -838,12 +1156,16 @@
     'port', 'dshVersion', 'preferBundled', 'command',
     'taskNotifications', 'budgetEnabled', 'dailyTokenBudget',
     'priceInputPerMillion', 'priceCacheReadPerMillion', 'priceOutputPerMillion',
-    'quietMode', 'wakeNudgeEnabled', 'wakeEscalateEnabled', 'wakeSoundEnabled'
+    'quietMode', 'wakeNudgeEnabled', 'wakeEscalateEnabled', 'wakeSoundEnabled',
+    'remoteFeishuEnabled', 'remoteDingtalkEnabled', 'remoteWebEnabled',
+    'remoteImApprovals', 'remoteImTaskCompletions', 'remoteImReports'
   ];
   const booleanFields = new Set([
     'openAtLogin', 'startMinimized', 'checkUpdates', 'preferBundled',
     'screenshotHotkeyEnabled', 'taskNotifications', 'budgetEnabled',
-    'quietMode', 'wakeNudgeEnabled', 'wakeEscalateEnabled', 'wakeSoundEnabled'
+    'quietMode', 'wakeNudgeEnabled', 'wakeEscalateEnabled', 'wakeSoundEnabled',
+    'remoteFeishuEnabled', 'remoteDingtalkEnabled', 'remoteWebEnabled',
+    'remoteImApprovals', 'remoteImTaskCompletions', 'remoteImReports'
   ]);
   const numberFields = new Set([
     'port', 'dailyTokenBudget', 'priceInputPerMillion',
@@ -916,7 +1238,16 @@
       priceCacheReadPerMillion: Number(source && source.priceCacheReadPerMillion !== undefined
         ? source.priceCacheReadPerMillion : 0.02),
       priceOutputPerMillion: Number(source && source.priceOutputPerMillion !== undefined
-        ? source.priceOutputPerMillion : 2)
+        ? source.priceOutputPerMillion : 2),
+      remoteFeishuEnabled: Boolean(source && source.remoteFeishuEnabled),
+      remoteDingtalkEnabled: Boolean(source && source.remoteDingtalkEnabled),
+      remoteWebEnabled: Boolean(source && source.remoteWebEnabled),
+      remoteImApprovals: source && source.remoteImApprovals !== undefined
+        ? Boolean(source.remoteImApprovals) : true,
+      remoteImTaskCompletions: source && source.remoteImTaskCompletions !== undefined
+        ? Boolean(source.remoteImTaskCompletions) : true,
+      remoteImReports: source && source.remoteImReports !== undefined
+        ? Boolean(source.remoteImReports) : true
     };
   }
 
@@ -1023,6 +1354,8 @@
       loginNote.style.color = '';
     }
 
+    renderRemoteRuntime(runtime.remote || runtimeSnapshot.remote);
+
     for (const [id, url] of [
       ['open-manual', runtimeSnapshot.manualUrl],
       ['open-logs', runtimeSnapshot.logsUrl]
@@ -1037,6 +1370,62 @@
         link.setAttribute('aria-disabled', 'true');
         link.tabIndex = -1;
       }
+    }
+  }
+
+  const remoteStateText = Object.freeze({
+    disabled: '已关闭',
+    disconnected: '未连接',
+    connecting: '连接中',
+    connected: '已连接',
+    error: '故障',
+    unavailable: '未配置'
+  });
+  // 只把内部 reasonCode 映射成固定中文提示；未知值一律收口，绝不显示平台原始错误。
+  const remoteReasonText = Object.freeze({
+    'adapter-missing': '功能尚未接通',
+    'service-unavailable': '远程服务尚未就绪',
+    'connect-timeout': '连接超时，请稍后重试',
+    'connect-failed': '连接失败，请检查本机配置',
+    'connect-cleanup-pending': '旧连接仍在回收，未确认前不会重连',
+    'disconnect-failed': '未确认断开，请退出鲸坞彻底结束',
+    'transport-error': '连接意外中断，请稍后重试',
+    'remote-closed': '连接已断开，请稍后重试',
+    'receive-failed': '收件失败，请回桌面重试',
+    'push-failed': '推送失败，请回桌面重试',
+    'approval-reply-failed': '确认回复失败，请回桌面处理',
+    'approval-uncertain': '确认状态不确定，请回桌面对账',
+    'binding-unavailable': '本机绑定卡未就绪，请重试',
+    'binding-persist-failed': '绑定未能安全保存，请重试'
+  });
+  const unknownRemoteReasonText = '通道暂不可用，请回桌面检查';
+  const remoteChannelMeta = Object.freeze({
+    feishu: { stateId: 'remote-feishu-state', noteId: 'remote-feishu-note', prefix: '自建应用 · 官方长连接' },
+    dingtalk: { stateId: 'remote-dingtalk-state', noteId: 'remote-dingtalk-note', prefix: '企业内部应用 · Stream 模式' },
+    web: { stateId: 'remote-web-state', noteId: 'remote-web-note', prefix: '同一 Wi-Fi 即用，不经过第三方服务器' }
+  });
+
+  function renderRemoteRuntime(value) {
+    const channels = value && value.channels ? value.channels : value || {};
+    for (const [id, meta] of Object.entries(remoteChannelMeta)) {
+      const channel = channels && channels[id] || {};
+      const state = Object.prototype.hasOwnProperty.call(remoteStateText, channel.state)
+        ? channel.state : 'unavailable';
+      const stateElement = document.getElementById(meta.stateId);
+      if (stateElement.dataset.state !== state) stateElement.dataset.state = state;
+      const text = stateElement.querySelector('span:last-child');
+      if (text.textContent !== remoteStateText[state]) text.textContent = remoteStateText[state];
+      const binding = channel.binding === 'bound'
+        ? '已绑定' : channel.binding === 'pending' ? '等待桌面确认' : '未绑定';
+      const dropped = Number.isSafeInteger(channel.counters && channel.counters.unauthorizedDropped)
+        ? channel.counters.unauthorizedDropped : 0;
+      const reasonCode = typeof channel.reasonCode === 'string' ? channel.reasonCode : '';
+      const reason = Object.prototype.hasOwnProperty.call(remoteReasonText, reasonCode)
+        ? remoteReasonText[reasonCode] : reasonCode ? unknownRemoteReasonText : '';
+      const nextNote = `${meta.prefix} · ${remoteStateText[state]} · ${binding}${reason ? ` · ${reason}` : ''}${dropped ? ` · 已静默丢弃 ${dropped} 条非白名单消息` : ''}`;
+      const noteElement = document.getElementById(meta.noteId);
+      // 不重写未变化的 live region，避免读屏器在每次计数快照时重复播报三条状态。
+      if (noteElement.textContent !== nextNote) noteElement.textContent = nextNote;
     }
   }
 
@@ -1371,6 +1760,7 @@
       if (responseFailed(result)) throw new Error(messageOf(result, '保存失败'));
       snapshot = normalizedConfig((result && (result.config || result.settings)) || { ...snapshot, ...patch });
       renderConfig(snapshot);
+      if (result && result.remote) renderRemoteRuntime(result.remote);
       const restartRequired = Boolean(result && result.restartRequired) || Object.keys(patch).some((name) => backendFields.has(name));
       showRestartNotice(restartRequired);
       const warning = result && (result.warning || result.loginItemWarning || result.loginItem && result.loginItem.error);
@@ -1440,6 +1830,29 @@
     }
   }
 
+  async function disconnectRemote() {
+    setBusy(true, '正在断开全部远程连接…');
+    try {
+      const result = await api.disconnectRemote();
+      // 主进程先持久化三个关闭开关；即使 adapter 未确认断开，也必须先应用权威回读，
+      // 避免旧 UI 在下一次保存时把通道意外重开。
+      if (result && result.settings) {
+        snapshot = normalizedConfig(result.settings);
+        renderConfig(snapshot);
+      }
+      if (result && result.remote) renderRemoteRuntime(result.remote);
+      if (responseFailed(result)) {
+        setStatus(messageOf(result, '远程连接未能全部断开'), 'error');
+        return;
+      }
+      setStatus('三个远程通道均已关闭并确认断开', 'success');
+    } catch (error) {
+      setStatus(messageOf(error, '远程连接未能全部断开'), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function activateTab(tab, focus) {
     for (const candidate of document.querySelectorAll('[role="tab"]')) {
       const active = candidate === tab;
@@ -1488,6 +1901,7 @@
   document.getElementById('choose-workdir').addEventListener('click', chooseWorkdir);
   document.getElementById('check-update').addEventListener('click', checkUpdate);
   document.getElementById('restart-now').addEventListener('click', restartBackend);
+  document.getElementById('remote-disconnect-all').addEventListener('click', disconnectRemote);
   saveButton.addEventListener('click', save);
   cancelButton.addEventListener('click', () => window.close());
   document.addEventListener('keydown', (event) => {
@@ -1502,6 +1916,17 @@
     setStatus('设置桥接不可用，请重新启动鲸坞', 'error');
     setBusy(false);
   } else {
+    if (typeof api.onRuntime === 'function') {
+      const removeRuntimeListener = api.onRuntime((payload) => {
+        const remoteValue = payload && (payload.remote || payload.runtime && payload.runtime.remote);
+        if (!remoteValue) return;
+        runtimeSnapshot = { ...runtimeSnapshot, remote: remoteValue };
+        renderRemoteRuntime(remoteValue);
+      });
+      window.addEventListener('beforeunload', () => {
+        if (typeof removeRuntimeListener === 'function') removeRuntimeListener();
+      }, { once: true });
+    }
     bindLook();
     bindWorkbenches();
     void refreshWorkbenches();
