@@ -1372,10 +1372,28 @@ const WORKBENCH_INSTALL_LIMITS = Object.freeze({
   maxEntries: 512, maxDepth: 5, maxTotalBytes: 32 * 1024 * 1024, maxFileBytes: 8 * 1024 * 1024
 });
 let workbenchCache = null;
-// 引导卡只在首次启用时弹一次；之后在「关于这个工作台」里能再看。
-const workbenchOnboardingSeen = new Set();
-// 重工作台的确认卡也只问一次：之后再切回这个工作台，一下就过去，什么都不弹。
-const workbenchHeavyConfirmed = new Set();
+const WORKBENCH_REMEMBERED_LIMIT = 64;
+
+// 首次引导与重工作台确认要跨 App 重启记住。纯函数保持 NFD/NFC 原样，不做 Unicode 归一化；
+// 真正落盘由 lib/config.js 校验，最多记住与扫描上限相同的 64 个 id。
+function workbenchIdRemembered(ids, id) {
+  return typeof id === 'string' && Array.isArray(ids) && ids.includes(id);
+}
+
+function rememberWorkbenchId(ids, id) {
+  const source = Array.isArray(ids) ? ids : [];
+  if (typeof id !== 'string' || !id) return source.slice(-WORKBENCH_REMEMBERED_LIMIT);
+  return [...source.filter((item) => item !== id), id].slice(-WORKBENCH_REMEMBERED_LIMIT);
+}
+
+function forgetWorkbenchId(ids, id) {
+  const source = Array.isArray(ids) ? ids : [];
+  return source.filter((item) => item !== id).slice(-WORKBENCH_REMEMBERED_LIMIT);
+}
+
+function shouldShowWorkbenchOnboarding(pkg, ids) {
+  return Boolean(pkg && pkg.onboarding && !workbenchIdRemembered(ids, pkg.id));
+}
 
 function workbenchRoots() {
   const roots = [{ dir: path.join(__dirname, 'assets', 'workbenches'), source: 'builtin' }];
@@ -1578,7 +1596,10 @@ async function applyWorkbench(workbenchId, options = {}) {
     config.set({ workbenchId: wanted, lastWorkbenchId: previous });
   }
 
-  const firstTime = Boolean(target && target.onboarding && !workbenchOnboardingSeen.has(target.id));
+  const firstTime = shouldShowWorkbenchOnboarding(
+    target,
+    config.get('workbenchOnboardingSeenIds')
+  );
   refreshWorkbenchSurfaces({ showOnboarding: firstTime });
   log.line('app', `工作台切换：${previous || '默认工作台'} → ${wanted || '默认工作台'}`);
   return { kind: 'ok' };
@@ -1592,10 +1613,12 @@ async function switchToHeavyWorkbench(target, previous, options = {}) {
   if (!plan) return { kind: 'error', text: '这个工作台的文件夹结构不可用，没有切换。' };
 
   const targetLabel = path.join('文稿', '鲸坞工作台', plan.root);
-  if (!workbenchHeavyConfirmed.has(target.id) && options.confirm !== false) {
+  const confirmedIds = config.get('workbenchHeavyConfirmedIds');
+  let confirmed = workbenchIdRemembered(confirmedIds, target.id);
+  if (!confirmed && options.confirm !== false) {
     const agreed = await confirmHeavyWorkbench(target, plan, targetLabel);
     if (!agreed) return { kind: 'cancelled' };
-    workbenchHeavyConfirmed.add(target.id);
+    confirmed = true;
   }
 
   let ensured;
@@ -1620,7 +1643,12 @@ async function switchToHeavyWorkbench(target, previous, options = {}) {
     return { kind: 'error', text: heavyWorkbenchSwitchMessage(error, target) };
   }
   // 事务提交之后才认这个工作台。
-  config.set({ workbenchId: target.id, lastWorkbenchId: previous });
+  config.set({
+    workbenchId: target.id,
+    lastWorkbenchId: previous,
+    workbenchHeavyConfirmedIds: confirmed
+      ? rememberWorkbenchId(confirmedIds, target.id) : confirmedIds
+  });
   return { kind: 'ok' };
 }
 
@@ -1772,16 +1800,21 @@ async function removeWorkbenchPack(workbenchId) {
   if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
     return { kind: 'error', text: '这个路径不在工作台目录里，没有删除。' };
   }
-  if (config.get('workbenchId') === workbenchId) {
-    config.set({ workbenchId: null });
-  }
-  if (config.get('lastWorkbenchId') === workbenchId) {
-    config.set({ lastWorkbenchId: null });
-  }
+  const cleanupPatch = {
+    workbenchOnboardingSeenIds: forgetWorkbenchId(
+      config.get('workbenchOnboardingSeenIds'), workbenchId
+    ),
+    workbenchHeavyConfirmedIds: forgetWorkbenchId(
+      config.get('workbenchHeavyConfirmedIds'), workbenchId
+    )
+  };
+  if (config.get('workbenchId') === workbenchId) cleanupPatch.workbenchId = null;
+  if (config.get('lastWorkbenchId') === workbenchId) cleanupPatch.lastWorkbenchId = null;
   try { fs.rmSync(real, { recursive: true, force: true }); } catch (error) {
     log.line('app', `移除工作台失败：${error && error.message || 'unknown'}`);
     return { kind: 'error', text: '删除副本失败。' };
   }
+  config.set(cleanupPatch);
   log.line('app', `已移除工作台 ${workbenchId}`);
   listAvailableWorkbenches({ refresh: true });
   refreshWorkbenchSurfaces();
@@ -4087,7 +4120,10 @@ function registerShellIpc() {
 
   ipcMain.handle('shell:get', trustedShellHandler(async () => {
     const active = currentWorkbench();
-    const firstTime = Boolean(active && active.onboarding && !workbenchOnboardingSeen.has(active.id));
+    const firstTime = shouldShowWorkbenchOnboarding(
+      active,
+      config.get('workbenchOnboardingSeenIds')
+    );
     return shellStateSnapshot({ showOnboarding: firstTime });
   }));
 
@@ -4123,7 +4159,13 @@ function registerShellIpc() {
   }));
 
   ipcMain.handle('shell:onboarding-seen', trustedShellHandler(async (workbenchId) => {
-    if (typeof workbenchId === 'string' && workbenchId) workbenchOnboardingSeen.add(workbenchId);
+    const active = currentWorkbench();
+    if (active && active.id === workbenchId && active.onboarding) {
+      const seenIds = config.get('workbenchOnboardingSeenIds');
+      config.set({
+        workbenchOnboardingSeenIds: rememberWorkbenchId(seenIds, active.id)
+      });
+    }
     return { kind: 'ok' };
   }));
 }
@@ -5265,6 +5307,10 @@ if (MAIN_HELPER_TEST) {
     PET_PAYLOAD_MAX_BYTES,
     submitPromptOnce,
     workbenchDetail,
+    workbenchIdRemembered,
+    rememberWorkbenchId,
+    forgetWorkbenchId,
+    shouldShowWorkbenchOnboarding,
     trayStateFrom,
     trayTooltipFor,
     wakeLadderPlan,

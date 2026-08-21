@@ -404,12 +404,54 @@ async function main06() {
     // 顺序：先建目录 → 再切工作区 → 事务成功后才落 workbenchId。
     const ensureIndex = block.indexOf('ensureWorkbenchWorkspace(plan');
     const switchIndex = block.indexOf('await switchWorkspace(');
-    const configIndex = block.indexOf("config.set({ workbenchId: target.id");
+    const configIndex = block.indexOf('config.set({', switchIndex);
     assert.ok(ensureIndex > -1 && switchIndex > ensureIndex && configIndex > switchIndex);
+    assert.ok(block.indexOf('workbenchId: target.id', configIndex) > configIndex);
     // 切换期间界面必须显示在忙。
     assert.match(block, /pushShellState\(\{ busy: true/);
-    // 确认卡只问一次。
-    assert.match(block, /workbenchHeavyConfirmed\.has\(target\.id\)/);
+    // 确认卡跨重启也只问一次，读取持久化 id 清单。
+    assert.match(block, /workbenchHeavyConfirmedIds/);
+    assert.match(block, /workbenchIdRemembered/);
+    const confirmedPersistIndex = block.indexOf('workbenchHeavyConfirmedIds:');
+    assert.ok(confirmedPersistIndex > switchIndex, '切换失败前不得记成重工作台已确认');
+  });
+
+  await test('工作台首次引导与重工作台确认跨重启记住，移除包后清理', async () => {
+    const nfdId = 'user:Cafe\u0301组合名工作台';
+    const pkg = { id: nfdId, onboarding: '# NFC/NFD 验收' };
+    assert.equal(main.shouldShowWorkbenchOnboarding(pkg, []), true);
+    let onboardingIds = main.rememberWorkbenchId([], nfdId);
+    assert.equal(main.shouldShowWorkbenchOnboarding(pkg, onboardingIds), false);
+    onboardingIds = main.rememberWorkbenchId(onboardingIds, nfdId);
+    assert.deepEqual(onboardingIds, [nfdId], '重复回执不重复记');
+
+    let heavyIds = main.rememberWorkbenchId([], 'builtin:短视频创作台');
+    assert.equal(main.workbenchIdRemembered(heavyIds, 'builtin:短视频创作台'), true);
+    const sixtyFive = Array.from({ length: 65 }, (_, index) => `user:fixture-${index}`)
+      .reduce((ids, id) => main.rememberWorkbenchId(ids, id), []);
+    assert.equal(sixtyFive.length, 64);
+    assert.equal(sixtyFive.includes('user:fixture-0'), false, '第 65 项淘汰最旧项');
+    assert.equal(sixtyFive.includes('user:fixture-64'), true);
+
+    onboardingIds = main.forgetWorkbenchId(onboardingIds, nfdId);
+    heavyIds = main.forgetWorkbenchId(heavyIds, 'builtin:短视频创作台');
+    assert.equal(main.shouldShowWorkbenchOnboarding(pkg, onboardingIds), true);
+    assert.equal(main.workbenchIdRemembered(heavyIds, 'builtin:短视频创作台'), false);
+
+    const value = source('main.js');
+    assert.equal(/workbenchOnboardingSeen\s*=\s*new Set/.test(value), false);
+    assert.equal(/workbenchHeavyConfirmed\s*=\s*new Set/.test(value), false);
+    assert.ok((value.match(/workbenchOnboardingSeenIds/g) || []).length >= 4);
+    assert.ok((value.match(/workbenchHeavyConfirmedIds/g) || []).length >= 3);
+    const ipcBlock = value.slice(value.indexOf("ipcMain.handle('shell:onboarding-seen'"), value.indexOf('function registerSettingsIpc()'));
+    assert.match(ipcBlock, /active\.id === workbenchId/);
+    assert.match(ipcBlock, /config\.set\(/);
+    const removeBlock = value.slice(value.indexOf('async function removeWorkbenchPack('), value.indexOf('// ---------- actions 按钮'));
+    assert.match(removeBlock, /forgetWorkbenchId/);
+    assert.ok(
+      removeBlock.indexOf('fs.rmSync(real') < removeBlock.indexOf('config.set(cleanupPatch)'),
+      '删除失败时必须保留 active/last 与两份首次确认记忆'
+    );
   });
 
   await test('外部 attach 拒绝切换时有专门的解释文案', async () => {
