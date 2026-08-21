@@ -733,6 +733,108 @@ async function main() {
     assert.equal(plan.folders[0].files[0].name, workbenches.README_FILE_NAME);
   });
 
+  await test('内置电商客服是纯数据重工作台：22 条虚构话术、八个按钮与脱敏红线完整', async () => {
+    const root = path.join(__dirname, '..');
+    const listed = workbenches.listWorkbenchPackages({
+      roots: [{ dir: path.join(root, 'assets', 'workbenches'), source: 'builtin' }]
+    });
+    assert.equal(listed.skipped.length, 0, '两个内置包都不许被跳过');
+    const pkg = listed.packages.find((item) => item.id === 'builtin:电商客服');
+    assert.notEqual(pkg, undefined);
+    assert.equal(pkg.issues.length, 0, '电商客服包必须零 issue');
+    assert.equal(pkg.unknownFieldCount, 0);
+    assert.equal(pkg.version, '0.1.0');
+    assert.equal(pkg.license, 'MIT');
+    assert.equal(pkg.dshRange, '0.1.0-rc.6');
+    assert.equal(pkg.heavy, true);
+    assert.deepEqual(
+      fs.readdirSync(pkg.dir).sort(),
+      ['actions.json', 'manifest.json', 'onboarding.md', 'skills.json', 'workspace.json'],
+      'v0.1 只交付五个声明式数据文件'
+    );
+
+    assert.deepEqual(pkg.workspace.folders.map((item) => item.path), ['话术库', '待入库']);
+    const library = pkg.workspace.folders[0];
+    assert.deepEqual(library.files.map((item) => item.name), ['示例-话术表.txt']);
+    const lines = library.files[0].content.split(/\r?\n/);
+    assert.equal(lines[0], '问题,答案');
+    assert.equal(lines.length, 23, '表头之外必须恰好 22 条纯虚构话术');
+    for (const [index, line] of lines.slice(1).entries()) {
+      assert.equal((line.match(/,/g) || []).length, 1, `第 ${index + 1} 条只能有一个英文逗号`);
+      assert.match(line, /^[^,\r\n]+,[^,\r\n]+$/, `第 ${index + 1} 条必须是非空的两列`);
+    }
+    for (const keyword of ['什么时候发货', '怎么还没到货', '尺寸怎么选', '我要退款']) {
+      assert.ok(library.files[0].content.includes(keyword), `示例表缺少 ${keyword}`);
+    }
+    assert.equal(/圆通|中通/.test(library.files[0].content), false, '虚构示例不夹带真实快递品牌');
+    const exampleAnswers = new Map(lines.slice(1).map((line) => line.split(',')));
+    for (const question of ['质量有问题怎么办？', '发票怎么开？', '我要退款', '下错单了怎么办？']) {
+      assert.match(exampleAnswers.get(question), /人工|专员/, `${question} 必须只做人工转接`);
+    }
+    assert.equal(exampleAnswers.get('可以改收货地址吗？').includes('把新地址发我'), false);
+    assert.equal(exampleAnswers.get('怎么还没到货？').includes('把订单号发我'), false);
+    assert.ok(library.readme.includes('另存为 CSV（UTF-8）'));
+    assert.ok(library.readme.includes('虚构的演示数据'));
+    assert.ok(library.readme.includes('删除或替换'));
+    const inbox = pkg.workspace.folders[1];
+    assert.ok(inbox.readme.includes('候选永远不会自动变成正式话术'));
+    assert.ok(inbox.readme.includes('由人审核后'));
+
+    assert.deepEqual(
+      pkg.actions.map((item) => item.id),
+      ['start', 'draft', 'polish', 'human', 'gap', 'collect', 'feed', 'report']
+    );
+    assert.deepEqual(
+      pkg.actions.map((item) => item.label),
+      ['开工上岗', '生成草稿', '改写得更礼貌', '给我转人工话术', '把这题登记为缺料', '收录这条', '批量喂', '值班小结']
+    );
+    for (const action of pkg.actions) {
+      assert.equal(action.confirm, false);
+      assert.ok(Buffer.byteLength(action.prompt, 'utf8') <= workbenches.LIMITS.maxPromptBytes);
+    }
+    const start = pkg.actions[0].prompt;
+    assert.ok(start.includes('【草稿】') && start.includes('【依据】') && start.includes('【风险】'));
+    assert.ok(start.includes('【依据】话术表《文件名》第 X 条：「答案原文开头约20字…」'));
+    assert.ok(start.includes('表头不计入条目编号'));
+    assert.ok(start.includes('.csv 或 .txt'));
+    assert.ok(start.includes('表里没有的不许编'));
+    assert.ok(start.includes('高风险一律转人工'));
+    assert.ok(start.includes('含个人信息，注意脱敏'));
+    assert.ok(start.includes('条目互相冲突或疑似过期时，答「待核」'));
+    const gap = pkg.actions.find((item) => item.id === 'gap').prompt;
+    assert.ok(gap.includes('缺料清单.md'));
+    assert.ok(gap.includes('买家A／尾号4位／[已删]'));
+    assert.ok(gap.includes('只登记，不要试图回答'));
+    for (const id of ['collect', 'feed']) {
+      const prompt = pkg.actions.find((item) => item.id === id).prompt;
+      assert.ok(prompt.includes('待入库/候选语料.csv'));
+      assert.ok(prompt.includes('绝不写入 话术库/'));
+      assert.ok(prompt.includes('买家A／尾号4位／[已删]'));
+    }
+    assert.ok(pkg.actions.find((item) => item.id === 'feed').prompt.includes('等我回复「确认」后'));
+
+    assert.deepEqual(pkg.skills, []);
+    assert.equal(pkg.agentPreset, null);
+    assert.equal(pkg.theme, null);
+    assert.equal(pkg.pet, null);
+    assert.equal(pkg.icon, null);
+    assert.ok(pkg.onboarding.includes('会被交给 AI 处理'));
+    assert.ok(pkg.onboarding.includes('买家昵称改成「买家A/B」'));
+    assert.ok(pkg.onboarding.includes('订单号只留尾号 4 位'));
+    assert.ok(pkg.onboarding.includes('手机号和地址整段删除'));
+
+    const plan = workbenches.workspacePlan(pkg);
+    assert.equal(plan.root, '电商客服');
+    assert.deepEqual(plan.folders.map((item) => item.path), ['话术库', '待入库']);
+    assert.deepEqual(plan.folders[0].files.map((item) => item.name), ['说明.md', '示例-话术表.txt']);
+    assert.deepEqual(plan.folders[1].files.map((item) => item.name), ['说明.md']);
+    assert.equal(
+      plan.folders.some((folder) => folder.files.some((file) => file.name === '缺料清单.md')),
+      false,
+      '缺料清单由首次登记动作创建，不在包里预置'
+    );
+  });
+
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log(`\nWORKBENCHES ALL PASS (${passed})`);
 }

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "name": "电商客服",
+  "summary": "粘进买家问题，秒出带依据的回复草稿；话术库越喂越聪明",
+  "version": "0.1.0",
+  "author": "SGD",
+  "license": "MIT",
+  "homepage": "https://github.com/sgd-shine/whaledock",
+  "dshRange": "0.1.0-rc.6",
+  "accent": "#0ea5e9"
+}

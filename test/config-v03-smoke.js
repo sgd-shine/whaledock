@@ -87,6 +87,42 @@ try {
     assert.strictEqual(value.priceCacheReadPerMillion, 0.02);
   });
 
+  test('config: v0.6 工作台首次确认记忆跨重启持久化且不是设置项', () => {
+    const oldDir = path.join(tmp, 'workbench-first-use-old');
+    fs.mkdirSync(oldDir, { recursive: true });
+    const oldFile = path.join(oldDir, 'config.json');
+    const oldText = JSON.stringify({ port: 4313, workbenchId: null }, null, 2) + '\n';
+    fs.writeFileSync(oldFile, oldText);
+    const oldValue = config.init(oldDir);
+    assert.deepStrictEqual(oldValue.workbenchOnboardingSeenIds, []);
+    assert.deepStrictEqual(oldValue.workbenchHeavyConfirmedIds, []);
+    assert.strictEqual(fs.readFileSync(oldFile, 'utf8'), oldText, '读旧配置时不顺手重写文件');
+
+    const nfdId = 'user:Cafe\u0301组合名工作台';
+    const heavyId = 'builtin:短视频创作台';
+    config.set({
+      workbenchOnboardingSeenIds: [nfdId, nfdId],
+      workbenchHeavyConfirmedIds: [heavyId]
+    });
+    const reloaded = config.init(oldDir);
+    assert.deepStrictEqual(reloaded.workbenchOnboardingSeenIds, [nfdId], '去重但不得改写 NFD id');
+    assert.strictEqual(reloaded.workbenchOnboardingSeenIds[0], nfdId);
+    assert.deepStrictEqual(reloaded.workbenchHeavyConfirmedIds, [heavyId]);
+    const copy = config.get('workbenchOnboardingSeenIds');
+    copy.push('user:不能污染内部值');
+    assert.deepStrictEqual(config.get('workbenchOnboardingSeenIds'), [nfdId], 'get 必须深拷贝');
+
+    for (const field of ['workbenchOnboardingSeenIds', 'workbenchHeavyConfirmedIds']) {
+      assert(!config.SETTINGS_FIELDS.has(field), field);
+      assertThrowsField(() => config.validateSettingsPatch({ [field]: [] }), field);
+      assertThrowsField(() => config.set({ [field]: 'not-an-array' }), field);
+      assertThrowsField(() => config.set({ [field]: ['user:../escape'] }), field);
+      assertThrowsField(() => config.set({
+        [field]: Array.from({ length: 65 }, (_, index) => `user:fixture-${index}`)
+      }), field);
+    }
+  });
+
   test('config: 设置白名单包含六个 v0.3 字段', () => {
     const fields = [
       'taskNotifications', 'budgetEnabled', 'dailyTokenBudget',
