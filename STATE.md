@@ -196,3 +196,11 @@ Windows/Intel 真机、Windows 签名与线上更新仍是独立证据边界。�
 7. macOS 签名与 Apple 公证已在 v0.6.0 完成；Windows 签名仍未做。
 
 详细发布证据与人工体验边界见 `HANDOFF.md`。
+
+## v0.7 视频驾驶舱Ⅰ期源码状态（2026-08-21）
+
+- 视频线 PR [#3](https://github.com/sgd-shine/whaledock/pull/3) 与 [#4](https://github.com/sgd-shine/whaledock/pull/4) 已合入 `main`；最新功能 merge 为 `457074c`。公开稳定版仍是 v0.6.0，v0.7 尚未改版本、打包、打 tag 或发布。
+- 内置短视频创作台已接通第一方驾驶舱：航道/今天、脚本块级建议、全屏拍摄、灵感/选题/打法、发布灯和离线数据占位均来自本地文件真相。普通工作台继续走原布局；电商客服包零改动。
+- 写入受 opaque token、源 hash CAS、root/父目录 inode 与恢复 journal 约束；未知 front matter 原样保留，平台数据未接通就不显示数字。主 dsh 视图继续无 preload/注入，根运行时依赖仍为 0。
+- 本地最新 `npm run smoke` 为 **396 PASS / ALL PASS**，v0.7 新增/扩展 68 项；PR #3/#4 的 macOS、Ubuntu、Windows CI 均全绿。安全复核为 P0=0、P1=0。
+- macOS Apple Silicon 隔离源码 App 已通过调试通道走完关键 DOM 点击与文件回读；本机锁屏使 SGD 亲眼视觉/手感仍为 `NEEDS-HUMAN`。尚未闭环：真实 dsh composer 焦点、Windows/Intel 真机、Windows 断电/子进程崩溃恢复，以及 v0.7 安装包、体积、签名、公证、tag 与 Release。成功受控替换会保留 `WhaleDock-recovery-*.bak`，特殊 copy-only 冲突可能留下额外恢复证据，均需人核对后处理。
