@@ -323,11 +323,15 @@ async function main() {
       && resumeWorkflow.includes('run-id: ${{ inputs.source_run_id }}')
       && resumeWorkflow.includes('notarytool info "$submission_id"')
       && !resumeWorkflow.includes('notarytool submit'));
-  const dmgGatekeeperAssessment =
-    'spctl --assess --type open --context context:primary-signature --verbose=2';
-  check('packaging: 公证 DMG 使用 Gatekeeper open 语义验证',
-    notarizeStep.includes(dmgGatekeeperAssessment)
-      && resumeWorkflow.includes(dmgGatekeeperAssessment)
+  const appGatekeeperAssessment =
+    'spctl --assess --type execute --verbose=2 "$mount_dir/WhaleDock.app"';
+  check('packaging: 公证 DMG 验 ticket 并挂载校验内层 App',
+    notarizeStep.includes('xcrun stapler validate "$asset"')
+      && notarizeStep.includes('hdiutil attach "$asset" -nobrowse -readonly')
+      && notarizeStep.includes(appGatekeeperAssessment)
+      && resumeWorkflow.includes('xcrun stapler validate "$dmg"')
+      && resumeWorkflow.includes('hdiutil attach "$dmg" -nobrowse -readonly')
+      && resumeWorkflow.includes(appGatekeeperAssessment)
       && !notarizeStep.includes('spctl --assess --type install')
       && !resumeWorkflow.includes('spctl --assess --type install'));
 

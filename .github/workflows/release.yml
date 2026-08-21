@@ -300,7 +300,16 @@ jobs:
               *.dmg)
                 xcrun stapler staple "$asset"
                 xcrun stapler validate "$asset"
-                spctl --assess --type open --context context:primary-signature --verbose=2 "$asset"
+                mount_dir="$(mktemp -d "$RUNNER_TEMP/whaledock-gatekeeper.XXXXXX")"
+                hdiutil attach "$asset" -nobrowse -readonly -mountpoint "$mount_dir"
+                if ! codesign --verify --deep --strict --verbose=2 "$mount_dir/WhaleDock.app" || \
+                   ! spctl --assess --type execute --verbose=2 "$mount_dir/WhaleDock.app"; then
+                  hdiutil detach "$mount_dir" || true
+                  rmdir "$mount_dir" || true
+                  exit 1
+                fi
+                hdiutil detach "$mount_dir"
+                rmdir "$mount_dir"
                 ;;
             esac
           done
