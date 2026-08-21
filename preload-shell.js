@@ -7,6 +7,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const stateListeners = new Set();
 const noticeListeners = new Set();
+const videoListeners = new Set();
 
 function emit(listeners, value) {
   for (const listener of listeners) {
@@ -64,6 +65,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
 ipcRenderer.on('shell:state', (_event, value) => emit(stateListeners, value));
 ipcRenderer.on('shell:notice', (_event, value) => emit(noticeListeners, value));
+ipcRenderer.on('shell:video-state', (_event, value) => emit(videoListeners, value));
 
 contextBridge.exposeInMainWorld('whaleShell', Object.freeze({
   getState: () => ipcRenderer.invoke('shell:get'),
@@ -71,6 +73,24 @@ contextBridge.exposeInMainWorld('whaleShell', Object.freeze({
   removePack: (workbenchId) => ipcRenderer.invoke('shell:remove', workbenchId),
   runAction: (actionId) => ipcRenderer.invoke('shell:action', actionId),
   setCockpitView: (request) => ipcRenderer.invoke('shell:cockpit-view', request),
+  getVideoState: () => ipcRenderer.invoke('shell:video:get'),
+  openVideoDocument: (projectToken) => ipcRenderer.invoke('shell:video:document', { projectToken }),
+  runVideoProjectAction: (projectToken, actionId) => ipcRenderer.invoke(
+    'shell:video:project-action', { projectToken, actionId }
+  ),
+  runVideoBlockAction: (projectToken, blockToken, action) => ipcRenderer.invoke(
+    'shell:video:block-action', { projectToken, blockToken, action }
+  ),
+  decideVideoProposal: (proposalToken, decision, proposalRevisionToken) => ipcRenderer.invoke(
+    'shell:video:proposal-decision', decision === 'adopt'
+      ? { proposalToken, decision, proposalRevisionToken }
+      : { proposalToken, decision }
+  ),
+  undoVideoRevision: (revisionToken) => ipcRenderer.invoke(
+    'shell:video:undo', { revisionToken }
+  ),
+  openShooting: (projectToken) => ipcRenderer.invoke('shell:video:shoot', { projectToken }),
+  runVideoSceneAction: (request) => ipcRenderer.invoke('shell:video:scene-action', request),
   openWorkspace: () => ipcRenderer.invoke('shell:open-workspace'),
   openSettings: () => ipcRenderer.invoke('shell:open-settings'),
   markOnboardingSeen: (workbenchId) => ipcRenderer.invoke('shell:onboarding-seen', workbenchId),
@@ -83,5 +103,10 @@ contextBridge.exposeInMainWorld('whaleShell', Object.freeze({
     if (typeof listener !== 'function') return () => {};
     noticeListeners.add(listener);
     return () => noticeListeners.delete(listener);
+  },
+  onVideoState: (listener) => {
+    if (typeof listener !== 'function') return () => {};
+    videoListeners.add(listener);
+    return () => videoListeners.delete(listener);
   }
 }));
