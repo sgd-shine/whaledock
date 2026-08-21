@@ -117,6 +117,140 @@
       font-size:12px; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; display:none;
     }
     #toast.open { display:block; }
+
+    /* v0.7 视频驾驶舱。只在带 cockpit:"video" 的工作台启用；经典工作台仍用上面的原布局。 */
+    #video-cockpit { display:none; position:fixed; inset:0; overflow:hidden; background:var(--bg); }
+    body.cockpit-active #rail { display:none; }
+    body.cockpit-active #video-cockpit { display:block; }
+    body.cockpit-active #toast { left:18px; max-width:min(560px,calc(100vw - 420px)); }
+    #enter-cockpit { display:none; }
+    body.cockpit-available:not(.cockpit-active) #enter-cockpit { display:block; color:var(--accent); }
+
+    #video-cockpit::before {
+      content:""; position:absolute; inset:0; pointer-events:none;
+      background:
+        radial-gradient(circle at 42% 4%, color-mix(in srgb,var(--accent) 12%,transparent), transparent 34%),
+        linear-gradient(115deg, transparent 0 48%, color-mix(in srgb,var(--primary) 7%,transparent) 70%, transparent 100%);
+      opacity:.9;
+    }
+    #cockpit-route {
+      position:absolute; left:0; right:clamp(340px,31vw,420px); top:0; height:104px;
+      display:grid; grid-template-columns:190px minmax(0,1fr) auto; align-items:center; gap:16px;
+      padding:14px 18px; border-bottom:1px solid var(--line);
+      background:color-mix(in srgb,var(--panel) 88%,transparent); backdrop-filter:blur(20px);
+    }
+    .cockpit-brand { display:flex; align-items:center; gap:10px; min-width:0; }
+    .cockpit-brand .mark {
+      width:38px; height:38px; border:1px solid color-mix(in srgb,var(--accent) 65%,var(--line));
+      border-radius:13px; display:grid; place-items:center; color:var(--accent);
+      background:color-mix(in srgb,var(--accent) 10%,var(--panel)); box-shadow:0 0 26px #22d3ee1c;
+      font-size:18px;
+    }
+    .cockpit-brand .eyebrow { display:block; color:var(--muted); font-size:10px; letter-spacing:.18em; }
+    .cockpit-brand strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }
+    #route-stages { display:flex; align-items:center; min-width:0; overflow-x:auto; scrollbar-width:none; }
+    #route-stages::-webkit-scrollbar { display:none; }
+    .route-step {
+      position:relative; flex:0 0 auto; min-width:68px; border:0; background:transparent; color:var(--muted);
+      padding:31px 8px 7px; font:inherit; font-size:11px; cursor:pointer;
+    }
+    .route-step::before {
+      content:""; position:absolute; left:50%; top:13px; width:8px; height:8px; border-radius:50%;
+      background:var(--line); border:2px solid var(--panel); box-shadow:0 0 0 1px var(--line);
+    }
+    .route-step::after {
+      content:""; position:absolute; left:calc(50% + 6px); right:calc(-50% + 6px); top:17px; height:1px;
+      background:var(--line);
+    }
+    .route-step:last-child::after { display:none; }
+    .route-step:hover, .route-step.active { color:var(--text); }
+    .route-step.active::before { background:var(--accent); box-shadow:0 0 0 1px var(--accent),0 0 16px #22d3eeaa; }
+    .route-step.blocked { opacity:.62; }
+    .route-step.blocked::before { background:#f59e0b; }
+    .ghost-button {
+      border:1px solid var(--line); border-radius:10px; background:color-mix(in srgb,var(--panel) 75%,transparent);
+      color:var(--muted); padding:8px 11px; font:inherit; font-size:11px; cursor:pointer;
+    }
+    .ghost-button:hover { color:var(--text); border-color:var(--accent); }
+
+    #cockpit-scene {
+      position:absolute; left:0; right:clamp(340px,31vw,420px); top:104px; bottom:0;
+      padding:24px; overflow:auto;
+    }
+    .scene-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:18px; margin:0 auto 20px; max-width:940px; }
+    .scene-kicker { color:var(--accent); font-size:10px; letter-spacing:.18em; text-transform:uppercase; }
+    .scene-heading h1 { margin:3px 0 0; font-size:clamp(24px,3vw,38px); line-height:1.1; letter-spacing:-.04em; }
+    .scene-heading p { margin:0; max-width:330px; color:var(--muted); font-size:12px; text-align:right; }
+    #scene-stage { max-width:940px; margin:0 auto; }
+    .scene-hero {
+      min-height:310px; border:1px solid color-mix(in srgb,var(--line) 80%,var(--accent)); border-radius:22px;
+      background:linear-gradient(150deg,color-mix(in srgb,var(--panel) 88%,transparent),color-mix(in srgb,var(--bg) 94%,transparent));
+      box-shadow:0 26px 80px #0005, inset 0 1px #ffffff08; padding:26px;
+      display:grid; grid-template-columns:minmax(0,1.2fr) minmax(230px,.8fr); gap:22px;
+    }
+    .scene-main { display:flex; flex-direction:column; justify-content:space-between; min-width:0; }
+    .scene-badge { display:inline-flex; align-items:center; gap:7px; color:var(--muted); font-size:11px; }
+    .scene-badge::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 12px #22d3eeaa; }
+    .scene-title { margin:14px 0 8px; font-size:clamp(22px,2.5vw,34px); line-height:1.18; max-width:620px; }
+    .scene-copy { color:var(--muted); max-width:560px; margin:0; font-size:13px; }
+    .scene-actions { display:flex; flex-wrap:wrap; gap:9px; margin-top:24px; }
+    .primary-action, .secondary-action {
+      border-radius:11px; padding:10px 15px; font:inherit; cursor:pointer;
+    }
+    .primary-action { border:1px solid var(--accent); color:#02161a; background:var(--accent); font-weight:700; }
+    .secondary-action { border:1px solid var(--line); color:var(--text); background:var(--bg); }
+    .scene-side { display:grid; gap:10px; align-content:start; }
+    .signal-card {
+      border:1px solid var(--line); border-radius:15px; padding:14px;
+      background:color-mix(in srgb,var(--bg) 70%,transparent);
+    }
+    .signal-card .label { color:var(--muted); font-size:10px; letter-spacing:.12em; }
+    .signal-card strong { display:block; margin-top:7px; font-size:14px; }
+    .signal-card small { display:block; margin-top:4px; color:var(--muted); }
+
+    #cockpit-panel {
+      position:absolute; right:0; top:0; bottom:0; width:clamp(340px,31vw,420px);
+      border-left:1px solid var(--line); background:color-mix(in srgb,var(--panel) 92%,var(--bg));
+      box-shadow:-24px 0 70px #0005;
+    }
+    #cockpit-task-flow { height:186px; padding:15px 15px 10px; border-bottom:1px solid var(--line); overflow:hidden; }
+    .panel-title { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .panel-title strong { font-size:12px; letter-spacing:.04em; }
+    #task-state { display:flex; align-items:center; gap:7px; color:var(--muted); font-size:11px; }
+    #task-state .lamp { width:8px; height:8px; border-radius:50%; background:var(--muted); }
+    #task-state[data-state="busy"] .lamp { background:var(--accent); box-shadow:0 0 14px #22d3eeaa; animation:pulse 1.3s ease-in-out infinite; }
+    #task-state[data-state="waiting"] .lamp { background:#f59e0b; box-shadow:0 0 12px #f59e0b88; }
+    #task-state[data-state="celebrate"] .lamp { background:#34d399; }
+    #task-state[data-state="error"] .lamp, #task-state[data-state="offline"] .lamp { background:#fb7185; }
+    @keyframes pulse { 50% { opacity:.42; transform:scale(.82); } }
+    .task-counts { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; margin-top:12px; }
+    .task-count { border:1px solid var(--line); border-radius:11px; padding:9px; background:var(--bg); }
+    .task-count span { display:block; color:var(--muted); font-size:10px; }
+    .task-count strong { display:block; margin-top:2px; font-size:17px; font-variant-numeric:tabular-nums; }
+    #task-recent { display:flex; gap:6px; margin-top:9px; overflow:hidden; }
+    .task-chip { flex:0 1 auto; min-width:0; border:1px solid var(--line); border-radius:999px; color:var(--muted); padding:5px 8px; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #cockpit-chat-head {
+      height:42px; display:flex; align-items:center; justify-content:space-between; padding:0 12px;
+      border-bottom:1px solid var(--line); color:var(--muted); font-size:11px;
+    }
+    #cockpit-chat-head strong { color:var(--text); font-size:12px; }
+    #cockpit-chat-head .chat-tools { display:flex; align-items:center; gap:6px; }
+    #cockpit-chat-head button { padding:5px 8px; }
+    #cockpit-chat-placeholder {
+      position:absolute; left:0; right:0; top:228px; bottom:0; display:none; place-items:center;
+      padding:28px; text-align:center; color:var(--muted); background:var(--bg);
+    }
+    body.chat-collapsed #cockpit-chat-placeholder { display:grid; }
+    #cockpit-chat-placeholder strong { display:block; color:var(--text); font-size:16px; margin-bottom:7px; }
+    @media (max-width:1080px) {
+      #cockpit-route { grid-template-columns:150px minmax(0,1fr) auto; gap:8px; padding-inline:12px; }
+      .route-step { min-width:58px; }
+      #cockpit-scene { padding:18px; }
+      .scene-hero { grid-template-columns:1fr; }
+      .scene-side { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .cockpit-brand .eyebrow { display:none; }
+    }
+    @media (prefers-reduced-motion:reduce) { #task-state .lamp { animation:none !important; } }
   </style>
 </head>
 <body>
@@ -127,10 +261,67 @@
     <div id="actions"></div>
     <div id="action-note"></div>
     <div id="rail-foot">
+      <button id="enter-cockpit" type="button">◉ 返回视频驾驶舱</button>
       <button id="open-workspace" type="button">📁 打开工作区</button>
       <button id="open-settings" type="button">⚙ 设置…</button>
     </div>
   </div>
+
+  <section id="video-cockpit" aria-label="视频创作驾驶舱">
+    <header id="cockpit-route">
+      <div class="cockpit-brand">
+        <div class="mark" aria-hidden="true">◉</div>
+        <div><span class="eyebrow">WHALEDOCK COCKPIT</span><strong id="cockpit-name">短视频创作台</strong></div>
+      </div>
+      <nav id="route-stages" aria-label="一条视频的航道"></nav>
+      <button class="ghost-button" id="exit-cockpit" type="button">退出驾驶舱</button>
+    </header>
+
+    <main id="cockpit-scene">
+      <div class="scene-heading">
+        <div><div class="scene-kicker" id="scene-kicker">TODAY · 今天</div><h1 id="scene-heading">今天，推进一件事</h1></div>
+        <p id="scene-summary">现场跟着文件走；没有证据的位置保持留白。</p>
+      </div>
+      <div id="scene-stage">
+        <section class="scene-hero" aria-live="polite">
+          <div class="scene-main">
+            <div>
+              <span class="scene-badge">创作闭环已靠岸</span>
+              <h2 class="scene-title">从选题到开拍，沿一条航道往前走</h2>
+              <p class="scene-copy">选中一个真实文件开始；鲸坞只展示已接通的状态，不会替你编播放量、漏斗或战绩。</p>
+            </div>
+            <div class="scene-actions">
+              <button class="primary-action" id="scene-primary" type="button">打开今天</button>
+              <button class="secondary-action" id="scene-workspace" type="button">查看工作区</button>
+            </div>
+          </div>
+          <div class="scene-side">
+            <div class="signal-card"><span class="label">当前现场</span><strong id="scene-current">今天</strong><small>按航道选择下一步</small></div>
+            <div class="signal-card"><span class="label">平台数据</span><strong>侦察中，未接通</strong><small>不展示示意数字</small></div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <aside id="cockpit-panel" aria-label="鲸坞面板">
+      <section id="cockpit-task-flow">
+        <div class="panel-title"><strong>鲸坞任务流</strong><div id="task-state" data-state="offline"><span class="lamp"></span><span id="task-state-label">正在接线</span></div></div>
+        <div class="task-counts">
+          <div class="task-count"><span>进行中</span><strong id="task-active">—</strong></div>
+          <div class="task-count"><span>等确认</span><strong id="task-waiting">—</strong></div>
+          <div class="task-count"><span>已完成</span><strong id="task-completed">—</strong></div>
+        </div>
+        <div id="task-recent" aria-label="最近任务"></div>
+      </section>
+      <div id="cockpit-chat-head">
+        <div><strong>鲸坞同事</strong> · dsh 会话</div>
+        <div class="chat-tools"><span>⌘K 聚焦</span><button class="ghost-button" id="toggle-chat" type="button">折叠</button></div>
+      </div>
+      <div id="cockpit-chat-placeholder">
+        <div><strong>对话已折叠</strong><span>现场更宽了；随时展开继续原会话。</span></div>
+      </div>
+    </aside>
+  </section>
 
   <div class="layer" id="switcher-layer">
     <div class="scrim" data-close="switcher"></div>

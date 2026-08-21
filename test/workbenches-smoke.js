@@ -60,7 +60,8 @@ const GOOD_MANIFEST = {
   license: 'MIT',
   homepage: 'https://github.com/sgd-shine/whaledock',
   dshRange: '0.1.0-rc.6',
-  accent: '#22d3ee'
+  accent: '#22d3ee',
+  cockpit: 'video'
 };
 const GOOD_WORKSPACE = {
   root: '短视频创作台',
@@ -112,6 +113,7 @@ async function main() {
     assert.equal(pkg.license, 'MIT');
     assert.equal(pkg.homepage, 'https://github.com/sgd-shine/whaledock');
     assert.equal(pkg.accent, '#22d3ee');
+    assert.equal(pkg.cockpit, 'video');
     assert.equal(pkg.heavy, true, '写了 workspace.json 就是重工作台');
     assert.equal(pkg.workspace.folders.length, 2);
     assert.equal(pkg.workspace.folders[0].files[0].name, '示例-第一条选题.md');
@@ -138,6 +140,7 @@ async function main() {
     assert.equal(pkg.version, null, '非法版本号丢弃成 null');
     assert.equal(pkg.license, null, 'UI 据此明写「未声明许可证」');
     assert.equal(pkg.accent, null);
+    assert.equal(pkg.cockpit, null);
     assert.equal(pkg.heavy, false, '没有 workspace.json = 轻工作台');
     assert.deepEqual(pkg.actions, [], '没有 actions.json = 不显示按钮栏');
     assert.equal(pkg.skills, null, 'null 表示没有 skills.json，与空数组区分');
@@ -536,6 +539,14 @@ async function main() {
     );
   });
 
+  await test('manifest：cockpit 只收 video，旧包与未知值继续走老路', async () => {
+    assert.equal(workbenches.parseManifest({ name: '视频台', cockpit: 'video' }).manifest.cockpit, 'video');
+    assert.equal(workbenches.parseManifest({ name: '旧台' }).manifest.cockpit, null);
+    const future = workbenches.parseManifest({ name: '未来台', cockpit: 'commerce' });
+    assert.equal(future.manifest.cockpit, null);
+    assert.equal(future.unknownFieldCount, 0, 'cockpit 是已知可选字段，值不支持时只回落');
+  });
+
   await test('manifest：accent 只收 #RGB / #RRGGBB，其余回落 null', async () => {
     assert.equal(workbenches.parseManifest(JSON.stringify({ accent: '#0af' })).manifest.accent, '#0af');
     assert.equal(workbenches.parseManifest(JSON.stringify({ accent: '#22D3EE' })).manifest.accent, '#22d3ee');
@@ -696,6 +707,7 @@ async function main() {
     assert.equal(pkg.issues.length, 0, '内置包必须零 issue');
     assert.equal(pkg.unknownFieldCount, 0);
     assert.equal(pkg.license, 'MIT');
+    assert.equal(pkg.cockpit, 'video');
     assert.equal(pkg.heavy, true, '短视频台是重工作台');
     assert.deepEqual(
       pkg.workspace.folders.map((item) => item.path),
@@ -745,6 +757,7 @@ async function main() {
     assert.equal(pkg.unknownFieldCount, 0);
     assert.equal(pkg.version, '0.1.0');
     assert.equal(pkg.license, 'MIT');
+    assert.equal(pkg.cockpit, null, '电商客服仍走既有工作台布局');
     assert.equal(pkg.dshRange, '0.1.0-rc.6');
     assert.equal(pkg.heavy, true);
     assert.deepEqual(
