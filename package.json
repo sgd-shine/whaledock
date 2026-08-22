@@ -1,7 +1,7 @@
 {
   "name": "whaledock",
   "productName": "WhaleDock",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "鲸坞 WhaleDock — Unofficial desktop app for DeepSeek Harness (dsh): auto-starts the local dsh backend and wraps its Web UI in a native window. 非官方 DeepSeek Harness 桌面客户端：给鲸鱼一个靠岸的坞。",
   "main": "main.js",
   "author": "SGD",

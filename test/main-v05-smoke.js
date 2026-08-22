@@ -192,7 +192,7 @@ async function run() {
     // 宠物包与主题包资源必须进入 electron-builder 的 files。
     const pkg = JSON.parse(source('package.json'));
     // 版本按当前大版本线校验；补丁号会随分发修复递增，不写死。
-    assert.equal(/^0\.6\.\d+$/.test(pkg.version), true, pkg.version);
+    assert.equal(/^0\.7\.\d+$/.test(pkg.version), true, pkg.version);
     for (const entry of [
       'pet.html', 'pet.js', 'preload-pet.js', 'assets/**/*',
       'shell.html', 'shell.js', 'preload-shell.js'

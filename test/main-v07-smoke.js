@@ -154,6 +154,29 @@ async function run() {
     assert.match(nativeToggle, /mainWindow\.webContents\.focus\(\)/);
   });
 
+  await test('发布前体验小修：灵感即时清空、建议标题分行且 Cmd/Ctrl+Shift+K 不误触', async () => {
+    const renderer = source('shell.js');
+    const html = source('shell.html');
+    const inspiration = renderer.slice(
+      renderer.indexOf('function renderInspirationScene()'),
+      renderer.indexOf('function renderTopicScene()')
+    );
+    assert.match(inspiration,
+      /if \(result && \(result\.kind === 'ok' \|\| result\.stored === true\)\) \{\s*inspirationDraft = '';\s*renderScene\(\);\s*\}/);
+    assert.equal((inspiration.match(/inspirationDraft\s*=\s*''/g) || []).length, 1);
+
+    const proposal = renderer.slice(
+      renderer.indexOf('function renderProposal()'),
+      renderer.indexOf('function renderScriptScene()')
+    );
+    assert.match(proposal, /title\.className = 'proposal-title'/);
+    assert.match(html, /\.proposal-title\s*\{[^}]*display:grid;[^}]*gap:/);
+
+    const shortcut = renderer.slice(renderer.indexOf("document.addEventListener('keydown'"));
+    assert.match(shortcut,
+      /\(event\.metaKey \|\| event\.ctrlKey\) && !event\.altKey\s*&& !event\.shiftKey\s*&& event\.key\.toLowerCase\(\) === 'k'/);
+  });
+
   console.log(`\nMAIN V07 ALL PASS (${passed})`);
 }
 

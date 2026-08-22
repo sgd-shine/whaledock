@@ -1,8 +1,16 @@
-# HANDOFF.md — WhaleDock v0.6.0 正式签名、公证与发布交接
+# HANDOFF.md — WhaleDock v0.7.0 发版候选与正式发布交接
 
-更新：2026-08-22 · v0.7 远程批次 1 已整合，视频驾驶舱已改为全宽对话现场并新增鲸坞全局色系快切；公开稳定版仍为 v0.6.0
+更新：2026-08-22 · v0.7.0 发版候选已完成三处体验小修、版本 bump 与双发布路径说明；公开稳定版仍为 v0.6.0
 
-## 当前结论
+## v0.7.0 发版候选当前结论
+
+- 独立发布分支 `codex/v0.7.0-release` 从 `main@6a347db` 建立；三处体验小修只改 `shell.js` / `shell.html`，最小回归位于 `test/main-v07-smoke.js`。
+- 灵感成功存入后现在会置空草稿并立即重渲染，失败仍保留用户输入；建议对照卡头部改为两行；页面级 `⌘K` / `Ctrl+K` 排除 Shift，菜单 `CommandOrControl+K` 不变。
+- `package.json` 已升至 `0.7.0`；两条发布 workflow 已同步 v0.7.0 用户说明。本地统一 smoke 为 **452 PASS / ALL PASS**，合规校验、diff check、零运行时依赖与 `lib/` 纯 Node 边界均通过。
+- `package-lock.json`、`compliance/`、`vendor/`、`licenses/`、`THIRD_PARTY_NOTICES.md` 零改动；当前无 S1。`v0.7.0` tag/Release 尚不存在，仓库审批变量为空。
+- 硬门不变：先合入 main 并回读三平台 CI，再由 SGD 完成远程页、色系、对话往返 5 分钟人工卡；只有收到“过”后才能创建注解 tag。v0.7.0 包、签名、公证、体积、官方安装和线上更新提醒当前都不能写成已验证。
+
+## v0.6.0 已发布基线
 
 v0.6.0 工作台包、内置短视频创作台、托盘五态与叫醒阶梯已完成实现和发布。当前公开稳定版是 [`v0.6.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.6.0)；macOS arm64/x64 已正式签名并通过 Apple 公证。
 
