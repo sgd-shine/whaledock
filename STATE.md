@@ -1,15 +1,20 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-22（v0.7.0 发版候选已完成三处体验小修与版本/Release 材料准备；公开稳定版仍为 v0.6.0）
+更新：2026-08-22（v0.7.0 已正式发布、完成线上更新提醒与本机官方 arm64 安装验收）
 
 ## 阶段结论
 
-**v0.7.0 发版候选已在独立发布分支完成；在 SGD 5 分钟人工卡回“过”、合入 main 且三平台 CI 全绿以前，不创建 tag。**
+**v0.7.0 已正式发布并成为 `releases/latest`；本机正式安装已升级到 `/Applications/WhaleDock.app` v0.7.0。**
 
-- `package.json` 已升至 `0.7.0`；`package-lock.json`、`compliance/`、`vendor/`、`licenses/` 与 `THIRD_PARTY_NOTICES.md` 未改，本轮不升级 Electron/dsh，也没有新增运行时依赖或再分发闭包。
-- 三处小修已完成：灵感成功存入后立即清空输入框且失败保留草稿；建议对照卡黄牌 kicker 与标题分行；页面级 `⌘K` / `Ctrl+K` 明确排除 Shift 组合键，菜单加速器保持不变。
-- 新增最小回归后，本地统一 `npm run smoke` 为 **452 PASS / ALL PASS**；`npm run compliance:verify`、`git diff --check`、runtime dependencies=0 与 `lib/` Electron require=0 均通过。
-- 两条发布路径（Release 与 Resume Notarization）已同步 v0.7.0 用户说明。当前 `v0.7.0` tag/Release 不存在，审批变量为空，v0.7.0 安装包、签名、公证、资产体积与本机安装验收仍为 `N/A`。
+- SGD 完成远程页、色系、对话往返人工卡并回“过”后，注解 tag `v0.7.0` 精确指向三平台 [main CI 32566512173](https://github.com/sgd-shine/whaledock/actions/runs/32566512173) 全绿的 `310654e412af38fd0d49f575c57ad9c166d3f7c4`。三处体验小修随 PR [#9](https://github.com/sgd-shine/whaledock/pull/9) 发布：灵感成功存入立即清空、失败保留草稿；建议卡标题分行；页面级 `⌘K` / `Ctrl+K` 排除 Shift。
+- 源 [Release run 32567142239](https://github.com/sgd-shine/whaledock/actions/runs/32567142239) 的 macOS/Windows build 均成功：两架构均为 Developer ID Application、`flags=0x10000(runtime)`，四项 Apple submission 全部 `Accepted`，两个 DMG staple/validate 与挂载 App Gatekeeper 均通过；三平台 runtime inventory 为 526 / 526 / 525 包。
+- 首轮 publish 被 fail-closed 成品校验及时拦住：通配下载同时合并 pending/final mac artifact，使公证前 arm64 DMG 覆盖公证后同名文件。未创建 Release、未设置审批变量。PR [#10](https://github.com/sgd-shine/whaledock/pull/10) 改为精确下载 final mac 与 Windows，并新增防回归；本地 **453 PASS / ALL PASS**，最终 [main CI 32567814738](https://github.com/sgd-shine/whaledock/actions/runs/32567814738) 三平台全绿。
+- [Resume run 32567660070](https://github.com/sgd-shine/whaledock/actions/runs/32567660070) 只复用原签名资产与四个 submission id，没有重建、重签或重复提交 Apple。六个成品校验全部 `OK`；精确批准摘要为 `96b1a95db9e05f80e9fa68a69e95fde9bbd59d3e3cd8efa84ca8ee47924b162c`。审批变量仅在 publish attempt 2 存在，Release 成功后立即删除并回读为 0。
+- 正式 [Release v0.7.0](https://github.com/sgd-shine/whaledock/releases/tag/v0.7.0) 非 draft、非 prerelease，共 8 项资产：arm64 ZIP/DMG 207,232,507 / 187,641,890 B，x64 ZIP/DMG 212,147,973 / 192,480,811 B，Windows Setup/portable 161,594,468 / 161,406,619 B，两份校验和 372 / 189 B。`releases/latest` 已精确命中 v0.7.0。
+- macOS runtime 的 ZIP 清单未压缩字节为 arm64 264,826,757 B、x64 267,672,095 B；正式 arm64 安装内 runtime 的本地磁盘占用为 359,784,448 B。Windows 无解包成品/真机，runtime 体积记 `N/A`，只保留 525 包 inventory 证据，不由 EXE 包体反推。
+- 本机仍装 v0.6.0 时已真实点击“立即检查”，回读“发现新版本 0.7.0”；随后从公开 Release 重新下载 arm64 DMG，SHA-256 `c9ebcad88191b2e9f9af18fc93f2a0773abd93f58e46af4cccb1c87951725c15`、Developer ID、Hardened Runtime、stapler、Gatekeeper、v0.7.0/arm64 均通过。安装包自身回读 `SMOKE_OK`，Spotlight 只发现 `/Applications/WhaleDock.app`；旧 v0.6.0 已可恢复地移入废纸篓。
+- `package-lock.json`、`compliance/`、`vendor/`、`licenses/` 与 `THIRD_PARTY_NOTICES.md` 相对 v0.6.0 零变化；root runtime dependencies=0，dsh 仍锁定 `0.1.0-rc.6`，无 S1。
+- `v0.7.0` tag 已落地，dsh 跟版升级线与远程批次 2 的开工条件已满足；两线的后续状态与证据由各自线程维护，不由本发版结论代替。
 
 **v0.6.0 工作台包已实现、通过三平台 CI，macOS arm64/x64 成品已用 Developer ID Application 正式签名、开启 Hardened Runtime 并获 Apple 公证；公开稳定版已是 v0.6.0。**
 
@@ -223,7 +228,7 @@ Windows/Intel 真机、Windows 签名与线上更新仍是独立证据边界。�
 
 ## 尚未完成
 
-1. v0.6.0 正式签名、Apple 公证、Release、官方 arm64 安装与唯一安装回读已完成；线上「检查更新」按钮仍未做本轮人工点击验收。
+1. v0.7.0 正式签名、公证、Release、官方 arm64 安装与唯一安装回读已完成；v0.6.0 的线上“立即检查”也已真实回读 v0.7.0 更新提醒并留存内部截图证据。
 2. v0.4 未对真实会话提交 prompt，未走完图片保存→OCR→复制/提交的全量 GUI 链；Windows.Media.Ocr、Windows `Win+Shift+S`/剪贴板、macOS 屏幕录制权限和安装包 GUI 仍待真机。
 3. v0.4 并行多开保留为 P2；官方视觉 API 与 vision 插件只保留可探测槽位。
 4. v0.3 Electron 系统通知权限及 Notification→Dock/托盘/banner 可见降级链尚未真机；真实 managed backend 跨预算线后的进程树停止、App 重启 latch 和“今日继续”恢复也未做 GUI+真进程闭环。
@@ -235,9 +240,9 @@ Windows/Intel 真机、Windows 签名与线上更新仍是独立证据边界。�
 
 ## v0.7 视频驾驶舱Ⅰ期源码状态（2026-08-21）
 
-- 视频线 PR [#3](https://github.com/sgd-shine/whaledock/pull/3)、[#4](https://github.com/sgd-shine/whaledock/pull/4) 与验收文档 PR [#5](https://github.com/sgd-shine/whaledock/pull/5) 均已合入 `main`。公开稳定版仍是 v0.6.0，v0.7 尚未改版本、打包、打 tag 或发布。
+- 视频线 PR [#3](https://github.com/sgd-shine/whaledock/pull/3)、[#4](https://github.com/sgd-shine/whaledock/pull/4) 与验收文档 PR [#5](https://github.com/sgd-shine/whaledock/pull/5) 均已合入 `main`；其后 v0.7.0 已按本文件顶部证据完成版本、打包、tag、Release 与本机安装。
 - 内置短视频创作台已接通第一方驾驶舱：航道/今天、脚本块级建议、全屏拍摄、灵感/选题/打法、发布灯和离线数据占位均来自本地文件真相。普通工作台继续走原布局；电商客服包零改动。SGD 已通过基本操作、快捷键与工作台展开手感；唯一退回项“窄侧栏对话”已改成顶部摘要常驻、下方完整 Harness 全宽切换，返回现场不刷新对话或草稿。
 - 驾驶舱顶栏新增「鲸坞色系」下拉与自定义主题入口。当前源码内置鲸坞深色、鲸坞浅色、极光、墨鲸、日落珊瑚、竹影青黛、潮汐靛蓝七套，也列出用户主题。选择复用并持久化 WhaleDock 的全局 `config.theme`，重启保留并同步刷新鲸坞自有界面；它不是驾驶舱私有配色。工作台自带 `theme.json` 时顶栏只读锁定，完整 dsh 对话 `WebContentsView` 仍不注入 CSS/DOM。
 - 写入受 opaque token、源 hash CAS、root/父目录 inode 与恢复 journal 约束；未知 front matter 原样保留，平台数据未接通就不显示数字。主 dsh 视图继续无 preload/注入，根运行时依赖仍为 0。
 - 本地最新 `npm run smoke` 为 **451 PASS / ALL PASS**；驾驶舱壳套件现为 6 项，新增精确主题请求、七套资源与三组 WCAG 对比度回归。全宽对话布局、IPC 白名单、快捷键与“不注入 dsh DOM”均继续通过；PR #3/#4/#6/#7 的既有三平台 CI 全绿，本色系批次的 CI 以对应 PR 回读为准。
-- macOS Apple Silicon 隔离源码 App 已真实点击进入/返回全宽对话，并用未发送草稿证明切换未重载同一个 dsh 视图；⌘K 从 dsh 焦点返回现场、再次打开均通过。本色系批次另在隔离 userData 下真实选择潮汐靛蓝与日落珊瑚，修复旧 `:root` 优先级后确认整页换色，重启回读仍为日落珊瑚；`960×620`、`1280×820` 的创作现场、全宽对话和自定义设置入口均走通。尚未闭环：Windows/Intel 真机、Windows 断电/子进程崩溃恢复，以及 v0.7 安装包、体积、签名、公证、tag 与 Release。成功受控替换会保留 `WhaleDock-recovery-*.bak`，特殊 copy-only 冲突可能留下额外恢复证据，均需人核对后处理。
+- macOS Apple Silicon 隔离源码 App 已真实点击进入/返回全宽对话，并用未发送草稿证明切换未重载同一个 dsh 视图；⌘K 从 dsh 焦点返回现场、再次打开均通过。本色系批次另在隔离 userData 下真实选择潮汐靛蓝与日落珊瑚，修复旧 `:root` 优先级后确认整页换色，重启回读仍为日落珊瑚；`960×620`、`1280×820` 的创作现场、全宽对话和自定义设置入口均走通。安装包、体积、签名、公证、tag 与 Release 已按顶部证据闭环；仍未闭环的是 Windows/Intel 真机与 Windows 断电/子进程崩溃恢复。成功受控替换会保留 `WhaleDock-recovery-*.bak`，特殊 copy-only 冲突可能留下额外恢复证据，均需人核对后处理。
