@@ -181,7 +181,9 @@ function test(name, fn) {
 
 const runtime = require(MODULE_PATH);
 
-test('Node 式解析 lock 路径并只遍历根生产依赖闭包', () => {
+test('Node 式解析 lock 路径、只遍历根生产依赖闭包且锁文件禁止换行改写', () => {
+  const attributes = fs.readFileSync(path.join(__dirname, '..', '.gitattributes'), 'utf8');
+  assert.match(attributes, /^package-lock\.json -text -whitespace$/m);
   const value = fixture();
   try {
     const lock = JSON.parse(fs.readFileSync(path.join(value.root, 'package-lock.json')));
