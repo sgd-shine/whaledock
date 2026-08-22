@@ -189,6 +189,32 @@ async function run() {
     await owner.service.close();
   });
 
+  await test('真实平台 sourceId/receivedAt 只交受信 sink 做持久幂等，不进入公开快照', async () => {
+    const received = [];
+    const owner = harness({ receiveSink: async (value) => received.push(value) });
+    const loopback = remote.createLoopbackAdapter();
+    const actorId = await bind(owner, loopback, 'feishu');
+    const result = await loopback.emitReceive({
+      actorId,
+      kind: 'text',
+      content: '带来源标识',
+      sourceId: 'om_message_123',
+      receivedAt: '2026-08-22T00:00:00.000Z'
+    });
+    assert.equal(result.accepted, true);
+    assert.equal(received[0].sourceId, 'om_message_123');
+    assert.equal(received[0].receivedAt, '2026-08-22T00:00:00.000Z');
+    assert.equal(JSON.stringify(owner.service.snapshot()).includes('om_message_123'), false);
+    await assert.rejects(() => loopback.emitReceive({
+      actorId,
+      kind: 'text',
+      content: '坏时间',
+      sourceId: 'om_bad_time',
+      receivedAt: '2026-08-22'
+    }), /平台收件时间无效/);
+    await owner.service.close();
+  });
+
   await test('并发首绑只锁定第一人，拒绝后下一人须重发；旧确认卡不能跨连接使用', async () => {
     const owner = harness();
     const loopback = remote.createLoopbackAdapter();
@@ -484,6 +510,43 @@ async function run() {
     });
     const disabled = await owner.service.push({ kind: 'task-completed', body: '任务完成' });
     assert.deepEqual(disabled.delivered, []);
+    await owner.service.close();
+  });
+
+  await test('平台测试通知只投指定通道，不会广播到其他已连接通道', async () => {
+    const localSelfTestContext = Object.freeze({});
+    const classified = [];
+    const owner = harness({
+      initialSensitivity: 'customer',
+      classifyContent: async (request) => {
+        classified.push(request);
+        return request.classificationContext === localSelfTestContext
+          ? 'anonymous' : 'customer';
+      }
+    });
+    const feishu = remote.createLoopbackAdapter();
+    const web = remote.createLoopbackAdapter();
+    await bind(owner, feishu, 'feishu');
+    await bind(owner, web, 'web');
+    const result = await owner.service.pushTo('feishu', {
+      kind: 'report-ready', body: '鲸坞飞书连接测试', dedupeKey: 'feishu-test-1'
+    }, { classificationContext: localSelfTestContext });
+    assert.deepEqual(result.delivered, ['feishu']);
+    assert.deepEqual(result.skipped, []);
+    assert.equal(feishu.snapshot().pushed.length, 1);
+    assert.equal(web.snapshot().pushed.length, 0);
+    assert.equal(classified[0].classificationContext, localSelfTestContext);
+    const ordinaryCustomerReport = await owner.service.pushTo('feishu', {
+      kind: 'report-ready', body: '真实客服报告', dedupeKey: 'customer-report-1'
+    });
+    assert.equal(ordinaryCustomerReport.skipped[0].reasonCode, 'customer-web-only');
+    assert.equal(feishu.snapshot().pushed.length, 1);
+    await assert.rejects(() => owner.service.pushTo('wechat', {
+      kind: 'report-ready', body: '不能发送'
+    }), /不支持的远程通道/);
+    await assert.rejects(() => owner.service.pushTo('feishu', {
+      kind: 'report-ready', body: '不能旁路'
+    }, { sensitivity: 'anonymous' }), /不支持的字段/);
     await owner.service.close();
   });
 

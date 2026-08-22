@@ -27,11 +27,18 @@ jobs:
       - name: Verify pinned Node and npm toolchain
         run: node -e "const cp=require('child_process');const npm=cp.spawnSync(process.platform==='win32'?'npm.cmd':'npm',['--version'],{encoding:'utf8',shell:process.platform==='win32'});if(process.version!=='v22.23.2'||npm.status!==0||npm.stdout.trim()!=='10.9.8')throw new Error('Expected Node v22.23.2 / npm 10.9.8, got '+process.version+' / '+npm.stdout.trim())"
 
+      - name: Verify tag matches committed package and lock versions
+        run: |
+          node -e "const tag=process.env.GITHUB_REF_NAME||'';const expected=tag.startsWith('v')?tag.slice(1):'';const p=require('./package.json'),l=require('./package-lock.json');if(!expected||p.version!==expected||l.version!==expected||!l.packages||!l.packages['']||l.packages[''].version!==expected)throw new Error('Release tag/package/lock version mismatch: '+tag+' / '+p.version+' / '+l.version+' / '+(l.packages&&l.packages['']&&l.packages[''].version))"
+
       - name: Install dependencies
         run: npm ci
 
       - name: Verify committed compliance materials
         run: npm run compliance:verify
+
+      - name: Verify committed app runtime compliance materials
+        run: npm run app-runtime:verify
 
       # 可选：仓库配了 Developer ID 证书才会执行；没配就走 ad-hoc，构建照常通过。
       - name: Import Developer ID certificate (optional)
@@ -62,9 +69,6 @@ jobs:
           echo "WHALEDOCK_MAC_SIGN_IDENTITY=$MACOS_SIGN_IDENTITY" >> "$GITHUB_ENV"
           echo "MACOS_SIGN_MODE=developer-id" >> "$GITHUB_ENV"
 
-      - name: Set package version from tag
-        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
-
       - name: Smoke test (no GUI)
         run: npm run smoke
 
@@ -82,6 +86,33 @@ jobs:
 
       - name: Verify packaged macOS arm64 compliance materials
         run: node scripts/verify-packaged-compliance.js --search=release --minimum=1
+
+      - name: Verify macOS arm64 app runtime in archive, ZIP, and DMG
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          node scripts/verify-packaged-compliance.js --search=release/.app-archives.noindex/WhaleDock-arm64.app-bundle/Contents/Resources --minimum=1
+          node scripts/verify-packaged-app-runtime.js --app=release/.app-archives.noindex/WhaleDock-arm64.app-bundle
+          workdir="$(mktemp -d "$RUNNER_TEMP/whaledock-app-runtime-arm64.XXXXXX")"
+          mount_dir="$(mktemp -d "$RUNNER_TEMP/whaledock-app-runtime-arm64-dmg.XXXXXX")"
+          cleanup() {
+            hdiutil detach "$mount_dir" >/dev/null 2>&1 || true
+            rm -rf "$workdir"
+            rmdir "$mount_dir" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          ditto -x -k "release/WhaleDock-${version}-arm64-mac.zip" "$workdir"
+          app="$(find "$workdir" -maxdepth 2 -name '*.app' -print -quit)"
+          test -n "$app"
+          node scripts/verify-packaged-compliance.js --search="$app/Contents/Resources" --minimum=1
+          node scripts/verify-packaged-app-runtime.js --app="$app"
+          hdiutil attach "release/WhaleDock-${version}-arm64.dmg" -nobrowse -readonly -mountpoint "$mount_dir"
+          node scripts/verify-packaged-compliance.js --search="$mount_dir/WhaleDock.app/Contents/Resources" --minimum=1
+          node scripts/verify-packaged-app-runtime.js --app="$mount_dir/WhaleDock.app"
+          hdiutil detach "$mount_dir"
+          rmdir "$mount_dir"
+          rm -rf "$workdir"
+          trap - EXIT
 
       - name: Verify macOS arm64 artifact signature
         shell: bash
@@ -112,6 +143,33 @@ jobs:
 
       - name: Verify packaged macOS compliance materials
         run: node scripts/verify-packaged-compliance.js --search=release --minimum=2
+
+      - name: Verify macOS x64 app runtime in archive, ZIP, and DMG
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          node scripts/verify-packaged-compliance.js --search=release/.app-archives.noindex/WhaleDock-x64.app-bundle/Contents/Resources --minimum=1
+          node scripts/verify-packaged-app-runtime.js --app=release/.app-archives.noindex/WhaleDock-x64.app-bundle
+          workdir="$(mktemp -d "$RUNNER_TEMP/whaledock-app-runtime-x64.XXXXXX")"
+          mount_dir="$(mktemp -d "$RUNNER_TEMP/whaledock-app-runtime-x64-dmg.XXXXXX")"
+          cleanup() {
+            hdiutil detach "$mount_dir" >/dev/null 2>&1 || true
+            rm -rf "$workdir"
+            rmdir "$mount_dir" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          ditto -x -k "release/WhaleDock-${version}-x64-mac.zip" "$workdir"
+          app="$(find "$workdir" -maxdepth 2 -name '*.app' -print -quit)"
+          test -n "$app"
+          node scripts/verify-packaged-compliance.js --search="$app/Contents/Resources" --minimum=1
+          node scripts/verify-packaged-app-runtime.js --app="$app"
+          hdiutil attach "release/WhaleDock-${version}-x64.dmg" -nobrowse -readonly -mountpoint "$mount_dir"
+          node scripts/verify-packaged-compliance.js --search="$mount_dir/WhaleDock.app/Contents/Resources" --minimum=1
+          node scripts/verify-packaged-app-runtime.js --app="$mount_dir/WhaleDock.app"
+          hdiutil detach "$mount_dir"
+          rmdir "$mount_dir"
+          rm -rf "$workdir"
+          trap - EXIT
 
       - name: Verify macOS x64 artifact signature
         shell: bash
@@ -308,6 +366,8 @@ jobs:
                   rmdir "$mount_dir" || true
                   exit 1
                 fi
+                node scripts/verify-packaged-compliance.js --search="$mount_dir/WhaleDock.app/Contents/Resources" --minimum=1
+                node scripts/verify-packaged-app-runtime.js --app="$mount_dir/WhaleDock.app"
                 hdiutil detach "$mount_dir"
                 rmdir "$mount_dir"
                 ;;
@@ -362,17 +422,18 @@ jobs:
       - name: Verify pinned Node and npm toolchain
         run: node -e "const cp=require('child_process');const npm=cp.spawnSync(process.platform==='win32'?'npm.cmd':'npm',['--version'],{encoding:'utf8',shell:process.platform==='win32'});if(process.version!=='v22.23.2'||npm.status!==0||npm.stdout.trim()!=='10.9.8')throw new Error('Expected Node v22.23.2 / npm 10.9.8, got '+process.version+' / '+npm.stdout.trim())"
 
+      - name: Verify tag matches committed package and lock versions
+        run: |
+          node -e "const tag=process.env.GITHUB_REF_NAME||'';const expected=tag.startsWith('v')?tag.slice(1):'';const p=require('./package.json'),l=require('./package-lock.json');if(!expected||p.version!==expected||l.version!==expected||!l.packages||!l.packages['']||l.packages[''].version!==expected)throw new Error('Release tag/package/lock version mismatch: '+tag+' / '+p.version+' / '+l.version+' / '+(l.packages&&l.packages['']&&l.packages[''].version))"
+
       - name: Install dependencies
         run: npm ci
 
       - name: Verify committed compliance materials
         run: npm run compliance:verify
 
-      - name: Set package version from tag
-        shell: pwsh
-        run: |
-          $version = $env:GITHUB_REF_NAME.Substring(1)
-          npm version --no-git-tag-version --allow-same-version $version
+      - name: Verify committed app runtime compliance materials
+        run: npm run app-runtime:verify
 
       - name: Smoke test (no GUI)
         run: npm run smoke
@@ -391,6 +452,38 @@ jobs:
 
       - name: Verify packaged Windows compliance materials
         run: node scripts/verify-packaged-compliance.js --search=release --minimum=1
+
+      - name: Verify Windows app runtime in unpacked, Setup, and portable artifacts
+        shell: pwsh
+        run: |
+          node scripts/verify-packaged-compliance.js --search=release/win-unpacked/resources --minimum=1
+          if ($LASTEXITCODE -ne 0) { throw "win-unpacked dsh compliance verification failed" }
+          node scripts/verify-packaged-app-runtime.js --app=release/win-unpacked
+          if ($LASTEXITCODE -ne 0) { throw "win-unpacked app runtime verification failed" }
+          $version = node -p "require('./package.json').version"
+          $sevenZip = (Get-Command 7z.exe -ErrorAction Stop).Source
+          $assets = @(
+            "release/WhaleDock-Setup-$version.exe",
+            "release/WhaleDock-$version-portable.exe"
+          )
+          $index = 0
+          foreach ($asset in $assets) {
+            $index += 1
+            $outer = Join-Path $env:RUNNER_TEMP "whaledock-app-runtime-outer-$index"
+            $app = Join-Path $env:RUNNER_TEMP "whaledock-app-runtime-app-$index"
+            New-Item -ItemType Directory -Force -Path $outer, $app | Out-Null
+            & $sevenZip x -y "-o$outer" $asset | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Failed to extract $asset" }
+            $inner = @(Get-ChildItem -LiteralPath $outer -Recurse -File -Filter 'app-*.7z')
+            if ($inner.Count -ne 1) { throw "Expected one app-*.7z in $asset, got $($inner.Count)" }
+            & $sevenZip x -y "-o$app" $inner[0].FullName | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Failed to extract $($inner[0].FullName)" }
+            node scripts/verify-packaged-compliance.js "--search=$app/resources" --minimum=1
+            if ($LASTEXITCODE -ne 0) { throw "dsh compliance verification failed for $asset" }
+            node scripts/verify-packaged-app-runtime.js "--app=$app"
+            if ($LASTEXITCODE -ne 0) { throw "App runtime verification failed for $asset" }
+            Remove-Item -LiteralPath $outer, $app -Recurse -Force
+          }
 
       - name: Verify Windows artifact names and write checksums
         shell: pwsh
@@ -486,13 +579,11 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
-            ## v0.7.0 更新
+            ## v0.8.0 更新
 
-            - **第一方视频驾驶舱**：今天、选题拍板、脚本块级建议/对照/采用/撤销、全屏拍摄提词器、两阶段收工、发布检查单与打法库连成一条本地创作线；平台数据未接通时只显示“侦察中，未接通”，不使用示意数字。
-            - **全宽对话现场**：在创作现场与完整 DeepSeek Harness 之间用 `⌘K` / `Ctrl+K` 往返，同一会话和未发送草稿不会因切换而重载。
-            - **鲸坞色系快切**：顶栏可直接切换七套内置色系与用户主题，选择跨重启保留；Harness 对话区仍保持自身外观。
-            - **远程板块批次 1**：设置页新增“远程”骨架与自助向导；飞书、钉钉、随身网页三通道默认全关，本版未接任何真实平台。
-            - **电商客服工作台包**：随附示例话术版，保持纯数据、纯本地边界。
+            - **dsh 跟版升级**：默认与内置引擎从 `0.1.0-rc.6` 升至经三平台审计的 `0.1.1-rc.2`；只有精确旧默认会一次性迁移，`latest`、其他版本与自定义命令保持不变。鲸坞仍不读写、迁移或清理 `~/.dsh`。
+            - **飞书远程通道**：设置页可保存飞书自建应用凭据，接收本人单聊文字/链接到当前工作区，并发送固定文字通知。通道默认关闭，只在启用连接时惰性加载 SDK；本版不开放远程审批，客服内容仍锁为仅随身网页。
+            - **双重成品合规回读**：dsh runtime 与根 App 的飞书 SDK 闭包分别维护 inventory、NOTICE 与许可材料，并在 macOS App/ZIP/DMG、Windows unpacked/Setup/portable 中逐项验证。
 
             ## macOS 安装
 
@@ -502,6 +593,8 @@ jobs:
 
             ## 重要平台边界
 
-            - Windows x64 构建未签名，且为实验性支持，尚未完成 Windows 真机验证；SmartScreen 拦截时可选择“更多信息 → 仍要运行”。遇到问题请提交 issue，并附鲸坞日志与完整资产名。
+            - 手动启用 dsh SQLite 存储的用户须在升级前备份并保留旧 runtime：`0.1.1-rc.2` 的 opt-in SQLite schema 从 15 升到 17，当前没有迁移路径；鲸坞不会自动迁移、覆盖或清理。默认 JSONL 会话存储不受影响。
+            - 飞书源码与成品自动验证不能代替真实平台验收；本版尚未完成真实企业租户、手机收发与人工绑定验证。
+            - Windows x64 构建未签名，且为实验性支持，尚未完成 Windows 真机验证；SmartScreen 拦截时可选择“更多信息 → 仍要运行”。CI 通过不代表 Windows dsh/飞书真机已通过。
             - Intel x64 仅在 Apple Silicon + Rosetta 环境抽查，尚未完成 Intel Mac 真机验证。
           prerelease: ${{ contains(github.ref_name, '-') }}

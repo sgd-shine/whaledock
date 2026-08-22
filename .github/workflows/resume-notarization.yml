@@ -10,7 +10,7 @@ on:
         required: true
         type: string
       release_tag:
-        description: "Exact release tag, for example v0.7.0"
+        description: "Exact release tag, for example v0.8.0"
         required: true
         type: string
 
@@ -49,6 +49,7 @@ jobs:
             echo "::error title=Invalid release tag::$RELEASE_TAG"
             exit 1
           fi
+          node -e "const tag=process.env.RELEASE_TAG||'';const expected=tag.startsWith('v')?tag.slice(1):'';const p=require('./package.json'),l=require('./package-lock.json');if(!expected||p.version!==expected||l.version!==expected||!l.packages||!l.packages['']||l.packages[''].version!==expected)throw new Error('Resume tag/package/lock version mismatch: '+tag+' / '+p.version+' / '+l.version+' / '+(l.packages&&l.packages['']&&l.packages[''].version))"
           version="$RELEASE_TAG"; version="${version#v}"
           assets=(
             "release/WhaleDock-${version}-arm64.dmg"
@@ -134,6 +135,8 @@ jobs:
               rmdir "$mount_dir" || true
               exit 1
             fi
+            node scripts/verify-packaged-compliance.js --search="$mount_dir/WhaleDock.app/Contents/Resources" --minimum=1
+            node scripts/verify-packaged-app-runtime.js --app="$mount_dir/WhaleDock.app"
             hdiutil detach "$mount_dir"
             rmdir "$mount_dir"
           done
@@ -234,13 +237,11 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
-            ## v0.7.0 更新
+            ## v0.8.0 更新
 
-            - **第一方视频驾驶舱**：今天、选题拍板、脚本块级建议/对照/采用/撤销、全屏拍摄提词器、两阶段收工、发布检查单与打法库连成一条本地创作线；平台数据未接通时只显示“侦察中，未接通”，不使用示意数字。
-            - **全宽对话现场**：在创作现场与完整 DeepSeek Harness 之间用 `⌘K` / `Ctrl+K` 往返，同一会话和未发送草稿不会因切换而重载。
-            - **鲸坞色系快切**：顶栏可直接切换七套内置色系与用户主题，选择跨重启保留；Harness 对话区仍保持自身外观。
-            - **远程板块批次 1**：设置页新增“远程”骨架与自助向导；飞书、钉钉、随身网页三通道默认全关，本版未接任何真实平台。
-            - **电商客服工作台包**：随附示例话术版，保持纯数据、纯本地边界。
+            - **dsh 跟版升级**：默认与内置引擎从 `0.1.0-rc.6` 升至经三平台审计的 `0.1.1-rc.2`；只有精确旧默认会一次性迁移，`latest`、其他版本与自定义命令保持不变。鲸坞仍不读写、迁移或清理 `~/.dsh`。
+            - **飞书远程通道**：设置页可保存飞书自建应用凭据，接收本人单聊文字/链接到当前工作区，并发送固定文字通知。通道默认关闭，只在启用连接时惰性加载 SDK；本版不开放远程审批，客服内容仍锁为仅随身网页。
+            - **双重成品合规回读**：dsh runtime 与根 App 的飞书 SDK 闭包分别维护 inventory、NOTICE 与许可材料，并在 macOS App/ZIP/DMG、Windows unpacked/Setup/portable 中逐项验证。
 
             ## macOS 安装
 
@@ -250,6 +251,8 @@ jobs:
 
             ## 重要平台边界
 
-            - Windows x64 构建仍未签名，且为实验性支持，尚未完成 Windows 真机验证；SmartScreen 拦截时可选择“更多信息 → 仍要运行”。遇到问题请提交 issue，并附鲸坞日志与完整资产名。
+            - 手动启用 dsh SQLite 存储的用户须在升级前备份并保留旧 runtime：`0.1.1-rc.2` 的 opt-in SQLite schema 从 15 升到 17，当前没有迁移路径；鲸坞不会自动迁移、覆盖或清理。默认 JSONL 会话存储不受影响。
+            - 飞书源码与成品自动验证不能代替真实平台验收；本版尚未完成真实企业租户、手机收发与人工绑定验证。
+            - Windows x64 构建仍未签名，且为实验性支持，尚未完成 Windows 真机验证；SmartScreen 拦截时可选择“更多信息 → 仍要运行”。CI 通过不代表 Windows dsh/飞书真机已通过。
             - Intel x64 仅在 Apple Silicon + Rosetta 环境抽查，尚未完成 Intel Mac 真机验证。
           prerelease: ${{ contains(inputs.release_tag, '-') }}

@@ -1,7 +1,7 @@
 {
   "name": "whaledock",
   "productName": "WhaleDock",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "鲸坞 WhaleDock — Unofficial desktop app for DeepSeek Harness (dsh): auto-starts the local dsh backend and wraps its Web UI in a native window. 非官方 DeepSeek Harness 桌面客户端：给鲸鱼一个靠岸的坞。",
   "main": "main.js",
   "author": "SGD",
@@ -16,6 +16,8 @@
     "compliance:sources": "node scripts/third-party-inventory.js sources --inventories=compliance --sources=compliance/SOURCES.json --output=compliance/SOURCES.md",
     "compliance:notices": "node scripts/third-party-inventory.js notices --inventories=compliance --output=THIRD_PARTY_NOTICES.md",
     "compliance:verify": "node scripts/third-party-inventory.js sources --check --inventories=compliance --sources=compliance/SOURCES.json --output=compliance/SOURCES.md && node scripts/third-party-inventory.js notices --check --inventories=compliance --sources=compliance/SOURCES.json --output=THIRD_PARTY_NOTICES.md",
+    "app-runtime:generate": "node scripts/app-runtime-compliance.js generate",
+    "app-runtime:verify": "node scripts/app-runtime-compliance.js verify",
     "dist": "npm run dist:mac:arm64",
     "dist:mac": "npm run dist:mac:arm64 && npm run dist:mac:x64",
     "predist:mac:arm64": "npm run bundle:dsh -- --platform=darwin --arch=arm64",
@@ -113,6 +115,13 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "compliance/app-runtime",
+        "to": "compliance/app-runtime",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "mac": {
@@ -172,5 +181,8 @@
       "artifactName": "WhaleDock-${version}-portable.${ext}",
       "requestExecutionLevel": "user"
     }
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "1.73.0"
   }
 }

@@ -2,3 +2,4 @@
 licenses/** -text -whitespace
 compliance/** -text -whitespace
 THIRD_PARTY_NOTICES.md -text -whitespace
+package-lock.json -text -whitespace

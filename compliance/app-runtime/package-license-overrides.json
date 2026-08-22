@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "packages": {
+    "agent-base@6.0.2": {
+      "packagePath": "README.md",
+      "sha256": "f1425c3b72330fe4fb2aa5a2fb152e939bdf534692a32b5f0b38f74147b98556"
+    },
+    "https-proxy-agent@5.0.1": {
+      "packagePath": "README.md",
+      "sha256": "32f0856d2c43df7d05cca960fdee84e1e38ab545bd7b2186433dfa41aa90a712"
+    }
+  }
+}

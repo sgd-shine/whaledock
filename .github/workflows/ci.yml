@@ -33,6 +33,9 @@ jobs:
       - name: Verify committed compliance materials
         run: npm run compliance:verify
 
+      - name: Verify committed app runtime compliance materials
+        run: npm run app-runtime:verify
+
       - name: Smoke test
         run: npm run smoke
 

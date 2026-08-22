@@ -94,6 +94,34 @@ function adapterOptions(fetch, overrides = {}) {
 }
 
 async function main() {
+  await test('根包 proof 默认锁 rc.6，候选只接受显式精确 SemVer 与字节级等值', async () => {
+    assert.equal(backend.hasExactDshPackageProof({
+      packageVersionProof: config.DSH_CONTRACT.packageVersion
+    }), true);
+    assert.equal(backend.hasExactDshPackageProof({
+      expectedPackageVersion: '0.1.1-rc.2',
+      packageVersionProof: '0.1.1-rc.2'
+    }), true);
+    for (const proof of [null, 'latest', 'system:/usr/local/bin/dsh', '0.1.0-rc.6']) {
+      assert.equal(backend.hasExactDshPackageProof({
+        expectedPackageVersion: '0.1.1-rc.2',
+        packageVersionProof: proof
+      }), false, String(proof));
+    }
+    assert.equal(backend.hasExactDshPackageProof({
+      expectedPackageVersion: '0.1.1-rc.2+probe',
+      packageVersionProof: '0.1.1-rc.2'
+    }), false);
+    for (const expectedPackageVersion of [
+      '', 'latest', 'v0.1.1-rc.2', ' 0.1.1-rc.2', '0.1.1-rc.02', '0.1.1-'
+    ]) {
+      assert.throws(() => backend.hasExactDshPackageProof({
+        expectedPackageVersion,
+        packageVersionProof: expectedPackageVersion
+      }), (error) => error.code === 'ERR_DSH_PACKAGE_CONTRACT');
+    }
+  });
+
   await test('根包版本无法证明时 detect/list 零请求且自动写入不可用', async () => {
     let fetchCalls = 0;
     const adapter = backend.createDshPromptAdapter(adapterOptions(async () => {
@@ -106,6 +134,74 @@ async function main() {
     });
     assert.equal(fetchCalls, 0);
     await adapter.close();
+  });
+
+  await test('候选 rc.2 错版或缺 proof 时在任何 fetch 前 fail-closed', async () => {
+    for (const packageVersionProof of [undefined, null, 'latest', '0.1.0-rc.6']) {
+      let fetchCalls = 0;
+      const candidate = backend.createDshPromptAdapter(adapterOptions(async () => {
+        fetchCalls += 1;
+        throw new Error('must not fetch');
+      }, {
+        expectedPackageVersion: '0.1.1-rc.2',
+        packageVersionProof
+      }));
+      assert.deepEqual(await candidate.detect(), {
+        available: false, reason: 'package-unproven'
+      });
+      assert.deepEqual(await candidate.listTargets(), {
+        available: false, reason: 'package-unproven', targets: []
+      });
+      assert.equal(fetchCalls, 0);
+      await candidate.close();
+    }
+  });
+
+  await test('非法候选版本在构造时失败且零 fetch', async () => {
+    let fetchCalls = 0;
+    assert.throws(() => backend.createDshPromptAdapter(adapterOptions(async () => {
+      fetchCalls += 1;
+    }, {
+      expectedPackageVersion: 'latest',
+      packageVersionProof: 'latest'
+    })), (error) => error.code === 'ERR_DSH_PACKAGE_CONTRACT');
+    assert.equal(fetchCalls, 0);
+  });
+
+  await test('显式精确 rc.2 proof 复用同一 describe/list/queue 合约', async () => {
+    const candidateRequests = [];
+    const candidate = backend.createDshPromptAdapter(adapterOptions(
+      fixtureFetch(candidateRequests, {
+        describe: {
+          version: '0.0.1', cwd: '/private/workspace',
+          home: '/private/rc2-home', attachedSessions: 3, canOpenPath: true
+        }
+      }),
+      {
+        expectedPackageVersion: '0.1.1-rc.2',
+        packageVersionProof: '0.1.1-rc.2'
+      }
+    ));
+    assert.deepEqual(await candidate.detect(), { available: true, reason: 'ready' });
+    const listed = await candidate.listTargets();
+    assert.equal(listed.available, true);
+    assert.equal(listed.targets.length, 1);
+    assert.equal(JSON.stringify(listed).includes('/private/rc2-home'), false);
+    assert.deepEqual(await candidate.submitText({
+      targetToken: listed.targets[0].targetToken,
+      text: 'RC2_CONTRACT_FIXTURE',
+      clientTimeZone: 'Etc/UTC'
+    }), { state: 'accepted', reason: 'accepted' });
+    assert.deepEqual(candidateRequests.map((item) => item.request.method), [
+      'host.describe', 'session.list', 'session.prompt'
+    ]);
+    assert.deepEqual(candidateRequests[2].request.payload, {
+      sessionId: 'raw-session-root',
+      mode: 'queue',
+      content: [{ type: 'text', text: 'RC2_CONTRACT_FIXTURE' }],
+      clientTimeZone: 'UTC'
+    });
+    await candidate.close();
   });
 
   const requests = [];

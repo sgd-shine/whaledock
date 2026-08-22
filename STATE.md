@@ -16,6 +16,29 @@
 - `package-lock.json`、`compliance/`、`vendor/`、`licenses/` 与 `THIRD_PARTY_NOTICES.md` 相对 v0.6.0 零变化；root runtime dependencies=0，dsh 仍锁定 `0.1.0-rc.6`，无 S1。
 - `v0.7.0` tag 已落地，dsh 跟版升级线与远程批次 2 的开工条件已满足；两线的后续状态与证据由各自线程维护，不由本发版结论代替。
 
+## v0.8.0 dsh / 飞书整合｜批次 0–5（已批准，发版门进行中）
+
+- 本线在独立 worktree `harness-desktop-v08-dsh-upgrade`、分支 `codex/v08-dsh-upgrade` 上从 `main@29070d5` 开工。批次 5 已在 dsh 预合并 head `05e489f5…` 之后按原父链合入飞书提交 `8ef005872e6b87d09eaba8ae601d132380151640` 与 `257b8bb60eff8ac97c18037dec03147036ef96fa`，本分支映射为 `e668611…` 与 `c444bfb…`，patch-id 一致，共享 `main.js` / `test/smoke.js` 已小步解冲突。
+- 2026-08-22T12:28Z 实时回读 npm `latest=next=0.1.1-rc.2`，发布时间 `2026-08-21T12:42:19.422Z`，tarball SHA-1 `1a5112369f1c46b13a6e6f21de8af5e6afd45074`；后续探针与候选材料只认该精确版本，若发布前 latest 再漂移则全套重跑。
+- 批次 1 已让 system dsh 与 npx 生产计划按已知版本决定 `--no-open`；bundled 仍被生产锁限制为 rc.6，本批只对 rc.2 验证纯 argv planner，不能启动 rc.2 bundled。rc.8 及以后追加旗标，rc.6 的完整命令对象保持原样。PATH 中 system dsh 不起版本子进程，只有界读取官方 npm shim/symlink 布局与 `package.json`；未知即沿用旧参数，结果不作为事件/prompt 根包证明；custom 命令零探测、零改写。
+- 批次 2 新增统一的根包 exact-proof helper：生产调用省略候选版本时仍只接受 rc.6；隔离探针可显式要求 `0.1.1-rc.2`，但 proof 必须逐字节相等。prompt 与托管事件门共用该 helper；错版、缺 proof、`latest`、system/custom 描述值均 fail-closed。workdir 的 host/cwd 证明与外部 read-only events attach 没有被误绑根包版本。
+- rc.2 live probe 已在全新临时 HOME/DSH_HOME/XDG/npm cache/workspace 与随机高位回环端口完成：fresh list=0；probe-only create 后有 3 条稳定安全元数据；WS opened/subscribed/send=0；raw queue 与鲸坞候选 prompt adapter 均 accepted 且 completed；raw/adapter history 均 6 页、36 事件、两个终态 seq 对齐；本地 SSE stub 3 请求，未继承真实凭据或访问真实模型。
+- `host.describe` 的 rc.2 加法字段 `home:string` 已用 synthetic fixture 与 live 值验证，只记录 present/length，不向中性层或报告暴露原文。`--dump-config` 现场回读 15,796 B/503 行/text，SHA-256 `cee7cd4d8c757ddf74a0bca9038ca817e2282f6c79f5c01d57baa89f871d4316`。
+- 自有 rc.2 进程以精确 PID/PGID/bin/父子链核验后 TERM，未用 KILL；web/provider 端口和引用临时根的残留进程均清零。既有 3080/50213 只做 lsof 前后回读，PID `53336` / `48805` 不变，未连接、未停止。
+- 全仓 42 个文件/3,221 次 rc.6 命中已逐类判定：3,031 次旧正式合规闭包已由批次 4 的独立候选胶囊全量重生；历史/兼容 fixture 保留；生产锁、工作台 range、当前用户文档只在批次 5 原子切换，不做盲替换。
+- 批次 3 对当前 audited-lock rc.6 合成状态做停机冷读，再用保留 mode 的副本启动 rc.2：36-event/2-completed raw history 在 rc.2 两次冷启都逐事件相等，物理 `sessions` 树与压缩文件未变，readback 期间 provider 请求为 0。另一副本在旧会话继续一轮后旧前缀完全相等，从 seq 36 连续追加 15 events，最终 51 events/3 completed，鲸坞中性 adapter 同样读到 51/3。rc.2 会重投影 full DSH_HOME 的 profile/cache 链接，因此 PASS 只针对 `sessions/`，不写成整个 DSH_HOME 零变化。
+- 默认 dsh web 两版都使用 JSONL/Zstandard、格式版本 0，因此本次结论是 `PASS_preserved_no_migration`，不是 SQLite 自动迁移。opt-in SQLite schema 15→17 且 rc.2 无 migration；批次 5 的升级提示必须告知手动配置 SQLite 的用户先备份并保留旧 runtime，鲸坞不自动迁移、覆盖或清理。
+- 批次 4 tip 为 `9e6dfdb7291d417d78f7ad42d0b6cc5f1d6acde3`。版本化 candidate capsule、独立聚合器/持久 verifier 与原生 CI workflow 已收口；本地统一 `npm run smoke` 实跑 **511 PASS / ALL PASS**，聚合器 9/9、持久 verifier 15/15，语法、diff、YAML/actionlint 均通过。
+- 候选精确为 `0.1.1-rc.2`，audited lock SHA-256 `c084af82305715116ac5bd30d586be94e0fce9e00c31db0a309c3eecdd099527`。原生 inventory 为 macOS arm64 **449**、macOS x64 **449**、Windows x64 **448** 包；跨目标去重 **458** 个 name@version，比现行 535 少 77。新增 19 个包名全部 MIT，删除 97 个包名；候选 `npm audit` 五级均为 0。
+- 胶囊提交 **214** 份许可材料（158 package-texts、33 embedded-components、3 embedded、20 SPDX），并含独立 NOTICE、SOURCES、3 份 inventory、3 份 runtime/material manifest 与原生二进制证明。包级 GPL/AGPL/SSPL 为 0；4 个弱 copyleft 二进制容器及其 14 个 source components 已进入源码/归属闭包，wasm 与 Cairo 差异按原边界保留而未被抹平。
+- 三平台候选 runtime 逻辑字节为 arm64 **209,815,821 B**、x64 **212,451,977 B**、Windows **211,785,126 B**。相对 v0.7 已发布 macOS runtime ZIP 清单未压缩基线，arm64 少 **55,010,936 B（-20.77%）**、x64 少 **55,220,118 B（-20.63%）**；Windows 现行解包基线与批次 5 成品包体均为 `N/A`，不由压缩证据外推。
+- 最终 [candidate CI 32580171385](https://github.com/sgd-shine/whaledock/actions/runs/32580171385) 在精确 head `9e6dfdb…` 上四个 job 全绿：macOS arm64、macOS Intel x64、Windows x64 原生构建/比对及 aggregate 均成功。完整胶囊 artifact 为 **4,883,804 B**，digest `sha256:cccb510e225ee5ad5dd516c2c329525b0112a16c9bb55234ea6064b172fdab8c`；下载后本机再次核验为 3 targets、214 license files、mirror verified `PASS`。
+- **SGD 已明确批准进入批次 5**：批准合入 dsh 与飞书代码、升生产锁，并落独立 app-runtime inventory/NOTICE/licenses/成品验证。生产 dsh 现已精确切到 `0.1.1-rc.2`；只有持久配置中字节精确等于旧默认 rc.6 才一次性迁移，`latest`、其他版本、非规范值和 custom command 保留。正式 dsh lock SHA-256 为 `c084af82305715116ac5bd30d586be94e0fce9e00c31db0a309c3eecdd099527`，三平台 inventory 449 / 449 / 448 包，许可材料 214 份，与已核验 capsule 逐字节一致。
+- 根 `package.json/package-lock.json` 已在独立窗精确锁定 `@larksuiteoapi/node-sdk@1.73.0`，未使用 `^` / `~`。最终根 lock 的生产可达闭包是 **52 包**（MIT 40 / BSD-3-Clause 11 / Apache-2.0 1）、源文件 830 个 / 39,607,980 B，许可原文去重 35 份；全量与 `--omit=dev` 的 `npm audit` 五级均为 0。该身份只存于 `compliance/app-runtime/`，没有混入 dsh runtime 材料。
+- 独立 app-runtime 链已基于最终 lock 生成且离线复核：inventory lock SHA-256 `b377ea28421419ee831a76ea93d01f92b45d420532a604c6f3a809b7a7aa88bf`，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`，成品预期树 `b363e6c80bca9296e566e0accae30143e6ce02dc53a660ec706bf8c9cfac1d02`；只有 `protobufjs@7.6.5` 的 postinstall 在精确脚本哈希 allowlist 中。CI/Release/resume 已要求 macOS `.app-bundle` / ZIP / 挂载 DMG 与 Windows unpacked / Setup / portable 全部同时运行 dsh 与 app-runtime verifier。
+- 本地统一 `npm run smoke` 实跑 **579 PASS / ALL PASS**。本机 arm64 真实 `electron-builder --mac dir` 已生成 ad-hoc 成品；dsh 随包材料与签名回读通过。app verifier 由此捕获并修复了 Electron ASAR 虚拟 `fs` 和 electron-builder 依赖 hoist/manifest 重写差异；最终将经确定性清理的 manifest 与必需运行时文件集全部绑定到 inventory，缺文件或改 `main` / `exports` / dependencies 都 fail-closed。真实成品回执 `packages=52 files=449 tree=b363e6c8…`，SDK 懒加载及 `WSClient` / `EventDispatcher` 导出已由成品 Electron 验证。
+- **当前发布边界**：工作树已完成生产切换与本地成品证据，但尚未合入 `main`、未打 `v0.8.0` tag、未获得最终三平台成品、未设置精确审批值也未创建公开 Release。发版前仍必须实时重查 npm `latest`；若不再是 rc.2，则停止并重走侦察/G1。
+
 **v0.6.0 历史发布基线：工作台包通过三平台 CI，macOS arm64/x64 成品使用 Developer ID Application 正式签名、开启 Hardened Runtime 并获 Apple 公证。**
 
 - 在 v0.6.0 发布时：[`v0.6.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.6.0) 为非 draft、非 prerelease 的最新稳定版，正式 tag 指向 `7ae619d8b7cbad81412e098706737d7e1490b9e8`。
@@ -67,9 +90,10 @@ Windows/Intel 真机与 Windows 签名仍是独立证据边界；v0.6.0 → v0.7
 - 本批不含真实飞书/钉钉 adapter、凭据输入/本地安全存储、真手机收发、随身网页 HTTP 监听、二维码或 Tailscale 安装。设置页向导是批次 1 信息架构，不得写成平台已可绑定。
 - SGD 已在 v0.7.0 tag 前完成人工目视卡并回“过”：检查了三通道默认关闭、向导文案、未配置不假绿与全部断开回读。内部记录为 `docs/验收记录-远程板块-批次1-2026-08-21.md`（已 exclude）；这不代表真实平台 adapter 已接通。
 
-### 下批硬门
+### 批次 2 / 批次 5 现状与后续边界
 
-- 批次 2 真实飞书长连接前，若确需官方 Node SDK，必须先以 S1 口径报许可证、体积和依赖闭包，获 SGD 批准后才能加依赖。
+- 飞书代码父链与重连 timer 时序修复已进入 v0.8 整合分支；根依赖只有精确 `@larksuiteoapi/node-sdk@1.73.0`，且关闭态零 SDK 加载/零平台网络的源码回归已通过。这不等于真实飞书租户、手机收发或人工绑定已验收。
+- 最终根 lock 的 52 包闭包已通过独立 app-runtime inventory/NOTICE/licenses 与本机 arm64 packaged verifier，没有混入 dsh-runtime 身份。三平台全载体仍等待正式 Release workflow 取证。
 - 批次 4 接真实事项前，内容分级必须接可回查的受信 event/approval/workspace ID，客服来源缺失时 fail-closed；`dedupeKey` 必须接持久去重。
 - 真实 adapter/store 必须完整实现核心合同：权威幂等 apply、同一绑定 store、网络方法响应 `AbortSignal`、断开幂等；回调不得反向等待同通道 service 操作。
 

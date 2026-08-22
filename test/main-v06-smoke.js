@@ -683,6 +683,34 @@ async function main06() {
     assert.match(source('main.js'), /不影响启动/);
   });
 
+  await test('候选 npx 的 dump-config 保留精确包版本且不混入 web 旗标', async () => {
+    const backend = require('../lib/backend');
+    const events = require('events');
+    let seen = null;
+    const result = await backend.probeDshConfig({ dshVersion: '0.1.1-rc.2' }, {
+      spawnImpl: (file, args, options) => {
+        seen = { file, args, options };
+        const child = new events.EventEmitter();
+        child.stdout = new events.EventEmitter();
+        child.kill = () => {};
+        setTimeout(() => {
+          child.stdout.emit('data', Buffer.from('{"port":3080}'));
+          child.emit('close', 0);
+        }, 5);
+        return child;
+      },
+      runtime: {
+        findCommand: (name) => (name === 'npx' ? '/usr/local/bin/npx' : null)
+      }
+    });
+    assert.equal(result.available, true);
+    assert.equal(seen.file, '/usr/local/bin/npx');
+    assert.deepEqual(seen.args, [
+      '-y', '@deepseek-ai/dsh@0.1.1-rc.2', '--profile', 'web', '--dump-config'
+    ]);
+    assert.equal(seen.args.includes('--no-open'), false);
+  });
+
   await test('内置工作台包进入 electron-builder 产物，且外壳三件套也在', async () => {
     const pkg = JSON.parse(source('package.json'));
     for (const entry of [
@@ -691,7 +719,9 @@ async function main06() {
     ]) {
       assert.ok(pkg.build.files.includes(entry), entry);
     }
-    assert.deepEqual(pkg.dependencies || {}, {});
+    assert.deepEqual(pkg.dependencies || {}, {
+      '@larksuiteoapi/node-sdk': '1.73.0'
+    });
     assert.ok(fs.existsSync(path.join(ROOT, 'assets', 'workbenches', '短视频创作台', 'manifest.json')));
   });
 

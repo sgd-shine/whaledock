@@ -1,0 +1,1341 @@
+{
+  "schemaVersion": 1,
+  "candidateVersion": "0.1.1-rc.2",
+  "expectedCommit": "6f3b79bf3afa03e73c1a6a712015f16e9b06c8ed",
+  "auditedLockSha256": "c084af82305715116ac5bd30d586be94e0fce9e00c31db0a309c3eecdd099527",
+  "runtimePackageIntegrity": "sha512-UP1UIh6q3Gme/yXRn/QL2P8IsVlv8Shpg22TRJIZPsCRWLm4CBiA1MUvXmJAfsOEETBMLAl+xWPtFw6ICsN3wg==",
+  "targets": [
+    {
+      "platform": "darwin",
+      "arch": "arm64",
+      "inventorySha256": "bf6f7be72a8d6f02ee7e1809f0763494c01d75f3fee3f137724c3dec51cc77eb",
+      "evidenceSha256": "ac36e1555465baf02cd4f6f3e164acaed4f73fb53748b6a837cc791c9c1b1da9",
+      "runtimeManifestSha256": "2b3b5e7ba6547c5fb6f01b42c5d13db0d873003a2ba8446f7301f29e3a653863",
+      "materialManifestSha256": "d3a992448603ce305664c3866f85a1ab85711614c52077e0e4e4130494d6c771"
+    },
+    {
+      "platform": "darwin",
+      "arch": "x64",
+      "inventorySha256": "5477b28b7e3478ecd0bb895c09c870a9b22c915391357ad0b5b71a8d15bc3253",
+      "evidenceSha256": "1f474fe1a09eaa48ce2fa9d5d91e89161f83468de070e4b5370dfed80af93ce5",
+      "runtimeManifestSha256": "5c13c133ed54b15531dc30c3593e6cf0ce35c60c5bd31f1e7254649b7ffe7582",
+      "materialManifestSha256": "b65365145bf93bb37b56ecaac24a7f887b0690144b7fcd401a5b689472ea67a8"
+    },
+    {
+      "platform": "win32",
+      "arch": "x64",
+      "inventorySha256": "8d79dcd012d7bafe877ba0ef38da9679d29897d439a80cc7de3af710f1a40b24",
+      "evidenceSha256": "400a91604c9d0ee554e3c4d37a15e6918f09c1e16c0cd924edefb4b366710f0e",
+      "runtimeManifestSha256": "82ca1452a53eed53749befe281962d74d48e7461749c2fc8652cffb88ef80304",
+      "materialManifestSha256": "088d5cc6765c3ba97d88c2dce477808e678059eaf6599791b9482d40b3a647f9"
+    }
+  ],
+  "compliance": {
+    "embeddedLicenseMaterialsSha256": "7b70bf1220b7d098b78c024d8baf3de21100b8fe5e20c9bffb9a0e906bf00b9d",
+    "sourcesSha256": "59c35f28b986d5e9c74b96174fd83d2d4b5b08e9bfb0fbdbc85994173e87292f",
+    "packageLicenseOverridesSha256": "65cfe90cd161732b9e9a99af05cee3a9c1becb590e5a2268046c929eaf5422f3",
+    "nativeEvidenceSummarySha256": "6fa9815abbf92fadccdc710e5321d7e3b7e1b7cdb302f56000c7b3b56c55807f",
+    "overrideKeys": [
+      "@aws-sdk/credential-provider-http@3.972.72",
+      "@aws-sdk/credential-provider-login@3.972.77",
+      "@aws-sdk/nested-clients@3.997.44",
+      "@earendil-works/pi-ai@0.82.1",
+      "@koromix/koffi-darwin-arm64@3.1.6",
+      "@koromix/koffi-darwin-x64@3.1.6",
+      "@koromix/koffi-win32-x64@3.1.6",
+      "data-uri-to-buffer@4.0.1"
+    ],
+    "licenseFiles": [
+      "licenses/SPDX-0BSD.txt",
+      "licenses/SPDX-Apache-2.0.txt",
+      "licenses/SPDX-BSD-2-Clause.txt",
+      "licenses/SPDX-BSD-3-Clause.txt",
+      "licenses/SPDX-FTL.txt",
+      "licenses/SPDX-GPL-3.0-only.txt",
+      "licenses/SPDX-IJG.txt",
+      "licenses/SPDX-ISC.txt",
+      "licenses/SPDX-LGPL-2.0-or-later.txt",
+      "licenses/SPDX-LGPL-2.1-only.txt",
+      "licenses/SPDX-LGPL-2.1-or-later.txt",
+      "licenses/SPDX-LGPL-3.0-only.txt",
+      "licenses/SPDX-LGPL-3.0-or-later.txt",
+      "licenses/SPDX-Libpng.txt",
+      "licenses/SPDX-MIT.txt",
+      "licenses/SPDX-MPL-1.1.txt",
+      "licenses/SPDX-MPL-2.0.txt",
+      "licenses/SPDX-Python-2.0.txt",
+      "licenses/SPDX-Zlib.txt",
+      "licenses/SPDX-libtiff.txt",
+      "licenses/embedded-components/cairo-COPYING-LGPL-2.1.txt",
+      "licenses/embedded-components/cairo-COPYING-MPL-1.1.txt",
+      "licenses/embedded-components/cairo-COPYING.txt",
+      "licenses/embedded-components/cgif-LICENSE.txt",
+      "licenses/embedded-components/emscripten-LICENSE.txt",
+      "licenses/embedded-components/expat-COPYING.txt",
+      "licenses/embedded-components/freetype-FTL.txt",
+      "licenses/embedded-components/fribidi-COPYING.txt",
+      "licenses/embedded-components/glib-COPYING.pointer.txt",
+      "licenses/embedded-components/glib-LGPL-2.1-or-later.txt",
+      "licenses/embedded-components/harfbuzz-COPYING.txt",
+      "licenses/embedded-components/highway-LICENSE.txt",
+      "licenses/embedded-components/libarchive-COPYING.txt",
+      "licenses/embedded-components/libexif-COPYING.txt",
+      "licenses/embedded-components/libffi-LICENSE.txt",
+      "licenses/embedded-components/libheif-COPYING.txt",
+      "licenses/embedded-components/libimagequant-COPYRIGHT.txt",
+      "licenses/embedded-components/libnsgif-vendored-COPYING.txt",
+      "licenses/embedded-components/libpng-LICENSE.txt",
+      "licenses/embedded-components/librsvg-libvips-LGPL-2.1.txt",
+      "licenses/embedded-components/libtiff-LICENSE.md",
+      "licenses/embedded-components/libultrahdr-LICENSE.txt",
+      "licenses/embedded-components/libwebp-COPYING.txt",
+      "licenses/embedded-components/libxml2-Copyright.txt",
+      "licenses/embedded-components/little-cms-LICENSE.txt",
+      "licenses/embedded-components/mozjpeg-LICENSE.md",
+      "licenses/embedded-components/pango-proxy-libintl-COPYING.txt",
+      "licenses/embedded-components/pixman-COPYING.txt",
+      "licenses/embedded-components/resvg-LICENSE-APACHE.txt",
+      "licenses/embedded-components/resvg-LICENSE-MIT.txt",
+      "licenses/embedded-components/sharp-libvips-v1.3.2-THIRD-PARTY-NOTICES.md",
+      "licenses/embedded-components/wasm-vips-9ff73c-THIRD-PARTY-NOTICES.md",
+      "licenses/embedded-components/zlib-ng-LICENSE.md",
+      "licenses/embedded/AOM-LICENSE.txt",
+      "licenses/embedded/AOM-PATENTS.txt",
+      "licenses/embedded/fontconfig-COPYING.txt",
+      "licenses/package-texts/01ad164273e8e095abc9dbd1c21e194594a671af7d528cb43ee7b4c903ba7da3.txt",
+      "licenses/package-texts/034fb52b1d57360ecbae6cb1632a88f86fd7c3d3f5631a5f082710203dda0be7.txt",
+      "licenses/package-texts/04512a63dce4d2d506ad612dc0bd7681ccf6e3655f7b6eaef7dfac8323d1ec0b.txt",
+      "licenses/package-texts/07364a5f7d0177a59a05a0002187431f8f899320983c0dc049d72df015e8064c.txt",
+      "licenses/package-texts/09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b.txt",
+      "licenses/package-texts/0a1df3a083d0c010560aa342e87959c8c1070e6fd54545741f083f22d0c8b551.txt",
+      "licenses/package-texts/0dd4e47333485760cf8c265db5a5e24ae8d7401064c6f2e19793ee81a5bef42f.txt",
+      "licenses/package-texts/117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76.txt",
+      "licenses/package-texts/11d017c3b9f1ee3f44caf7203035f0461d5b57e0db8ce1bc03a9af34fa7d3f6b.txt",
+      "licenses/package-texts/1662fae9b5314d11cf51284e2dcd1f006a354f7343f08712a730fcff9a359801.txt",
+      "licenses/package-texts/18a2bfd070b08bd1cc538c90f59989a9523e070e72fe9a9068593c3e82f44fa7.txt",
+      "licenses/package-texts/18c295fdd68d4f68418b0209829f241481e93549d9e7b9fcd4b4c029322c8a45.txt",
+      "licenses/package-texts/1a526fbe8d8577f5a4b1c2821842b55b7c0e18862531c62ae4ce69c9b19b74b6.txt",
+      "licenses/package-texts/1aa9a12863eefb583779b2ca0e5d73c610b6e6d07529ae0472721769a6ea0a32.txt",
+      "licenses/package-texts/206c1adcf206dc0031b11232f5b054ec5f1662407ab1ca415247921cab2068ab.txt",
+      "licenses/package-texts/2088f55c6731498410b20c95ebd345ed4a4a800bf74c0fba4d282fd2a021daaa.txt",
+      "licenses/package-texts/210b19e543130388c68654b7497e967119ce17145f66ab7d85688fbd70f08751.txt",
+      "licenses/package-texts/2213d91c606205c71eb051a199478cdc2adde945893404d7f1421436dd6d5cc1.txt",
+      "licenses/package-texts/22bcbbbacd739b026a8dc484f62a31484ce4c4e31f3408b60b29b4e41d62b290.txt",
+      "licenses/package-texts/23d466b1b134b415b66fa50c6526b4cf3e7b9258554da88d3abb371721e7ce68.txt",
+      "licenses/package-texts/255aa557a1f55224ce522f311629c0bf20854740a67955cefd798fbd1d3d1ded.txt",
+      "licenses/package-texts/257aed98914108e91a337912727b6a802eef218248507f74b76faffaff517a38.txt",
+      "licenses/package-texts/25a328069fe771f8ed5b6f983ed4b0e6c84b3312ac0f69b28c3d52dc277962c9.txt",
+      "licenses/package-texts/280e7d164420cfc1a1b192a582bf53e3dba97b86a5c3575f878b674ad1d41e13.txt",
+      "licenses/package-texts/2b29dcfe0d6471f7e8c92c5fb38c9f93edee10330937055440192f1832b1ecef.txt",
+      "licenses/package-texts/2b770a704c15de238c3f622b01b0044ddd60b49ee30608ea6991ebf19db7a7a1.txt",
+      "licenses/package-texts/2ef1e48ea743d9c82313e6887858f7c1feaddd636f5a3f43926aab0143e67ebd.txt",
+      "licenses/package-texts/3320319f8a5f42bc4254e65471eca7a5ea4dc8c883c4c24b4868e36b14890bcf.txt",
+      "licenses/package-texts/37876d7de8bdf5e5b9b58a697ebc34044624e493e6f49eff5c938e5226dcac6b.txt",
+      "licenses/package-texts/39c5ec504cf6bd5cd782a7c695828e09189df79f5d94840e4f08feb97b9fd416.txt",
+      "licenses/package-texts/3a61c6c96caf5c1d9b623fb9b04c822b783dfcb78aa7e49c76a3f643e6ed7f95.txt",
+      "licenses/package-texts/3e2c11dcf3f17ab585baab8faba54772d7872f1c6e026022acd4b4006665efb0.txt",
+      "licenses/package-texts/3f1189b28e3866e0d979968d466b78f813f76827cfdca1fbb124cc0a5c8841f8.txt",
+      "licenses/package-texts/435a6437e47e5e479942255680e7fbe5f333d55234ada1c35f6115ca641d5bb4.txt",
+      "licenses/package-texts/44191656d296391e0ec97e32f5385f0d02b6f2992694082d22ea04ba0f66f9e4.txt",
+      "licenses/package-texts/47083f1ae7e990f74a56f576bcb8434051cb84ed1982fa57932720869e5147fe.txt",
+      "licenses/package-texts/47dcccf62bf40469d23849b0b1dc8df9fc91bce219b880c638d4dc4596e6b5cf.txt",
+      "licenses/package-texts/48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0.txt",
+      "licenses/package-texts/49d6a1c9a623784c61c6cb70f773f3457faceb1914a13c8560a9823b7631950c.txt",
+      "licenses/package-texts/4ab87e6e3c0c0b78e47c77d49ec10c048f8a519fb8062e6e3217e3e6e9b0c6e9.txt",
+      "licenses/package-texts/4bc935e71be198c67ddf3c2b5fddb195f6edc182bfc155a96a6db61b44b494b9.txt",
+      "licenses/package-texts/4eb7543b08d955a6d23fcc224601d43ff566e775be918805e26210d7f6eb4893.txt",
+      "licenses/package-texts/4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b.txt",
+      "licenses/package-texts/4eeb3271453a891df609e5a9f4ee79a68307f730c13417a3bfeffa604ac8cf25.txt",
+      "licenses/package-texts/4f6a1985796db5225e3b1e59972bd47e07a27a0748427cb3d3c8fbf39f9311f0.txt",
+      "licenses/package-texts/50a6b24f8defc31a078aa9799a91d776f83948071574854f12473362aee74d0d.txt",
+      "licenses/package-texts/512cfa4d5e7a7569c7ae4dd95241cb6ae2aaf648ef9ebd080c01bd24868d26e9.txt",
+      "licenses/package-texts/52412d7bc7ce4157ea628bbaacb8829e0a9cb3c58f57f99176126bc8cf2bfc85.txt",
+      "licenses/package-texts/553d4d20029a24e315b428a1a54a9e109eaa340f2e958a4f50a92362c2c4070b.txt",
+      "licenses/package-texts/5b37224c080cdcc97c871ada971c224e9926370fe74f11b539aa1cf9f3b1aca1.txt",
+      "licenses/package-texts/5bba27375d93e9119f76c1015f7672cf9ad5f70952296e0842fb2243d6376869.txt",
+      "licenses/package-texts/5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3.txt",
+      "licenses/package-texts/5e13dbbc1d120fc2a03cecde7c91424ae2d7de11b63d58ded2f4431e261ee50d.txt",
+      "licenses/package-texts/5e325595b4ea8cfec3802f545b1def5d7b73e4a5b8e9ba63e32a320f67732292.txt",
+      "licenses/package-texts/5ffe28e7ade7d8f10d85d5337a73fd793dac5c462fb9a28fbf8c5046c7fbca3b.txt",
+      "licenses/package-texts/62568a2d1337b77171ecca9db10579163446de1ba6151678e81f06cdc199971b.txt",
+      "licenses/package-texts/636eb7d79da9bb6d515a4b3fd417aa26679eb3cf16396ddab4bc55fa74e616e4.txt",
+      "licenses/package-texts/63b9a188d7d43e64b0558b7115255045b9fe20a5fc3ff483421cb899e7f52bcb.txt",
+      "licenses/package-texts/653b779005a3a4d64a7288c940f7b9a0e8f0b1e0375f6aa6af9473caf131e564.txt",
+      "licenses/package-texts/6582629e2979466878f6014313dcc2f3756c9616148682227ce3063dde310750.txt",
+      "licenses/package-texts/6895190430d809c4c57a7582ecc2f99acbc2ea39a5dfad20262a41d5b3e91733.txt",
+      "licenses/package-texts/69dee148a2cc470554dfa7142e830662062394d0fe67cddd379aba90dc60d6b3.txt",
+      "licenses/package-texts/6dc0e068dcf3a5bc8e054205b85b7720e1d49265bbc64bf515d2cf79197df69a.txt",
+      "licenses/package-texts/6ee0feb1f6ef996ff5a68600f8cf98909cf412d39ef3cdceaefd87d636fa1b7f.txt",
+      "licenses/package-texts/6fb9754611c20f6649f68805e8c990e83261f29316e29de9e6cedae607b8634c.txt",
+      "licenses/package-texts/70b126abc64d7ea06e1243349073935caa16fa47a41a571773ccf0b350b1d574.txt",
+      "licenses/package-texts/71368fd0f5b4129191e9afcd1e1ef2dc89a9090d3e4d80bbab92dafd032b3bef.txt",
+      "licenses/package-texts/71f83c4c0621102a56d9853812777b85751bce7e9726f686f5b056c1f8a4b0e6.txt",
+      "licenses/package-texts/73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68.txt",
+      "licenses/package-texts/751d0e80fb5c828f8c3de198cc760e1e05377e47c8263ab6ee2f10cdc19ba658.txt",
+      "licenses/package-texts/7585ea7bba616ccbbe43cb54ecb67956688c3c5641bb84f3099a652a73193afe.txt",
+      "licenses/package-texts/75bd0a6d6b9f9f0a6c792ca89832360b19749ebe16af0222e34387f262baa95e.txt",
+      "licenses/package-texts/76d6d1ea0c268da37dd3c961b4fcfb23dee8417fff9e8786d4d44c585b781b69.txt",
+      "licenses/package-texts/773e131a7684726005a7e4688a80b4620033bc08499bc1404dd1a1eb3bca725e.txt",
+      "licenses/package-texts/7beaa85b57d7211f6684af6c1d97e6d9ef7ec1851f779152043a47a8700306a9.txt",
+      "licenses/package-texts/7bf9b2de73a6b356761c948d0e9eeb4be6c1270bd04c79cd489c1e400ffdfc1a.txt",
+      "licenses/package-texts/8078b0829d6c3e9ecde2f003e1966e4cad3efc6e7a640efbab0313cc166b1af1.txt",
+      "licenses/package-texts/8089bcc08845ec143e5761f4a101a65b8c792a0dedbfeeb90a15560c0b77f768.txt",
+      "licenses/package-texts/80d3168ad2f70f6f5bb2ab22b23414707abf6f0a392034891481ae36a1a429d4.txt",
+      "licenses/package-texts/81008a3fb78f69f3c4a72a9e005c8582342ab62864371b3ab8e1b6af9041e080.txt",
+      "licenses/package-texts/835eb611a23301b27115ca1be9f754c876e643ceb7fe63049c6b50609a1cafeb.txt",
+      "licenses/package-texts/89024017b88a9f2b763f79b941a4f2db3b4428edfcacdc0b23866b2da633ad0c.txt",
+      "licenses/package-texts/8bf96984ff8bcfae7e48cae76a529e8a25317ba9e02abf7fd3cc64fdf95657a6.txt",
+      "licenses/package-texts/8d8c55319c7729d57be811c747452636688d54f19701ee0752b6b15ad3771d9a.txt",
+      "licenses/package-texts/8ec1386f7f078b0c7cd25341cd80f332df902371cda9f40c10ec2b4007b420b7.txt",
+      "licenses/package-texts/90021adfb24b0a7af5754cebc6085e2560555f74d29a6d44a7f9a32125f8b348.txt",
+      "licenses/package-texts/95a5762890e5c1c9808921cef095661fc482c5e1f0bba31446ac85595df6237c.txt",
+      "licenses/package-texts/965ef284f7f4c176842ec2e87fa13e79feed777d56d7a21a5a3b38f1bb6dc288.txt",
+      "licenses/package-texts/9672b5ea831c360425e95b806b302e502582dd9718b056f29c40cf241daecb68.txt",
+      "licenses/package-texts/97af7428f93afbab9bf79cd09254da1357161794f4255eb1b4599f04dd2d2e7c.txt",
+      "licenses/package-texts/99cf22f6960a6fe228ec84ea9aefb0d75b27999ece83a3a9801e1c2081fa270b.txt",
+      "licenses/package-texts/9a9edad7baae52622bddf3c15b2ef8a33d2c89f2d25408ad13e8a7481c6b0c97.txt",
+      "licenses/package-texts/9d7a84ade91e8e50f5dfc303fb53e580e806f6f89bde804e84a01c1b8853fff5.txt",
+      "licenses/package-texts/9df3bb69929a3b650ed73b3bfa1756725aaff0ac296461605753547004eafeaf.txt",
+      "licenses/package-texts/a05350a88e318e4f5f2c2a1ff1e2e88daa4dd38e6e78b71cccae422bdc762cc3.txt",
+      "licenses/package-texts/a055e3a15db4b4cbb5af381230eba085603126d7d5d8c4dae45ee85b877a9729.txt",
+      "licenses/package-texts/a07bc24468b9654ce76a547d47a2db282d07733b715db4c73a98bd63961f9550.txt",
+      "licenses/package-texts/a0ec0dab16b3666f24950f86d257930ac2ad475557b4bfe245620e0817d8a45d.txt",
+      "licenses/package-texts/a3d60eaf32d2fb09c9d82ef39f14bd6e2c0f3ca7de30daa827486c0d6f8b6e9f.txt",
+      "licenses/package-texts/a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7.txt",
+      "licenses/package-texts/a553508f516031c91f3af1148d44970cb81bbae6c4f091be6835d39cc252238c.txt",
+      "licenses/package-texts/a5edccac92c3aa845694dcfaa72a0c098c1ae40d5ca6a37e4e59d778cf8e29bd.txt",
+      "licenses/package-texts/a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794.txt",
+      "licenses/package-texts/a6ab98e5c77b9070c443eaff2ff81034a6f8cc05a7524d5098eb0f24defa0115.txt",
+      "licenses/package-texts/a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27.txt",
+      "licenses/package-texts/a7996721249a136fbcfc1c201bcb5f414f38a701d4a24f28abe65e16cfcce813.txt",
+      "licenses/package-texts/a7cc4332acfa1f9b6530e01aac77fefe74f2efa32579215fddaa473013f9a25c.txt",
+      "licenses/package-texts/a832d679750e49ab433626ab196350b89964b60eb0d3edd3341887c7d5f4c128.txt",
+      "licenses/package-texts/aaa78451b6fecd1b9c4594c796c133c0e90cad100372ff8bc6de615e9ef9adf1.txt",
+      "licenses/package-texts/ac779f7314c74f232ef847ea86e714abe25cf6eeb5cc97b69451b74e2af6492d.txt",
+      "licenses/package-texts/ad4b50ffd183d0ec8b3e56fedae59575f13cee1cee74c466b16fad4bed032bed.txt",
+      "licenses/package-texts/b010b0dfdfdb23d7396e03b82cd4621fc9bb8f95d6b0aea70b9c24e12074c786.txt",
+      "licenses/package-texts/b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1.txt",
+      "licenses/package-texts/bbb84e1fa86b44508e893afe1a84a640cd452c0e671f001256959352bfacb7e5.txt",
+      "licenses/package-texts/bbe87b573c12bda5baf18742117330efa177e0886b3b0a278dacf8f236e1e129.txt",
+      "licenses/package-texts/bd134b41da59e452fb5a1d366b660886f741c87c2bf9428e93764c419fbc40f5.txt",
+      "licenses/package-texts/bd40cc437e28a3ad7bef2ad34e6b72e757b182e67bda1acadbab4ef0476f8232.txt",
+      "licenses/package-texts/bd47ce7b88c7759630d1e2b9fcfa170a0f1fde522be09e13fb1581a79d090400.txt",
+      "licenses/package-texts/bdfd5e0edb6089e6586c8f15e6a86fab83ffbeeda3b3b7b33734ccb8c5906965.txt",
+      "licenses/package-texts/be46ce1e3b0479af9ce82d22b465a6d7d2ff084fca0aaf3d54172da2b5eb5781.txt",
+      "licenses/package-texts/bf9b0d665be2a689851eea667ca9f42066ea1d903b38349c51e6a44b2577680a.txt",
+      "licenses/package-texts/c02110eedc16c7114f1a9bdc026c65626ce1d9c7e27fd51a8e0feee8a48a6858.txt",
+      "licenses/package-texts/c1e6e266563517467b1bf874817d23e426f3149252bd7d42758cd697514b8417.txt",
+      "licenses/package-texts/c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383.txt",
+      "licenses/package-texts/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4.txt",
+      "licenses/package-texts/c7cc929b57080f4b9d0c6cf57669f0463fc5b39906344dfc8d3bc43426b30eac.txt",
+      "licenses/package-texts/cc1dfd4dafa27271e8212cd3b274eeb3f262e40a6fdab36ddc3f9696f706f58b.txt",
+      "licenses/package-texts/ccf06b70760761ae1437395117bcf911501e3dc85385d84c7eba20d5dfab55dd.txt",
+      "licenses/package-texts/cd519ad3d7e012427f978dfb2e3b92ee403d189d7b859ba6bf68fd7e12ca456f.txt",
+      "licenses/package-texts/cfc3f455254c0af0655cc3ff46a41ed644b67599f6043346169d285bf2b3cf3b.txt",
+      "licenses/package-texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+      "licenses/package-texts/d0bca4e517157b7a6120c085f5fe43a35b90c095e3bbeb9e67f220c608506a16.txt",
+      "licenses/package-texts/d0cd141b0c322fded5dfad1d4645bb2fedfc05b7321fe1009469638190d59ef9.txt",
+      "licenses/package-texts/d82ceb8cbd004a2d4834085c557d55459f528e30268d95159ee1e4030a693a6e.txt",
+      "licenses/package-texts/d8c77eaffed7f1f874b97f66ee47a557ae24fd59bae8ae14f9b1b84f26a94d2f.txt",
+      "licenses/package-texts/d90bf0a089da4cf43d644ed240a0b3825dcdb705e64e38371d56995a4cc9e4c5.txt",
+      "licenses/package-texts/da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93.txt",
+      "licenses/package-texts/db1ed8cccea0d0fb5d92b7c59d9aa78a5bbcd047972519c6a21a4416937f2ebf.txt",
+      "licenses/package-texts/dc1f5d2d43c5531dfe0acaf4e950ea5dbe3e61e1850cf0e983bda7efc10d6693.txt",
+      "licenses/package-texts/dcb94ff9b1e037a847bc20589dc81a1066d041fd4c16deb18b0fa968c66cf395.txt",
+      "licenses/package-texts/de4d1f2d2ad5ad0cfd1657a106476b31cb5db5ef9d1ff842b237c0c81f0c8a23.txt",
+      "licenses/package-texts/dea9265341829002e2c23a7372393eb2ed6e26085fb623f38a4ba0af833f30a6.txt",
+      "licenses/package-texts/def75ba75d6426f1c3f02addf8e175fbe6e0d8a82e541cbdffc16d2bd8fd7d6a.txt",
+      "licenses/package-texts/def82c085d05e795fe6a9cb5b70c48e022212355afc0e91d4de047cade28df06.txt",
+      "licenses/package-texts/dfde54fedc270c2a305d9a9f993d93f706d34624455a2fd2d2a05ca34d8ae8c3.txt",
+      "licenses/package-texts/dffec71d93f273d2af7b54c6c7e7e70b3289c632ec0d7253210ec21ac336d5ac.txt",
+      "licenses/package-texts/e2eaa4603c14cb26f301e88648c12a853fa3f0f5da6d4b0972958c666e7f2ab8.txt",
+      "licenses/package-texts/e345c2ee7df4446e739de7b91535f0c10ddcd909b9753889e943ee637b05db8c.txt",
+      "licenses/package-texts/e3b44af066615de2ea48d18d852d0762f18c0b2efcea714fa48a6f729d405b85.txt",
+      "licenses/package-texts/e7dc37bf662d7f786efcb46c545615e70c1daf458a38385521c63cf6607cdfe1.txt",
+      "licenses/package-texts/e8a7cc256941a26ba8234f04390165243a4d42f74fd6491934140605bf7eae2d.txt",
+      "licenses/package-texts/ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be.txt",
+      "licenses/package-texts/eda81a415869e67809f6a9f3fd6056062cb83a462118e07eec5e92b2e0c40ce9.txt",
+      "licenses/package-texts/edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d.txt",
+      "licenses/package-texts/f655e6291356ec0de7a8f0e69f294961a2cea86678ec94588be1e6a492e278ab.txt",
+      "licenses/package-texts/f683a72ffe6a9675b5507af22fe0f448d8c8de3da1e14f139d370a7e6a54a23e.txt",
+      "licenses/package-texts/f8d791359a50cbcac82c29cb7b0b1b889b28be76fdd35b8ee33f0f7c8704702a.txt",
+      "licenses/package-texts/feb87a2e0c305de3464cc44077da5393c52d8ca6362d37427157d04ec6f4510d.txt"
+    ],
+    "licenseMaterials": [
+      {
+        "path": "licenses/SPDX-0BSD.txt",
+        "bytes": 643,
+        "sha256": "e3f18c71e10d673590eb9856c1d79dd3b4b0d65404efb5e8584dbede7edd608b"
+      },
+      {
+        "path": "licenses/SPDX-Apache-2.0.txt",
+        "bytes": 10280,
+        "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+      },
+      {
+        "path": "licenses/SPDX-BSD-2-Clause.txt",
+        "bytes": 1267,
+        "sha256": "f32fb3b417a194167cfad068223fc975ba96c5960513a10f66a3c28720aec1df"
+      },
+      {
+        "path": "licenses/SPDX-BSD-3-Clause.txt",
+        "bytes": 1460,
+        "sha256": "5a93d5831e1297ab10fe643e1a631e83be392896da14ee2951285a79012df69d"
+      },
+      {
+        "path": "licenses/SPDX-FTL.txt",
+        "bytes": 5979,
+        "sha256": "ced6622122ce451cb1ea0c3c3f507a640e2a44c075c04900ddd9fae8acb5369f"
+      },
+      {
+        "path": "licenses/SPDX-GPL-3.0-only.txt",
+        "bytes": 34674,
+        "sha256": "fb981668c18a279e285fc4d83fba1e836cc84dd4daa73c9697d3cfd2d8aca6e0"
+      },
+      {
+        "path": "licenses/SPDX-IJG.txt",
+        "bytes": 4244,
+        "sha256": "7658542977bfdced9e1059a6c934ce4281de76d103b831007b825917dc62511a"
+      },
+      {
+        "path": "licenses/SPDX-ISC.txt",
+        "bytes": 823,
+        "sha256": "f2ec607f67bb0dd3053b49835b02110d5cd0f8eb6da3aac4dc0b142a6b299be9"
+      },
+      {
+        "path": "licenses/SPDX-LGPL-2.0-or-later.txt",
+        "bytes": 24877,
+        "sha256": "86dc99d7e5060915ab1dfc1378b7dd351c62088bfa74067e8aa1868c6fdba7d8"
+      },
+      {
+        "path": "licenses/SPDX-LGPL-2.1-only.txt",
+        "bytes": 26001,
+        "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+      },
+      {
+        "path": "licenses/SPDX-LGPL-2.1-or-later.txt",
+        "bytes": 26001,
+        "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+      },
+      {
+        "path": "licenses/SPDX-LGPL-3.0-only.txt",
+        "bytes": 42098,
+        "sha256": "996af0513df21f7496288951c41428a03c174e9e4a9d63665c57d670f845ccb1"
+      },
+      {
+        "path": "licenses/SPDX-LGPL-3.0-or-later.txt",
+        "bytes": 42098,
+        "sha256": "996af0513df21f7496288951c41428a03c174e9e4a9d63665c57d670f845ccb1"
+      },
+      {
+        "path": "licenses/SPDX-Libpng.txt",
+        "bytes": 4218,
+        "sha256": "7667a8c88c7a63690244988d626bcddd27ed895526e2c3ab1a9adb463a5fa287"
+      },
+      {
+        "path": "licenses/SPDX-MIT.txt",
+        "bytes": 1078,
+        "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+      },
+      {
+        "path": "licenses/SPDX-MPL-1.1.txt",
+        "bytes": 23669,
+        "sha256": "6214f8b1300bb9f37b16ebc146f8f61af0187e0025042ff95c8b3030744a8795"
+      },
+      {
+        "path": "licenses/SPDX-MPL-2.0.txt",
+        "bytes": 16727,
+        "sha256": "66a3107d5ad6a058aab753eaac2047ccb2ed0e39465dd0fe5844da3e300d5172"
+      },
+      {
+        "path": "licenses/SPDX-Python-2.0.txt",
+        "bytes": 9411,
+        "sha256": "893c2bafbb8133f7aa97e1f79a3ee3241ebca7025f56278e9e1f72bb98592f9d"
+      },
+      {
+        "path": "licenses/SPDX-Zlib.txt",
+        "bytes": 838,
+        "sha256": "bfb1112d49db5b1daecdfef24bd7e2f3ea0bafb33aa67aa0ab51e2bf8407c03d"
+      },
+      {
+        "path": "licenses/SPDX-libtiff.txt",
+        "bytes": 1139,
+        "sha256": "a6ecaa20c8c1b7a8215ed05e5f58764f821596e36d31acc05282c6154cf0dc44"
+      },
+      {
+        "path": "licenses/embedded-components/cairo-COPYING-LGPL-2.1.txt",
+        "bytes": 26533,
+        "sha256": "9e9e8608c4cdda51a78cc3a385f4ec9a2e4c96d5ecad74ac8bca5fca3e563b7d"
+      },
+      {
+        "path": "licenses/embedded-components/cairo-COPYING-MPL-1.1.txt",
+        "bytes": 25755,
+        "sha256": "53692a2ed6c6a2c6ec9b32dd0b820dfae91e0a1fcdf625ca9ed0bdf8705fcc4f"
+      },
+      {
+        "path": "licenses/embedded-components/cairo-COPYING.txt",
+        "bytes": 1576,
+        "sha256": "67228a9f7c5f9b67c58f556f1be178f62da4d9e2e6285318d8c74d567255abdf"
+      },
+      {
+        "path": "licenses/embedded-components/cgif-LICENSE.txt",
+        "bytes": 1099,
+        "sha256": "7264dede477abab4ac3fe8236beb8153845c04ccd33b18f281085087e219fc6d"
+      },
+      {
+        "path": "licenses/embedded-components/emscripten-LICENSE.txt",
+        "bytes": 5093,
+        "sha256": "620a78084fc7ca97c0b5dea9abf891f3ffcadfdbf305276f099c9c4e12fc1d86"
+      },
+      {
+        "path": "licenses/embedded-components/expat-COPYING.txt",
+        "bytes": 1144,
+        "sha256": "73cc92f80889ab23c7287b1a11dd50fdec190c3f26ebe5938c579043817d651e"
+      },
+      {
+        "path": "licenses/embedded-components/freetype-FTL.txt",
+        "bytes": 6743,
+        "sha256": "5a5ee54c5001bbad1cdc1a57cc3dd4c42199b2da09d39c7ee41fab002d02967f"
+      },
+      {
+        "path": "licenses/embedded-components/fribidi-COPYING.txt",
+        "bytes": 26440,
+        "sha256": "32434afcc8666ba060e111d715bfdb6c2d5dd8a35fa4d3ab8ad67d8f850d2f2b"
+      },
+      {
+        "path": "licenses/embedded-components/glib-COPYING.pointer.txt",
+        "bytes": 31,
+        "sha256": "878aa58313266f0400b7c26560b472e5a5f334a8a574a4e0b6e0c33002a2f7ac"
+      },
+      {
+        "path": "licenses/embedded-components/glib-LGPL-2.1-or-later.txt",
+        "bytes": 25967,
+        "sha256": "fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb"
+      },
+      {
+        "path": "licenses/embedded-components/harfbuzz-COPYING.txt",
+        "bytes": 1971,
+        "sha256": "ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64"
+      },
+      {
+        "path": "licenses/embedded-components/highway-LICENSE.txt",
+        "bytes": 20786,
+        "sha256": "b8b1fae5894cfbe213b47f1378bb2269cf82de18b34447e871c0225ace0d3ad7"
+      },
+      {
+        "path": "licenses/embedded-components/libarchive-COPYING.txt",
+        "bytes": 3089,
+        "sha256": "30e556b3959e3985d66efefec5eaac51d4995053caa1d3cffe6eb916f146f229"
+      },
+      {
+        "path": "licenses/embedded-components/libexif-COPYING.txt",
+        "bytes": 26434,
+        "sha256": "36b6d3fa47916943fd5fec313c584784946047ec1337a78b440e5992cb595f89"
+      },
+      {
+        "path": "licenses/embedded-components/libffi-LICENSE.txt",
+        "bytes": 1132,
+        "sha256": "d5699fa516968e3a1550e6c902b7441c78856f2603d61bedd0b0662a26655366"
+      },
+      {
+        "path": "licenses/embedded-components/libheif-COPYING.txt",
+        "bytes": 44366,
+        "sha256": "fa81ce652315b013359d6e8e4744335f31a50c7c192907176d3632f78a3b4596"
+      },
+      {
+        "path": "licenses/embedded-components/libimagequant-COPYRIGHT.txt",
+        "bytes": 1851,
+        "sha256": "7391bfbcde4404cefb9849553362c3ab436f929f5cc1abb57071ec045590ee99"
+      },
+      {
+        "path": "licenses/embedded-components/libnsgif-vendored-COPYING.txt",
+        "bytes": 1133,
+        "sha256": "1469b759cf18e43c6e1b4ff892307d3962cbbb337ac497620d6690a219fad10c"
+      },
+      {
+        "path": "licenses/embedded-components/libpng-LICENSE.txt",
+        "bytes": 5345,
+        "sha256": "bdb0a645ea18c60507d0368379b1ac5474b92255fcc2d115e07486a7672ba526"
+      },
+      {
+        "path": "licenses/embedded-components/librsvg-libvips-LGPL-2.1.txt",
+        "bytes": 26530,
+        "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551"
+      },
+      {
+        "path": "licenses/embedded-components/libtiff-LICENSE.md",
+        "bytes": 2416,
+        "sha256": "0e27c2382d7b8147972bbb746e04059a1152c8d0fda9d03ef1399d1a433c4ade"
+      },
+      {
+        "path": "licenses/embedded-components/libultrahdr-LICENSE.txt",
+        "bytes": 12566,
+        "sha256": "c9247b5cb07866938643cc238292434e6f2af8642e1fce10771c0e4cc7909316"
+      },
+      {
+        "path": "licenses/embedded-components/libwebp-COPYING.txt",
+        "bytes": 1496,
+        "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf"
+      },
+      {
+        "path": "licenses/embedded-components/libxml2-Copyright.txt",
+        "bytes": 1314,
+        "sha256": "5d4873884a890122a4b9b20ad56ac6f7da1d796a5bfcf04a427970ac96217626"
+      },
+      {
+        "path": "licenses/embedded-components/little-cms-LICENSE.txt",
+        "bytes": 1080,
+        "sha256": "6dbd60437f8ef91d8de1f08ad75882547fd4931bfcc3566a0735f28db1484d31"
+      },
+      {
+        "path": "licenses/embedded-components/mozjpeg-LICENSE.md",
+        "bytes": 5620,
+        "sha256": "96f5b328adbb78eeaaec6980d73fd558cb1e4d62560ed615646bc3cf5e532430"
+      },
+      {
+        "path": "licenses/embedded-components/pango-proxy-libintl-COPYING.txt",
+        "bytes": 25292,
+        "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+      },
+      {
+        "path": "licenses/embedded-components/pixman-COPYING.txt",
+        "bytes": 2087,
+        "sha256": "fac9270f0987b96ff4533fca3548c633e02083cbba4a0172a3b149b2e4019793"
+      },
+      {
+        "path": "licenses/embedded-components/resvg-LICENSE-APACHE.txt",
+        "bytes": 10173,
+        "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9"
+      },
+      {
+        "path": "licenses/embedded-components/resvg-LICENSE-MIT.txt",
+        "bytes": 1057,
+        "sha256": "f5d934dc281b44e0003ee461ac740b18b6629a454decd872c774d34e4ee0b21d"
+      },
+      {
+        "path": "licenses/embedded-components/sharp-libvips-v1.3.2-THIRD-PARTY-NOTICES.md",
+        "bytes": 4230,
+        "sha256": "25ffcfa69e28b1913ced27ec778b90f24911a1bb3021253577e8b0af55db0d49"
+      },
+      {
+        "path": "licenses/embedded-components/wasm-vips-9ff73c-THIRD-PARTY-NOTICES.md",
+        "bytes": 3323,
+        "sha256": "0f52de00dd217125646ae85177def3e144de48d11f76368f257ba6468d3f7d8d"
+      },
+      {
+        "path": "licenses/embedded-components/zlib-ng-LICENSE.md",
+        "bytes": 867,
+        "sha256": "6c9f0d975b41afaa34d22f55bb8986ce69e5cb7ad327cb2b28820cd425edf5ee"
+      },
+      {
+        "path": "licenses/embedded/AOM-LICENSE.txt",
+        "bytes": 1316,
+        "sha256": "4764a286d8b2faeaf42f4418e7d7a28d58fc8fd4d00a3d0a7f44b0a4099de7f2"
+      },
+      {
+        "path": "licenses/embedded/AOM-PATENTS.txt",
+        "bytes": 5701,
+        "sha256": "661fb8e504744e95587b556b94a58343448300606a41bea8c7a9b97125696e61"
+      },
+      {
+        "path": "licenses/embedded/fontconfig-COPYING.txt",
+        "bytes": 8616,
+        "sha256": "51a51aa9823704fd90bccc616cdd17ebabb5b2b3e9cbde886ca02c7002288067"
+      },
+      {
+        "path": "licenses/package-texts/01ad164273e8e095abc9dbd1c21e194594a671af7d528cb43ee7b4c903ba7da3.txt",
+        "bytes": 1139,
+        "sha256": "01ad164273e8e095abc9dbd1c21e194594a671af7d528cb43ee7b4c903ba7da3"
+      },
+      {
+        "path": "licenses/package-texts/034fb52b1d57360ecbae6cb1632a88f86fd7c3d3f5631a5f082710203dda0be7.txt",
+        "bytes": 1071,
+        "sha256": "034fb52b1d57360ecbae6cb1632a88f86fd7c3d3f5631a5f082710203dda0be7"
+      },
+      {
+        "path": "licenses/package-texts/04512a63dce4d2d506ad612dc0bd7681ccf6e3655f7b6eaef7dfac8323d1ec0b.txt",
+        "bytes": 1098,
+        "sha256": "04512a63dce4d2d506ad612dc0bd7681ccf6e3655f7b6eaef7dfac8323d1ec0b"
+      },
+      {
+        "path": "licenses/package-texts/07364a5f7d0177a59a05a0002187431f8f899320983c0dc049d72df015e8064c.txt",
+        "bytes": 11385,
+        "sha256": "07364a5f7d0177a59a05a0002187431f8f899320983c0dc049d72df015e8064c"
+      },
+      {
+        "path": "licenses/package-texts/09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b.txt",
+        "bytes": 10142,
+        "sha256": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+      },
+      {
+        "path": "licenses/package-texts/0a1df3a083d0c010560aa342e87959c8c1070e6fd54545741f083f22d0c8b551.txt",
+        "bytes": 1069,
+        "sha256": "0a1df3a083d0c010560aa342e87959c8c1070e6fd54545741f083f22d0c8b551"
+      },
+      {
+        "path": "licenses/package-texts/0dd4e47333485760cf8c265db5a5e24ae8d7401064c6f2e19793ee81a5bef42f.txt",
+        "bytes": 1124,
+        "sha256": "0dd4e47333485760cf8c265db5a5e24ae8d7401064c6f2e19793ee81a5bef42f"
+      },
+      {
+        "path": "licenses/package-texts/117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76.txt",
+        "bytes": 1106,
+        "sha256": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+      },
+      {
+        "path": "licenses/package-texts/11d017c3b9f1ee3f44caf7203035f0461d5b57e0db8ce1bc03a9af34fa7d3f6b.txt",
+        "bytes": 1173,
+        "sha256": "11d017c3b9f1ee3f44caf7203035f0461d5b57e0db8ce1bc03a9af34fa7d3f6b"
+      },
+      {
+        "path": "licenses/package-texts/1662fae9b5314d11cf51284e2dcd1f006a354f7343f08712a730fcff9a359801.txt",
+        "bytes": 1079,
+        "sha256": "1662fae9b5314d11cf51284e2dcd1f006a354f7343f08712a730fcff9a359801"
+      },
+      {
+        "path": "licenses/package-texts/18a2bfd070b08bd1cc538c90f59989a9523e070e72fe9a9068593c3e82f44fa7.txt",
+        "bytes": 1071,
+        "sha256": "18a2bfd070b08bd1cc538c90f59989a9523e070e72fe9a9068593c3e82f44fa7"
+      },
+      {
+        "path": "licenses/package-texts/18c295fdd68d4f68418b0209829f241481e93549d9e7b9fcd4b4c029322c8a45.txt",
+        "bytes": 11390,
+        "sha256": "18c295fdd68d4f68418b0209829f241481e93549d9e7b9fcd4b4c029322c8a45"
+      },
+      {
+        "path": "licenses/package-texts/1a526fbe8d8577f5a4b1c2821842b55b7c0e18862531c62ae4ce69c9b19b74b6.txt",
+        "bytes": 1114,
+        "sha256": "1a526fbe8d8577f5a4b1c2821842b55b7c0e18862531c62ae4ce69c9b19b74b6"
+      },
+      {
+        "path": "licenses/package-texts/1aa9a12863eefb583779b2ca0e5d73c610b6e6d07529ae0472721769a6ea0a32.txt",
+        "bytes": 1095,
+        "sha256": "1aa9a12863eefb583779b2ca0e5d73c610b6e6d07529ae0472721769a6ea0a32"
+      },
+      {
+        "path": "licenses/package-texts/206c1adcf206dc0031b11232f5b054ec5f1662407ab1ca415247921cab2068ab.txt",
+        "bytes": 1071,
+        "sha256": "206c1adcf206dc0031b11232f5b054ec5f1662407ab1ca415247921cab2068ab"
+      },
+      {
+        "path": "licenses/package-texts/2088f55c6731498410b20c95ebd345ed4a4a800bf74c0fba4d282fd2a021daaa.txt",
+        "bytes": 1076,
+        "sha256": "2088f55c6731498410b20c95ebd345ed4a4a800bf74c0fba4d282fd2a021daaa"
+      },
+      {
+        "path": "licenses/package-texts/210b19e543130388c68654b7497e967119ce17145f66ab7d85688fbd70f08751.txt",
+        "bytes": 655,
+        "sha256": "210b19e543130388c68654b7497e967119ce17145f66ab7d85688fbd70f08751"
+      },
+      {
+        "path": "licenses/package-texts/2213d91c606205c71eb051a199478cdc2adde945893404d7f1421436dd6d5cc1.txt",
+        "bytes": 1103,
+        "sha256": "2213d91c606205c71eb051a199478cdc2adde945893404d7f1421436dd6d5cc1"
+      },
+      {
+        "path": "licenses/package-texts/22bcbbbacd739b026a8dc484f62a31484ce4c4e31f3408b60b29b4e41d62b290.txt",
+        "bytes": 1117,
+        "sha256": "22bcbbbacd739b026a8dc484f62a31484ce4c4e31f3408b60b29b4e41d62b290"
+      },
+      {
+        "path": "licenses/package-texts/23d466b1b134b415b66fa50c6526b4cf3e7b9258554da88d3abb371721e7ce68.txt",
+        "bytes": 1172,
+        "sha256": "23d466b1b134b415b66fa50c6526b4cf3e7b9258554da88d3abb371721e7ce68"
+      },
+      {
+        "path": "licenses/package-texts/255aa557a1f55224ce522f311629c0bf20854740a67955cefd798fbd1d3d1ded.txt",
+        "bytes": 1157,
+        "sha256": "255aa557a1f55224ce522f311629c0bf20854740a67955cefd798fbd1d3d1ded"
+      },
+      {
+        "path": "licenses/package-texts/257aed98914108e91a337912727b6a802eef218248507f74b76faffaff517a38.txt",
+        "bytes": 1089,
+        "sha256": "257aed98914108e91a337912727b6a802eef218248507f74b76faffaff517a38"
+      },
+      {
+        "path": "licenses/package-texts/25a328069fe771f8ed5b6f983ed4b0e6c84b3312ac0f69b28c3d52dc277962c9.txt",
+        "bytes": 1128,
+        "sha256": "25a328069fe771f8ed5b6f983ed4b0e6c84b3312ac0f69b28c3d52dc277962c9"
+      },
+      {
+        "path": "licenses/package-texts/280e7d164420cfc1a1b192a582bf53e3dba97b86a5c3575f878b674ad1d41e13.txt",
+        "bytes": 4913,
+        "sha256": "280e7d164420cfc1a1b192a582bf53e3dba97b86a5c3575f878b674ad1d41e13"
+      },
+      {
+        "path": "licenses/package-texts/2b29dcfe0d6471f7e8c92c5fb38c9f93edee10330937055440192f1832b1ecef.txt",
+        "bytes": 1183,
+        "sha256": "2b29dcfe0d6471f7e8c92c5fb38c9f93edee10330937055440192f1832b1ecef"
+      },
+      {
+        "path": "licenses/package-texts/2b770a704c15de238c3f622b01b0044ddd60b49ee30608ea6991ebf19db7a7a1.txt",
+        "bytes": 1073,
+        "sha256": "2b770a704c15de238c3f622b01b0044ddd60b49ee30608ea6991ebf19db7a7a1"
+      },
+      {
+        "path": "licenses/package-texts/2ef1e48ea743d9c82313e6887858f7c1feaddd636f5a3f43926aab0143e67ebd.txt",
+        "bytes": 11352,
+        "sha256": "2ef1e48ea743d9c82313e6887858f7c1feaddd636f5a3f43926aab0143e67ebd"
+      },
+      {
+        "path": "licenses/package-texts/3320319f8a5f42bc4254e65471eca7a5ea4dc8c883c4c24b4868e36b14890bcf.txt",
+        "bytes": 1068,
+        "sha256": "3320319f8a5f42bc4254e65471eca7a5ea4dc8c883c4c24b4868e36b14890bcf"
+      },
+      {
+        "path": "licenses/package-texts/37876d7de8bdf5e5b9b58a697ebc34044624e493e6f49eff5c938e5226dcac6b.txt",
+        "bytes": 1181,
+        "sha256": "37876d7de8bdf5e5b9b58a697ebc34044624e493e6f49eff5c938e5226dcac6b"
+      },
+      {
+        "path": "licenses/package-texts/39c5ec504cf6bd5cd782a7c695828e09189df79f5d94840e4f08feb97b9fd416.txt",
+        "bytes": 1071,
+        "sha256": "39c5ec504cf6bd5cd782a7c695828e09189df79f5d94840e4f08feb97b9fd416"
+      },
+      {
+        "path": "licenses/package-texts/3a61c6c96caf5c1d9b623fb9b04c822b783dfcb78aa7e49c76a3f643e6ed7f95.txt",
+        "bytes": 1139,
+        "sha256": "3a61c6c96caf5c1d9b623fb9b04c822b783dfcb78aa7e49c76a3f643e6ed7f95"
+      },
+      {
+        "path": "licenses/package-texts/3e2c11dcf3f17ab585baab8faba54772d7872f1c6e026022acd4b4006665efb0.txt",
+        "bytes": 1090,
+        "sha256": "3e2c11dcf3f17ab585baab8faba54772d7872f1c6e026022acd4b4006665efb0"
+      },
+      {
+        "path": "licenses/package-texts/3f1189b28e3866e0d979968d466b78f813f76827cfdca1fbb124cc0a5c8841f8.txt",
+        "bytes": 1072,
+        "sha256": "3f1189b28e3866e0d979968d466b78f813f76827cfdca1fbb124cc0a5c8841f8"
+      },
+      {
+        "path": "licenses/package-texts/435a6437e47e5e479942255680e7fbe5f333d55234ada1c35f6115ca641d5bb4.txt",
+        "bytes": 1083,
+        "sha256": "435a6437e47e5e479942255680e7fbe5f333d55234ada1c35f6115ca641d5bb4"
+      },
+      {
+        "path": "licenses/package-texts/44191656d296391e0ec97e32f5385f0d02b6f2992694082d22ea04ba0f66f9e4.txt",
+        "bytes": 1058,
+        "sha256": "44191656d296391e0ec97e32f5385f0d02b6f2992694082d22ea04ba0f66f9e4"
+      },
+      {
+        "path": "licenses/package-texts/47083f1ae7e990f74a56f576bcb8434051cb84ed1982fa57932720869e5147fe.txt",
+        "bytes": 4333,
+        "sha256": "47083f1ae7e990f74a56f576bcb8434051cb84ed1982fa57932720869e5147fe"
+      },
+      {
+        "path": "licenses/package-texts/47dcccf62bf40469d23849b0b1dc8df9fc91bce219b880c638d4dc4596e6b5cf.txt",
+        "bytes": 1119,
+        "sha256": "47dcccf62bf40469d23849b0b1dc8df9fc91bce219b880c638d4dc4596e6b5cf"
+      },
+      {
+        "path": "licenses/package-texts/48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0.txt",
+        "bytes": 1109,
+        "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0"
+      },
+      {
+        "path": "licenses/package-texts/49d6a1c9a623784c61c6cb70f773f3457faceb1914a13c8560a9823b7631950c.txt",
+        "bytes": 1937,
+        "sha256": "49d6a1c9a623784c61c6cb70f773f3457faceb1914a13c8560a9823b7631950c"
+      },
+      {
+        "path": "licenses/package-texts/4ab87e6e3c0c0b78e47c77d49ec10c048f8a519fb8062e6e3217e3e6e9b0c6e9.txt",
+        "bytes": 1476,
+        "sha256": "4ab87e6e3c0c0b78e47c77d49ec10c048f8a519fb8062e6e3217e3e6e9b0c6e9"
+      },
+      {
+        "path": "licenses/package-texts/4bc935e71be198c67ddf3c2b5fddb195f6edc182bfc155a96a6db61b44b494b9.txt",
+        "bytes": 1094,
+        "sha256": "4bc935e71be198c67ddf3c2b5fddb195f6edc182bfc155a96a6db61b44b494b9"
+      },
+      {
+        "path": "licenses/package-texts/4eb7543b08d955a6d23fcc224601d43ff566e775be918805e26210d7f6eb4893.txt",
+        "bytes": 1100,
+        "sha256": "4eb7543b08d955a6d23fcc224601d43ff566e775be918805e26210d7f6eb4893"
+      },
+      {
+        "path": "licenses/package-texts/4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b.txt",
+        "bytes": 765,
+        "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b"
+      },
+      {
+        "path": "licenses/package-texts/4eeb3271453a891df609e5a9f4ee79a68307f730c13417a3bfeffa604ac8cf25.txt",
+        "bytes": 1103,
+        "sha256": "4eeb3271453a891df609e5a9f4ee79a68307f730c13417a3bfeffa604ac8cf25"
+      },
+      {
+        "path": "licenses/package-texts/4f6a1985796db5225e3b1e59972bd47e07a27a0748427cb3d3c8fbf39f9311f0.txt",
+        "bytes": 1070,
+        "sha256": "4f6a1985796db5225e3b1e59972bd47e07a27a0748427cb3d3c8fbf39f9311f0"
+      },
+      {
+        "path": "licenses/package-texts/50a6b24f8defc31a078aa9799a91d776f83948071574854f12473362aee74d0d.txt",
+        "bytes": 11312,
+        "sha256": "50a6b24f8defc31a078aa9799a91d776f83948071574854f12473362aee74d0d"
+      },
+      {
+        "path": "licenses/package-texts/512cfa4d5e7a7569c7ae4dd95241cb6ae2aaf648ef9ebd080c01bd24868d26e9.txt",
+        "bytes": 1172,
+        "sha256": "512cfa4d5e7a7569c7ae4dd95241cb6ae2aaf648ef9ebd080c01bd24868d26e9"
+      },
+      {
+        "path": "licenses/package-texts/52412d7bc7ce4157ea628bbaacb8829e0a9cb3c58f57f99176126bc8cf2bfc85.txt",
+        "bytes": 1086,
+        "sha256": "52412d7bc7ce4157ea628bbaacb8829e0a9cb3c58f57f99176126bc8cf2bfc85"
+      },
+      {
+        "path": "licenses/package-texts/553d4d20029a24e315b428a1a54a9e109eaa340f2e958a4f50a92362c2c4070b.txt",
+        "bytes": 1177,
+        "sha256": "553d4d20029a24e315b428a1a54a9e109eaa340f2e958a4f50a92362c2c4070b"
+      },
+      {
+        "path": "licenses/package-texts/5b37224c080cdcc97c871ada971c224e9926370fe74f11b539aa1cf9f3b1aca1.txt",
+        "bytes": 1081,
+        "sha256": "5b37224c080cdcc97c871ada971c224e9926370fe74f11b539aa1cf9f3b1aca1"
+      },
+      {
+        "path": "licenses/package-texts/5bba27375d93e9119f76c1015f7672cf9ad5f70952296e0842fb2243d6376869.txt",
+        "bytes": 738,
+        "sha256": "5bba27375d93e9119f76c1015f7672cf9ad5f70952296e0842fb2243d6376869"
+      },
+      {
+        "path": "licenses/package-texts/5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3.txt",
+        "bytes": 1117,
+        "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+      },
+      {
+        "path": "licenses/package-texts/5e13dbbc1d120fc2a03cecde7c91424ae2d7de11b63d58ded2f4431e261ee50d.txt",
+        "bytes": 1071,
+        "sha256": "5e13dbbc1d120fc2a03cecde7c91424ae2d7de11b63d58ded2f4431e261ee50d"
+      },
+      {
+        "path": "licenses/package-texts/5e325595b4ea8cfec3802f545b1def5d7b73e4a5b8e9ba63e32a320f67732292.txt",
+        "bytes": 1071,
+        "sha256": "5e325595b4ea8cfec3802f545b1def5d7b73e4a5b8e9ba63e32a320f67732292"
+      },
+      {
+        "path": "licenses/package-texts/5ffe28e7ade7d8f10d85d5337a73fd793dac5c462fb9a28fbf8c5046c7fbca3b.txt",
+        "bytes": 749,
+        "sha256": "5ffe28e7ade7d8f10d85d5337a73fd793dac5c462fb9a28fbf8c5046c7fbca3b"
+      },
+      {
+        "path": "licenses/package-texts/62568a2d1337b77171ecca9db10579163446de1ba6151678e81f06cdc199971b.txt",
+        "bytes": 1087,
+        "sha256": "62568a2d1337b77171ecca9db10579163446de1ba6151678e81f06cdc199971b"
+      },
+      {
+        "path": "licenses/package-texts/636eb7d79da9bb6d515a4b3fd417aa26679eb3cf16396ddab4bc55fa74e616e4.txt",
+        "bytes": 11336,
+        "sha256": "636eb7d79da9bb6d515a4b3fd417aa26679eb3cf16396ddab4bc55fa74e616e4"
+      },
+      {
+        "path": "licenses/package-texts/63b9a188d7d43e64b0558b7115255045b9fe20a5fc3ff483421cb899e7f52bcb.txt",
+        "bytes": 1189,
+        "sha256": "63b9a188d7d43e64b0558b7115255045b9fe20a5fc3ff483421cb899e7f52bcb"
+      },
+      {
+        "path": "licenses/package-texts/653b779005a3a4d64a7288c940f7b9a0e8f0b1e0375f6aa6af9473caf131e564.txt",
+        "bytes": 1071,
+        "sha256": "653b779005a3a4d64a7288c940f7b9a0e8f0b1e0375f6aa6af9473caf131e564"
+      },
+      {
+        "path": "licenses/package-texts/6582629e2979466878f6014313dcc2f3756c9616148682227ce3063dde310750.txt",
+        "bytes": 787,
+        "sha256": "6582629e2979466878f6014313dcc2f3756c9616148682227ce3063dde310750"
+      },
+      {
+        "path": "licenses/package-texts/6895190430d809c4c57a7582ecc2f99acbc2ea39a5dfad20262a41d5b3e91733.txt",
+        "bytes": 1101,
+        "sha256": "6895190430d809c4c57a7582ecc2f99acbc2ea39a5dfad20262a41d5b3e91733"
+      },
+      {
+        "path": "licenses/package-texts/69dee148a2cc470554dfa7142e830662062394d0fe67cddd379aba90dc60d6b3.txt",
+        "bytes": 1116,
+        "sha256": "69dee148a2cc470554dfa7142e830662062394d0fe67cddd379aba90dc60d6b3"
+      },
+      {
+        "path": "licenses/package-texts/6dc0e068dcf3a5bc8e054205b85b7720e1d49265bbc64bf515d2cf79197df69a.txt",
+        "bytes": 11323,
+        "sha256": "6dc0e068dcf3a5bc8e054205b85b7720e1d49265bbc64bf515d2cf79197df69a"
+      },
+      {
+        "path": "licenses/package-texts/6ee0feb1f6ef996ff5a68600f8cf98909cf412d39ef3cdceaefd87d636fa1b7f.txt",
+        "bytes": 1128,
+        "sha256": "6ee0feb1f6ef996ff5a68600f8cf98909cf412d39ef3cdceaefd87d636fa1b7f"
+      },
+      {
+        "path": "licenses/package-texts/6fb9754611c20f6649f68805e8c990e83261f29316e29de9e6cedae607b8634c.txt",
+        "bytes": 1119,
+        "sha256": "6fb9754611c20f6649f68805e8c990e83261f29316e29de9e6cedae607b8634c"
+      },
+      {
+        "path": "licenses/package-texts/70b126abc64d7ea06e1243349073935caa16fa47a41a571773ccf0b350b1d574.txt",
+        "bytes": 1231,
+        "sha256": "70b126abc64d7ea06e1243349073935caa16fa47a41a571773ccf0b350b1d574"
+      },
+      {
+        "path": "licenses/package-texts/71368fd0f5b4129191e9afcd1e1ef2dc89a9090d3e4d80bbab92dafd032b3bef.txt",
+        "bytes": 1102,
+        "sha256": "71368fd0f5b4129191e9afcd1e1ef2dc89a9090d3e4d80bbab92dafd032b3bef"
+      },
+      {
+        "path": "licenses/package-texts/71f83c4c0621102a56d9853812777b85751bce7e9726f686f5b056c1f8a4b0e6.txt",
+        "bytes": 1167,
+        "sha256": "71f83c4c0621102a56d9853812777b85751bce7e9726f686f5b056c1f8a4b0e6"
+      },
+      {
+        "path": "licenses/package-texts/73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68.txt",
+        "bytes": 10273,
+        "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+      },
+      {
+        "path": "licenses/package-texts/751d0e80fb5c828f8c3de198cc760e1e05377e47c8263ab6ee2f10cdc19ba658.txt",
+        "bytes": 1518,
+        "sha256": "751d0e80fb5c828f8c3de198cc760e1e05377e47c8263ab6ee2f10cdc19ba658"
+      },
+      {
+        "path": "licenses/package-texts/7585ea7bba616ccbbe43cb54ecb67956688c3c5641bb84f3099a652a73193afe.txt",
+        "bytes": 1089,
+        "sha256": "7585ea7bba616ccbbe43cb54ecb67956688c3c5641bb84f3099a652a73193afe"
+      },
+      {
+        "path": "licenses/package-texts/75bd0a6d6b9f9f0a6c792ca89832360b19749ebe16af0222e34387f262baa95e.txt",
+        "bytes": 1096,
+        "sha256": "75bd0a6d6b9f9f0a6c792ca89832360b19749ebe16af0222e34387f262baa95e"
+      },
+      {
+        "path": "licenses/package-texts/76d6d1ea0c268da37dd3c961b4fcfb23dee8417fff9e8786d4d44c585b781b69.txt",
+        "bytes": 727,
+        "sha256": "76d6d1ea0c268da37dd3c961b4fcfb23dee8417fff9e8786d4d44c585b781b69"
+      },
+      {
+        "path": "licenses/package-texts/773e131a7684726005a7e4688a80b4620033bc08499bc1404dd1a1eb3bca725e.txt",
+        "bytes": 1052,
+        "sha256": "773e131a7684726005a7e4688a80b4620033bc08499bc1404dd1a1eb3bca725e"
+      },
+      {
+        "path": "licenses/package-texts/7beaa85b57d7211f6684af6c1d97e6d9ef7ec1851f779152043a47a8700306a9.txt",
+        "bytes": 746,
+        "sha256": "7beaa85b57d7211f6684af6c1d97e6d9ef7ec1851f779152043a47a8700306a9"
+      },
+      {
+        "path": "licenses/package-texts/7bf9b2de73a6b356761c948d0e9eeb4be6c1270bd04c79cd489c1e400ffdfc1a.txt",
+        "bytes": 1074,
+        "sha256": "7bf9b2de73a6b356761c948d0e9eeb4be6c1270bd04c79cd489c1e400ffdfc1a"
+      },
+      {
+        "path": "licenses/package-texts/8078b0829d6c3e9ecde2f003e1966e4cad3efc6e7a640efbab0313cc166b1af1.txt",
+        "bytes": 1079,
+        "sha256": "8078b0829d6c3e9ecde2f003e1966e4cad3efc6e7a640efbab0313cc166b1af1"
+      },
+      {
+        "path": "licenses/package-texts/8089bcc08845ec143e5761f4a101a65b8c792a0dedbfeeb90a15560c0b77f768.txt",
+        "bytes": 1167,
+        "sha256": "8089bcc08845ec143e5761f4a101a65b8c792a0dedbfeeb90a15560c0b77f768"
+      },
+      {
+        "path": "licenses/package-texts/80d3168ad2f70f6f5bb2ab22b23414707abf6f0a392034891481ae36a1a429d4.txt",
+        "bytes": 745,
+        "sha256": "80d3168ad2f70f6f5bb2ab22b23414707abf6f0a392034891481ae36a1a429d4"
+      },
+      {
+        "path": "licenses/package-texts/81008a3fb78f69f3c4a72a9e005c8582342ab62864371b3ab8e1b6af9041e080.txt",
+        "bytes": 1120,
+        "sha256": "81008a3fb78f69f3c4a72a9e005c8582342ab62864371b3ab8e1b6af9041e080"
+      },
+      {
+        "path": "licenses/package-texts/835eb611a23301b27115ca1be9f754c876e643ceb7fe63049c6b50609a1cafeb.txt",
+        "bytes": 1098,
+        "sha256": "835eb611a23301b27115ca1be9f754c876e643ceb7fe63049c6b50609a1cafeb"
+      },
+      {
+        "path": "licenses/package-texts/89024017b88a9f2b763f79b941a4f2db3b4428edfcacdc0b23866b2da633ad0c.txt",
+        "bytes": 1150,
+        "sha256": "89024017b88a9f2b763f79b941a4f2db3b4428edfcacdc0b23866b2da633ad0c"
+      },
+      {
+        "path": "licenses/package-texts/8bf96984ff8bcfae7e48cae76a529e8a25317ba9e02abf7fd3cc64fdf95657a6.txt",
+        "bytes": 1056,
+        "sha256": "8bf96984ff8bcfae7e48cae76a529e8a25317ba9e02abf7fd3cc64fdf95657a6"
+      },
+      {
+        "path": "licenses/package-texts/8d8c55319c7729d57be811c747452636688d54f19701ee0752b6b15ad3771d9a.txt",
+        "bytes": 1101,
+        "sha256": "8d8c55319c7729d57be811c747452636688d54f19701ee0752b6b15ad3771d9a"
+      },
+      {
+        "path": "licenses/package-texts/8ec1386f7f078b0c7cd25341cd80f332df902371cda9f40c10ec2b4007b420b7.txt",
+        "bytes": 1071,
+        "sha256": "8ec1386f7f078b0c7cd25341cd80f332df902371cda9f40c10ec2b4007b420b7"
+      },
+      {
+        "path": "licenses/package-texts/90021adfb24b0a7af5754cebc6085e2560555f74d29a6d44a7f9a32125f8b348.txt",
+        "bytes": 1082,
+        "sha256": "90021adfb24b0a7af5754cebc6085e2560555f74d29a6d44a7f9a32125f8b348"
+      },
+      {
+        "path": "licenses/package-texts/95a5762890e5c1c9808921cef095661fc482c5e1f0bba31446ac85595df6237c.txt",
+        "bytes": 1249,
+        "sha256": "95a5762890e5c1c9808921cef095661fc482c5e1f0bba31446ac85595df6237c"
+      },
+      {
+        "path": "licenses/package-texts/965ef284f7f4c176842ec2e87fa13e79feed777d56d7a21a5a3b38f1bb6dc288.txt",
+        "bytes": 1099,
+        "sha256": "965ef284f7f4c176842ec2e87fa13e79feed777d56d7a21a5a3b38f1bb6dc288"
+      },
+      {
+        "path": "licenses/package-texts/9672b5ea831c360425e95b806b302e502582dd9718b056f29c40cf241daecb68.txt",
+        "bytes": 1340,
+        "sha256": "9672b5ea831c360425e95b806b302e502582dd9718b056f29c40cf241daecb68"
+      },
+      {
+        "path": "licenses/package-texts/97af7428f93afbab9bf79cd09254da1357161794f4255eb1b4599f04dd2d2e7c.txt",
+        "bytes": 1081,
+        "sha256": "97af7428f93afbab9bf79cd09254da1357161794f4255eb1b4599f04dd2d2e7c"
+      },
+      {
+        "path": "licenses/package-texts/99cf22f6960a6fe228ec84ea9aefb0d75b27999ece83a3a9801e1c2081fa270b.txt",
+        "bytes": 1074,
+        "sha256": "99cf22f6960a6fe228ec84ea9aefb0d75b27999ece83a3a9801e1c2081fa270b"
+      },
+      {
+        "path": "licenses/package-texts/9a9edad7baae52622bddf3c15b2ef8a33d2c89f2d25408ad13e8a7481c6b0c97.txt",
+        "bytes": 1104,
+        "sha256": "9a9edad7baae52622bddf3c15b2ef8a33d2c89f2d25408ad13e8a7481c6b0c97"
+      },
+      {
+        "path": "licenses/package-texts/9d7a84ade91e8e50f5dfc303fb53e580e806f6f89bde804e84a01c1b8853fff5.txt",
+        "bytes": 3740,
+        "sha256": "9d7a84ade91e8e50f5dfc303fb53e580e806f6f89bde804e84a01c1b8853fff5"
+      },
+      {
+        "path": "licenses/package-texts/9df3bb69929a3b650ed73b3bfa1756725aaff0ac296461605753547004eafeaf.txt",
+        "bytes": 1074,
+        "sha256": "9df3bb69929a3b650ed73b3bfa1756725aaff0ac296461605753547004eafeaf"
+      },
+      {
+        "path": "licenses/package-texts/a05350a88e318e4f5f2c2a1ff1e2e88daa4dd38e6e78b71cccae422bdc762cc3.txt",
+        "bytes": 1090,
+        "sha256": "a05350a88e318e4f5f2c2a1ff1e2e88daa4dd38e6e78b71cccae422bdc762cc3"
+      },
+      {
+        "path": "licenses/package-texts/a055e3a15db4b4cbb5af381230eba085603126d7d5d8c4dae45ee85b877a9729.txt",
+        "bytes": 1069,
+        "sha256": "a055e3a15db4b4cbb5af381230eba085603126d7d5d8c4dae45ee85b877a9729"
+      },
+      {
+        "path": "licenses/package-texts/a07bc24468b9654ce76a547d47a2db282d07733b715db4c73a98bd63961f9550.txt",
+        "bytes": 1084,
+        "sha256": "a07bc24468b9654ce76a547d47a2db282d07733b715db4c73a98bd63961f9550"
+      },
+      {
+        "path": "licenses/package-texts/a0ec0dab16b3666f24950f86d257930ac2ad475557b4bfe245620e0817d8a45d.txt",
+        "bytes": 1174,
+        "sha256": "a0ec0dab16b3666f24950f86d257930ac2ad475557b4bfe245620e0817d8a45d"
+      },
+      {
+        "path": "licenses/package-texts/a3d60eaf32d2fb09c9d82ef39f14bd6e2c0f3ca7de30daa827486c0d6f8b6e9f.txt",
+        "bytes": 3326,
+        "sha256": "a3d60eaf32d2fb09c9d82ef39f14bd6e2c0f3ca7de30daa827486c0d6f8b6e9f"
+      },
+      {
+        "path": "licenses/package-texts/a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7.txt",
+        "bytes": 1079,
+        "sha256": "a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7"
+      },
+      {
+        "path": "licenses/package-texts/a553508f516031c91f3af1148d44970cb81bbae6c4f091be6835d39cc252238c.txt",
+        "bytes": 1064,
+        "sha256": "a553508f516031c91f3af1148d44970cb81bbae6c4f091be6835d39cc252238c"
+      },
+      {
+        "path": "licenses/package-texts/a5edccac92c3aa845694dcfaa72a0c098c1ae40d5ca6a37e4e59d778cf8e29bd.txt",
+        "bytes": 1068,
+        "sha256": "a5edccac92c3aa845694dcfaa72a0c098c1ae40d5ca6a37e4e59d778cf8e29bd"
+      },
+      {
+        "path": "licenses/package-texts/a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794.txt",
+        "bytes": 1505,
+        "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794"
+      },
+      {
+        "path": "licenses/package-texts/a6ab98e5c77b9070c443eaff2ff81034a6f8cc05a7524d5098eb0f24defa0115.txt",
+        "bytes": 1101,
+        "sha256": "a6ab98e5c77b9070c443eaff2ff81034a6f8cc05a7524d5098eb0f24defa0115"
+      },
+      {
+        "path": "licenses/package-texts/a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27.txt",
+        "bytes": 1090,
+        "sha256": "a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27"
+      },
+      {
+        "path": "licenses/package-texts/a7996721249a136fbcfc1c201bcb5f414f38a701d4a24f28abe65e16cfcce813.txt",
+        "bytes": 1094,
+        "sha256": "a7996721249a136fbcfc1c201bcb5f414f38a701d4a24f28abe65e16cfcce813"
+      },
+      {
+        "path": "licenses/package-texts/a7cc4332acfa1f9b6530e01aac77fefe74f2efa32579215fddaa473013f9a25c.txt",
+        "bytes": 2926,
+        "sha256": "a7cc4332acfa1f9b6530e01aac77fefe74f2efa32579215fddaa473013f9a25c"
+      },
+      {
+        "path": "licenses/package-texts/a832d679750e49ab433626ab196350b89964b60eb0d3edd3341887c7d5f4c128.txt",
+        "bytes": 1108,
+        "sha256": "a832d679750e49ab433626ab196350b89964b60eb0d3edd3341887c7d5f4c128"
+      },
+      {
+        "path": "licenses/package-texts/aaa78451b6fecd1b9c4594c796c133c0e90cad100372ff8bc6de615e9ef9adf1.txt",
+        "bytes": 1105,
+        "sha256": "aaa78451b6fecd1b9c4594c796c133c0e90cad100372ff8bc6de615e9ef9adf1"
+      },
+      {
+        "path": "licenses/package-texts/ac779f7314c74f232ef847ea86e714abe25cf6eeb5cc97b69451b74e2af6492d.txt",
+        "bytes": 1064,
+        "sha256": "ac779f7314c74f232ef847ea86e714abe25cf6eeb5cc97b69451b74e2af6492d"
+      },
+      {
+        "path": "licenses/package-texts/ad4b50ffd183d0ec8b3e56fedae59575f13cee1cee74c466b16fad4bed032bed.txt",
+        "bytes": 11340,
+        "sha256": "ad4b50ffd183d0ec8b3e56fedae59575f13cee1cee74c466b16fad4bed032bed"
+      },
+      {
+        "path": "licenses/package-texts/b010b0dfdfdb23d7396e03b82cd4621fc9bb8f95d6b0aea70b9c24e12074c786.txt",
+        "bytes": 1813,
+        "sha256": "b010b0dfdfdb23d7396e03b82cd4621fc9bb8f95d6b0aea70b9c24e12074c786"
+      },
+      {
+        "path": "licenses/package-texts/b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1.txt",
+        "bytes": 11357,
+        "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1"
+      },
+      {
+        "path": "licenses/package-texts/bbb84e1fa86b44508e893afe1a84a640cd452c0e671f001256959352bfacb7e5.txt",
+        "bytes": 4324,
+        "sha256": "bbb84e1fa86b44508e893afe1a84a640cd452c0e671f001256959352bfacb7e5"
+      },
+      {
+        "path": "licenses/package-texts/bbe87b573c12bda5baf18742117330efa177e0886b3b0a278dacf8f236e1e129.txt",
+        "bytes": 2859,
+        "sha256": "bbe87b573c12bda5baf18742117330efa177e0886b3b0a278dacf8f236e1e129"
+      },
+      {
+        "path": "licenses/package-texts/bd134b41da59e452fb5a1d366b660886f741c87c2bf9428e93764c419fbc40f5.txt",
+        "bytes": 1094,
+        "sha256": "bd134b41da59e452fb5a1d366b660886f741c87c2bf9428e93764c419fbc40f5"
+      },
+      {
+        "path": "licenses/package-texts/bd40cc437e28a3ad7bef2ad34e6b72e757b182e67bda1acadbab4ef0476f8232.txt",
+        "bytes": 1071,
+        "sha256": "bd40cc437e28a3ad7bef2ad34e6b72e757b182e67bda1acadbab4ef0476f8232"
+      },
+      {
+        "path": "licenses/package-texts/bd47ce7b88c7759630d1e2b9fcfa170a0f1fde522be09e13fb1581a79d090400.txt",
+        "bytes": 1094,
+        "sha256": "bd47ce7b88c7759630d1e2b9fcfa170a0f1fde522be09e13fb1581a79d090400"
+      },
+      {
+        "path": "licenses/package-texts/bdfd5e0edb6089e6586c8f15e6a86fab83ffbeeda3b3b7b33734ccb8c5906965.txt",
+        "bytes": 1124,
+        "sha256": "bdfd5e0edb6089e6586c8f15e6a86fab83ffbeeda3b3b7b33734ccb8c5906965"
+      },
+      {
+        "path": "licenses/package-texts/be46ce1e3b0479af9ce82d22b465a6d7d2ff084fca0aaf3d54172da2b5eb5781.txt",
+        "bytes": 1071,
+        "sha256": "be46ce1e3b0479af9ce82d22b465a6d7d2ff084fca0aaf3d54172da2b5eb5781"
+      },
+      {
+        "path": "licenses/package-texts/bf9b0d665be2a689851eea667ca9f42066ea1d903b38349c51e6a44b2577680a.txt",
+        "bytes": 1083,
+        "sha256": "bf9b0d665be2a689851eea667ca9f42066ea1d903b38349c51e6a44b2577680a"
+      },
+      {
+        "path": "licenses/package-texts/c02110eedc16c7114f1a9bdc026c65626ce1d9c7e27fd51a8e0feee8a48a6858.txt",
+        "bytes": 1175,
+        "sha256": "c02110eedc16c7114f1a9bdc026c65626ce1d9c7e27fd51a8e0feee8a48a6858"
+      },
+      {
+        "path": "licenses/package-texts/c1e6e266563517467b1bf874817d23e426f3149252bd7d42758cd697514b8417.txt",
+        "bytes": 1070,
+        "sha256": "c1e6e266563517467b1bf874817d23e426f3149252bd7d42758cd697514b8417"
+      },
+      {
+        "path": "licenses/package-texts/c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383.txt",
+        "bytes": 1141,
+        "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+      },
+      {
+        "path": "licenses/package-texts/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4.txt",
+        "bytes": 11357,
+        "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+      },
+      {
+        "path": "licenses/package-texts/c7cc929b57080f4b9d0c6cf57669f0463fc5b39906344dfc8d3bc43426b30eac.txt",
+        "bytes": 1081,
+        "sha256": "c7cc929b57080f4b9d0c6cf57669f0463fc5b39906344dfc8d3bc43426b30eac"
+      },
+      {
+        "path": "licenses/package-texts/cc1dfd4dafa27271e8212cd3b274eeb3f262e40a6fdab36ddc3f9696f706f58b.txt",
+        "bytes": 1172,
+        "sha256": "cc1dfd4dafa27271e8212cd3b274eeb3f262e40a6fdab36ddc3f9696f706f58b"
+      },
+      {
+        "path": "licenses/package-texts/ccf06b70760761ae1437395117bcf911501e3dc85385d84c7eba20d5dfab55dd.txt",
+        "bytes": 1113,
+        "sha256": "ccf06b70760761ae1437395117bcf911501e3dc85385d84c7eba20d5dfab55dd"
+      },
+      {
+        "path": "licenses/package-texts/cd519ad3d7e012427f978dfb2e3b92ee403d189d7b859ba6bf68fd7e12ca456f.txt",
+        "bytes": 1075,
+        "sha256": "cd519ad3d7e012427f978dfb2e3b92ee403d189d7b859ba6bf68fd7e12ca456f"
+      },
+      {
+        "path": "licenses/package-texts/cfc3f455254c0af0655cc3ff46a41ed644b67599f6043346169d285bf2b3cf3b.txt",
+        "bytes": 1071,
+        "sha256": "cfc3f455254c0af0655cc3ff46a41ed644b67599f6043346169d285bf2b3cf3b"
+      },
+      {
+        "path": "licenses/package-texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+        "bytes": 11358,
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      {
+        "path": "licenses/package-texts/d0bca4e517157b7a6120c085f5fe43a35b90c095e3bbeb9e67f220c608506a16.txt",
+        "bytes": 1128,
+        "sha256": "d0bca4e517157b7a6120c085f5fe43a35b90c095e3bbeb9e67f220c608506a16"
+      },
+      {
+        "path": "licenses/package-texts/d0cd141b0c322fded5dfad1d4645bb2fedfc05b7321fe1009469638190d59ef9.txt",
+        "bytes": 1091,
+        "sha256": "d0cd141b0c322fded5dfad1d4645bb2fedfc05b7321fe1009469638190d59ef9"
+      },
+      {
+        "path": "licenses/package-texts/d82ceb8cbd004a2d4834085c557d55459f528e30268d95159ee1e4030a693a6e.txt",
+        "bytes": 11357,
+        "sha256": "d82ceb8cbd004a2d4834085c557d55459f528e30268d95159ee1e4030a693a6e"
+      },
+      {
+        "path": "licenses/package-texts/d8c77eaffed7f1f874b97f66ee47a557ae24fd59bae8ae14f9b1b84f26a94d2f.txt",
+        "bytes": 1588,
+        "sha256": "d8c77eaffed7f1f874b97f66ee47a557ae24fd59bae8ae14f9b1b84f26a94d2f"
+      },
+      {
+        "path": "licenses/package-texts/d90bf0a089da4cf43d644ed240a0b3825dcdb705e64e38371d56995a4cc9e4c5.txt",
+        "bytes": 1071,
+        "sha256": "d90bf0a089da4cf43d644ed240a0b3825dcdb705e64e38371d56995a4cc9e4c5"
+      },
+      {
+        "path": "licenses/package-texts/da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93.txt",
+        "bytes": 1088,
+        "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+      },
+      {
+        "path": "licenses/package-texts/db1ed8cccea0d0fb5d92b7c59d9aa78a5bbcd047972519c6a21a4416937f2ebf.txt",
+        "bytes": 11356,
+        "sha256": "db1ed8cccea0d0fb5d92b7c59d9aa78a5bbcd047972519c6a21a4416937f2ebf"
+      },
+      {
+        "path": "licenses/package-texts/dc1f5d2d43c5531dfe0acaf4e950ea5dbe3e61e1850cf0e983bda7efc10d6693.txt",
+        "bytes": 10464,
+        "sha256": "dc1f5d2d43c5531dfe0acaf4e950ea5dbe3e61e1850cf0e983bda7efc10d6693"
+      },
+      {
+        "path": "licenses/package-texts/dcb94ff9b1e037a847bc20589dc81a1066d041fd4c16deb18b0fa968c66cf395.txt",
+        "bytes": 1168,
+        "sha256": "dcb94ff9b1e037a847bc20589dc81a1066d041fd4c16deb18b0fa968c66cf395"
+      },
+      {
+        "path": "licenses/package-texts/de4d1f2d2ad5ad0cfd1657a106476b31cb5db5ef9d1ff842b237c0c81f0c8a23.txt",
+        "bytes": 12775,
+        "sha256": "de4d1f2d2ad5ad0cfd1657a106476b31cb5db5ef9d1ff842b237c0c81f0c8a23"
+      },
+      {
+        "path": "licenses/package-texts/dea9265341829002e2c23a7372393eb2ed6e26085fb623f38a4ba0af833f30a6.txt",
+        "bytes": 1183,
+        "sha256": "dea9265341829002e2c23a7372393eb2ed6e26085fb623f38a4ba0af833f30a6"
+      },
+      {
+        "path": "licenses/package-texts/def75ba75d6426f1c3f02addf8e175fbe6e0d8a82e541cbdffc16d2bd8fd7d6a.txt",
+        "bytes": 1147,
+        "sha256": "def75ba75d6426f1c3f02addf8e175fbe6e0d8a82e541cbdffc16d2bd8fd7d6a"
+      },
+      {
+        "path": "licenses/package-texts/def82c085d05e795fe6a9cb5b70c48e022212355afc0e91d4de047cade28df06.txt",
+        "bytes": 1081,
+        "sha256": "def82c085d05e795fe6a9cb5b70c48e022212355afc0e91d4de047cade28df06"
+      },
+      {
+        "path": "licenses/package-texts/dfde54fedc270c2a305d9a9f993d93f706d34624455a2fd2d2a05ca34d8ae8c3.txt",
+        "bytes": 1797,
+        "sha256": "dfde54fedc270c2a305d9a9f993d93f706d34624455a2fd2d2a05ca34d8ae8c3"
+      },
+      {
+        "path": "licenses/package-texts/dffec71d93f273d2af7b54c6c7e7e70b3289c632ec0d7253210ec21ac336d5ac.txt",
+        "bytes": 1114,
+        "sha256": "dffec71d93f273d2af7b54c6c7e7e70b3289c632ec0d7253210ec21ac336d5ac"
+      },
+      {
+        "path": "licenses/package-texts/e2eaa4603c14cb26f301e88648c12a853fa3f0f5da6d4b0972958c666e7f2ab8.txt",
+        "bytes": 4433,
+        "sha256": "e2eaa4603c14cb26f301e88648c12a853fa3f0f5da6d4b0972958c666e7f2ab8"
+      },
+      {
+        "path": "licenses/package-texts/e345c2ee7df4446e739de7b91535f0c10ddcd909b9753889e943ee637b05db8c.txt",
+        "bytes": 11390,
+        "sha256": "e345c2ee7df4446e739de7b91535f0c10ddcd909b9753889e943ee637b05db8c"
+      },
+      {
+        "path": "licenses/package-texts/e3b44af066615de2ea48d18d852d0762f18c0b2efcea714fa48a6f729d405b85.txt",
+        "bytes": 1153,
+        "sha256": "e3b44af066615de2ea48d18d852d0762f18c0b2efcea714fa48a6f729d405b85"
+      },
+      {
+        "path": "licenses/package-texts/e7dc37bf662d7f786efcb46c545615e70c1daf458a38385521c63cf6607cdfe1.txt",
+        "bytes": 1600,
+        "sha256": "e7dc37bf662d7f786efcb46c545615e70c1daf458a38385521c63cf6607cdfe1"
+      },
+      {
+        "path": "licenses/package-texts/e8a7cc256941a26ba8234f04390165243a4d42f74fd6491934140605bf7eae2d.txt",
+        "bytes": 1094,
+        "sha256": "e8a7cc256941a26ba8234f04390165243a4d42f74fd6491934140605bf7eae2d"
+      },
+      {
+        "path": "licenses/package-texts/ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be.txt",
+        "bytes": 1065,
+        "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"
+      },
+      {
+        "path": "licenses/package-texts/eda81a415869e67809f6a9f3fd6056062cb83a462118e07eec5e92b2e0c40ce9.txt",
+        "bytes": 1546,
+        "sha256": "eda81a415869e67809f6a9f3fd6056062cb83a462118e07eec5e92b2e0c40ce9"
+      },
+      {
+        "path": "licenses/package-texts/edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d.txt",
+        "bytes": 11352,
+        "sha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d"
+      },
+      {
+        "path": "licenses/package-texts/f655e6291356ec0de7a8f0e69f294961a2cea86678ec94588be1e6a492e278ab.txt",
+        "bytes": 1178,
+        "sha256": "f655e6291356ec0de7a8f0e69f294961a2cea86678ec94588be1e6a492e278ab"
+      },
+      {
+        "path": "licenses/package-texts/f683a72ffe6a9675b5507af22fe0f448d8c8de3da1e14f139d370a7e6a54a23e.txt",
+        "bytes": 1087,
+        "sha256": "f683a72ffe6a9675b5507af22fe0f448d8c8de3da1e14f139d370a7e6a54a23e"
+      },
+      {
+        "path": "licenses/package-texts/f8d791359a50cbcac82c29cb7b0b1b889b28be76fdd35b8ee33f0f7c8704702a.txt",
+        "bytes": 1061,
+        "sha256": "f8d791359a50cbcac82c29cb7b0b1b889b28be76fdd35b8ee33f0f7c8704702a"
+      },
+      {
+        "path": "licenses/package-texts/feb87a2e0c305de3464cc44077da5393c52d8ca6362d37427157d04ec6f4510d.txt",
+        "bytes": 1057,
+        "sha256": "feb87a2e0c305de3464cc44077da5393c52d8ca6362d37427157d04ec6f4510d"
+      }
+    ]
+  },
+  "wasm": {
+    "present": true,
+    "requiresThirdPartyInventoryConditionalCheck": false
+  }
+}
