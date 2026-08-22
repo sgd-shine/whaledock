@@ -91,6 +91,15 @@ async function run() {
     assert.throws(() => main.cockpitViewRequest({ mode: 'cockpit', command: 'executeJavaScript' }));
   });
 
+  await test('鲸坞色系请求只接受单个安全主题 id', async () => {
+    assert.deepEqual(main.cockpitThemeRequest({ themeId: 'sunset-coral' }), {
+      themeId: 'sunset-coral'
+    });
+    assert.throws(() => main.cockpitThemeRequest('sunset-coral'));
+    assert.throws(() => main.cockpitThemeRequest({ themeId: '../evil' }));
+    assert.throws(() => main.cockpitThemeRequest({ themeId: 'aurora', path: '/tmp/theme' }));
+  });
+
   await test('驾驶舱仍是本地壳，dsh 子视图无 preload/注入', async () => {
     const html = source('shell.html');
     const renderer = source('shell.js');
@@ -100,6 +109,9 @@ async function run() {
     assert.match(html, /id="cockpit-route"/);
     assert.match(html, /id="cockpit-task-flow"/);
     assert.match(html, /id="toggle-chat"/);
+    assert.match(html, /id="cockpit-theme-select"/);
+    assert.match(html, /id="cockpit-theme-swatch"/);
+    assert.match(html, /id="open-theme-settings"/);
     assert.doesNotMatch(html, /id="cockpit-panel"|id="cockpit-chat-placeholder"/);
     assert.doesNotMatch(html, /clamp\(340px,31vw,420px\)/);
     assert.match(html, /#cockpit-route[\s\S]*?height:136px/);
@@ -110,6 +122,11 @@ async function run() {
     assert.match(renderer, /event\.key\.toLowerCase\(\) === 'k'/);
     assert.match(renderer, /chatOpen/);
     assert.match(preload, /shell:cockpit-view/);
+    assert.match(preload, /shell:cockpit-theme/);
+    assert.match(renderer, /api\.setCockpitTheme\(\{ themeId \}\)/);
+    assert.match(mainSource, /theme: cockpitThemeSurface\(active\)/);
+    assert.match(mainSource, /active\.theme[\s\S]*不能从顶栏覆盖/);
+    assert.doesNotMatch(html, /#22d3ee(?:1c|aa|33|0b|18|88)/);
     assert.match(mainSource, /const COCKPIT_HEADER_HEIGHT = 136/);
     assert.doesNotMatch(mainSource, /COCKPIT_PANEL_|COCKPIT_DSH_TOP|cockpitChatCollapsed/);
     const viewBlock = mainSource.slice(

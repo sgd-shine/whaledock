@@ -1,6 +1,6 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-22（v0.7 远程板块批次 1 已并入 main；视频驾驶舱已按体验反馈改为全宽对话现场；公开稳定版仍为 v0.6.0）
+更新：2026-08-22（v0.7 远程板块批次 1 已并入 main；视频驾驶舱已改为全宽对话现场并新增鲸坞全局色系快切；公开稳定版仍为 v0.6.0）
 
 ## 阶段结论
 
@@ -230,6 +230,7 @@ Windows/Intel 真机、Windows 签名与线上更新仍是独立证据边界。�
 
 - 视频线 PR [#3](https://github.com/sgd-shine/whaledock/pull/3)、[#4](https://github.com/sgd-shine/whaledock/pull/4) 与验收文档 PR [#5](https://github.com/sgd-shine/whaledock/pull/5) 均已合入 `main`。公开稳定版仍是 v0.6.0，v0.7 尚未改版本、打包、打 tag 或发布。
 - 内置短视频创作台已接通第一方驾驶舱：航道/今天、脚本块级建议、全屏拍摄、灵感/选题/打法、发布灯和离线数据占位均来自本地文件真相。普通工作台继续走原布局；电商客服包零改动。SGD 已通过基本操作、快捷键与工作台展开手感；唯一退回项“窄侧栏对话”已改成顶部摘要常驻、下方完整 Harness 全宽切换，返回现场不刷新对话或草稿。
+- 驾驶舱顶栏新增「鲸坞色系」下拉与自定义主题入口。当前源码内置鲸坞深色、鲸坞浅色、极光、墨鲸、日落珊瑚、竹影青黛、潮汐靛蓝七套，也列出用户主题。选择复用并持久化 WhaleDock 的全局 `config.theme`，重启保留并同步刷新鲸坞自有界面；它不是驾驶舱私有配色。工作台自带 `theme.json` 时顶栏只读锁定，完整 dsh 对话 `WebContentsView` 仍不注入 CSS/DOM。
 - 写入受 opaque token、源 hash CAS、root/父目录 inode 与恢复 journal 约束；未知 front matter 原样保留，平台数据未接通就不显示数字。主 dsh 视图继续无 preload/注入，根运行时依赖仍为 0。
-- 与远程批次整合后的本地最新 `npm run smoke` 为 **450 PASS / ALL PASS**；全宽对话布局、IPC 白名单、快捷键与“不注入 dsh DOM”均有纯 Node 回归。PR #3/#4/#6 的 macOS、Ubuntu、Windows CI 均全绿；安全复核仍为 P0=0、P1=0。
-- macOS Apple Silicon 隔离源码 App 已真实点击进入/返回全宽对话，并用未发送草稿证明切换未重载同一个 dsh 视图；⌘K 从 dsh 焦点返回现场、再次打开均通过。尚未闭环：Windows/Intel 真机、Windows 断电/子进程崩溃恢复，以及 v0.7 安装包、体积、签名、公证、tag 与 Release。成功受控替换会保留 `WhaleDock-recovery-*.bak`，特殊 copy-only 冲突可能留下额外恢复证据，均需人核对后处理。
+- 本地最新 `npm run smoke` 为 **451 PASS / ALL PASS**；驾驶舱壳套件现为 6 项，新增精确主题请求、七套资源与三组 WCAG 对比度回归。全宽对话布局、IPC 白名单、快捷键与“不注入 dsh DOM”均继续通过；PR #3/#4/#6/#7 的既有三平台 CI 全绿，本色系批次的 CI 以对应 PR 回读为准。
+- macOS Apple Silicon 隔离源码 App 已真实点击进入/返回全宽对话，并用未发送草稿证明切换未重载同一个 dsh 视图；⌘K 从 dsh 焦点返回现场、再次打开均通过。本色系批次另在隔离 userData 下真实选择潮汐靛蓝与日落珊瑚，修复旧 `:root` 优先级后确认整页换色，重启回读仍为日落珊瑚；`960×620`、`1280×820` 的创作现场、全宽对话和自定义设置入口均走通。尚未闭环：Windows/Intel 真机、Windows 断电/子进程崩溃恢复，以及 v0.7 安装包、体积、签名、公证、tag 与 Release。成功受控替换会保留 `WhaleDock-recovery-*.bak`，特殊 copy-only 冲突可能留下额外恢复证据，均需人核对后处理。

@@ -73,6 +73,7 @@ contextBridge.exposeInMainWorld('whaleShell', Object.freeze({
   removePack: (workbenchId) => ipcRenderer.invoke('shell:remove', workbenchId),
   runAction: (actionId) => ipcRenderer.invoke('shell:action', actionId),
   setCockpitView: (request) => ipcRenderer.invoke('shell:cockpit-view', request),
+  setCockpitTheme: (request) => ipcRenderer.invoke('shell:cockpit-theme', request),
   getVideoState: () => ipcRenderer.invoke('shell:video:get'),
   openVideoDocument: (projectToken) => ipcRenderer.invoke('shell:video:document', { projectToken }),
   runVideoProjectAction: (projectToken, actionId) => ipcRenderer.invoke(

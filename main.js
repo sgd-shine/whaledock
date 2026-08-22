@@ -570,6 +570,8 @@ let petTransient = null;
 let petTransientTimer = null;
 const themedPages = new Map();
 const themedWindows = new Map();
+const themedWindowGenerations = new Map();
+let cockpitThemeCatalogCache = null;
 let tray = null;
 let backendState = null;
 let spawnedByUs = false;
@@ -1186,6 +1188,58 @@ function listAvailableThemes() {
   }
 }
 
+const COCKPIT_THEME_ORDER = Object.freeze([
+  'whaledock-dark', 'whaledock-light', 'aurora', 'ink-whale',
+  'sunset-coral', 'jade-night', 'indigo-tide'
+]);
+
+function cockpitThemeCatalog(options = {}) {
+  if (!options.refresh && cockpitThemeCatalogCache) return cockpitThemeCatalogCache;
+  cockpitThemeCatalogCache = listAvailableThemes();
+  return cockpitThemeCatalogCache;
+}
+
+function invalidateCockpitThemeCatalog() {
+  cockpitThemeCatalogCache = null;
+}
+
+// 驾驶舱只拿展示色样所需的安全 token；不下发路径或原始 JSON。
+// 内置主题按产品顺序排，用户主题保持扫描顺序接在后面。
+function cockpitThemeSurface(active) {
+  const listed = cockpitThemeCatalog();
+  const locked = Boolean(active && active.theme);
+  const selected = locked
+    ? active.theme
+    : themes.selectTheme(listed.themes, config.get().theme);
+  const rank = new Map(COCKPIT_THEME_ORDER.map((id, index) => [id, index]));
+  const available = locked ? [selected] : [...listed.themes];
+  if (!available.some((item) => item.id === selected.id)) available.unshift(selected);
+  available.sort((left, right) => {
+    const leftRank = rank.has(left.id) ? rank.get(left.id) : COCKPIT_THEME_ORDER.length;
+    const rightRank = rank.has(right.id) ? rank.get(right.id) : COCKPIT_THEME_ORDER.length;
+    return leftRank - rightRank;
+  });
+  return {
+    scope: 'whaledock',
+    selected: selected.id,
+    locked,
+    skipped: listed.skipped.length,
+    themes: available.slice(0, 100).map((item) => ({
+      id: item.id,
+      name: item.name,
+      source: item.source,
+      base: item.base,
+      colors: {
+        background: item.colors.background,
+        surface: item.colors.surface,
+        primary: item.colors.primary,
+        accent: item.colors.accent,
+        text: item.colors.text
+      }
+    }))
+  };
+}
+
 function currentTheme() {
   // 工作台自带主题优先；包里没写就跟随全局主题，不变。
   const active = currentWorkbench();
@@ -1203,7 +1257,9 @@ function themeCssFor(page, theme) {
   if (!build) return null;
   const declarations = Object.entries(build(theme.colors))
     .map(([name, value]) => `${name}:${value};`).join('');
-  return `:root{color-scheme:${theme.base};${declarations}}`;
+  // 自有页面源码也声明了 :root 兜底色。增加元素选择器的 specificity，
+  // 保证运行时主题无论 insertCSS 的层叠顺序如何都能真实覆盖兜底值。
+  return `html:root{color-scheme:${theme.base};${declarations}}`;
 }
 
 async function applyThemeToWindow(win, page, theme) {
@@ -1211,12 +1267,17 @@ async function applyThemeToWindow(win, page, theme) {
   const css = themeCssFor(page, theme || currentTheme());
   if (!css) return;
   const key = `whaledock-theme:${page}`;
+  const generation = (themedWindowGenerations.get(win) || 0) + 1;
+  themedWindowGenerations.set(win, generation);
   try {
-    const previous = themedWindows.get(win);
-    if (previous) await win.webContents.removeInsertedCSS(previous).catch(() => {});
     const handle = await win.webContents.insertCSS(css);
+    if (win.isDestroyed() || themedWindowGenerations.get(win) !== generation) {
+      if (!win.isDestroyed()) await win.webContents.removeInsertedCSS(handle).catch(() => {});
+      return;
+    }
+    const previous = themedWindows.get(win);
     themedWindows.set(win, handle);
-    win.webContents.once('destroyed', () => themedWindows.delete(win));
+    if (previous) await win.webContents.removeInsertedCSS(previous).catch(() => {});
   } catch (error) {
     log.line('app', `${key} 注入失败：${error && error.message || 'unknown'}`);
   }
@@ -1239,7 +1300,11 @@ function registerThemedWindow(win, page) {
   if (!win || win.isDestroyed() || !THEME_VARIABLE_MAP[page]) return;
   themedPages.set(win, page);
   win.webContents.on('did-finish-load', () => { void applyThemeToWindow(win, page); });
-  win.on('closed', () => { themedPages.delete(win); themedWindows.delete(win); });
+  win.on('closed', () => {
+    themedPages.delete(win);
+    themedWindows.delete(win);
+    themedWindowGenerations.delete(win);
+  });
 }
 
 // ---------- v0.5 桌面宠物 ----------
@@ -1692,6 +1757,15 @@ function exactPlainRequest(value, requiredKeys, optionalKeys, label) {
   return value;
 }
 
+function cockpitThemeRequest(value) {
+  exactPlainRequest(value, ['themeId'], [], '鲸坞色系请求');
+  if (typeof value.themeId !== 'string'
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value.themeId)) {
+    throw new Error('鲸坞色系 id 无效');
+  }
+  return { themeId: value.themeId };
+}
+
 function videoProjectActionRequest(value) {
   exactPlainRequest(value, ['projectToken', 'actionId'], [], '视频项目动作');
   if (typeof value.projectToken !== 'string' || !/^project-[a-f0-9]{24}$/.test(value.projectToken)) {
@@ -2122,6 +2196,7 @@ function shellStateSnapshot(extra = {}) {
       kind: 'video',
       mode: cockpitNativeMode ? 'native' : 'cockpit',
       chatOpen: cockpitChatOpen,
+      theme: cockpitThemeSurface(active),
       taskFlow: cockpitTaskFlow(canonicalEventSnapshot())
     } : null,
     ...extra
@@ -6283,7 +6358,7 @@ function trustedVideoShellHandler(handler) {
 function registerShellIpc() {
   const channels = [
     'shell:get', 'shell:switch', 'shell:remove', 'shell:action',
-    'shell:cockpit-view', 'shell:install', 'shell:open-workspace',
+    'shell:cockpit-view', 'shell:cockpit-theme', 'shell:install', 'shell:open-workspace',
     'shell:open-settings', 'shell:onboarding-seen',
     'shell:video:get', 'shell:video:document', 'shell:video:project-action',
     'shell:video:block-action', 'shell:video:proposal-decision',
@@ -6335,6 +6410,30 @@ function registerShellIpc() {
     pushShellState();
     createAppMenu();
     return { kind: 'ok' };
+  }));
+
+  ipcMain.handle('shell:cockpit-theme', trustedShellHandler(async (value) => {
+    const request = cockpitThemeRequest(value);
+    const active = currentWorkbench();
+    if (!active || active.cockpit !== 'video') {
+      return { kind: 'error', text: '当前工作台没有视频驾驶舱。' };
+    }
+    if (active.theme) {
+      return { kind: 'error', text: '这个工作台使用自带主题，不能从顶栏覆盖。' };
+    }
+    const listed = cockpitThemeCatalog();
+    const wanted = listed.themes.find((item) => item.id === request.themeId);
+    if (!wanted) return { kind: 'error', text: '这个色系当前不可用，请重载主题后再试。' };
+    const normalized = config.validateSettingsPatch({ theme: wanted.id });
+    config.set(normalized);
+    const applied = refreshAllThemes();
+    pushShellState();
+    log.line('app', `鲸坞色系已切换：${applied.id}`);
+    return {
+      kind: 'ok',
+      themeId: applied.id,
+      message: `鲸坞色系已切换为「${applied.name}」`
+    };
   }));
 
   ipcMain.handle('shell:video:get', trustedVideoShellHandler(async () => (
@@ -6495,7 +6594,10 @@ function registerSettingsIpc() {
       .some((key) => Object.prototype.hasOwnProperty.call(normalized, key))) {
       syncPetWindow();
     }
-    if (Object.prototype.hasOwnProperty.call(normalized, 'theme')) refreshAllThemes();
+    if (Object.prototype.hasOwnProperty.call(normalized, 'theme')) {
+      refreshAllThemes();
+      pushShellState();
+    }
 
     if (eventEffects.length) await handleEventEffects(eventEffects, eventMonitor);
     if (loginChanged) login = loginItemStatus(loginError);
@@ -6565,7 +6667,9 @@ function registerSettingsIpc() {
     return { ok: true, pets: petsRuntimeSurface() };
   }));
   ipcMain.handle('settings:reload-themes', trustedSettingsHandler(async () => {
+    invalidateCockpitThemeCatalog();
     const theme = refreshAllThemes();
+    pushShellState();
     return { ok: true, themes: themesRuntimeSurface(), applied: theme.id };
   }));
   ipcMain.handle('settings:list-workbenches', trustedSettingsHandler(async () => {
@@ -7632,6 +7736,7 @@ if (MAIN_HELPER_TEST) {
     mainViewLayout,
     cockpitTaskFlow,
     cockpitViewRequest,
+    cockpitThemeRequest,
     videoProjectActionRequest,
     videoDocumentRequest,
     videoBlockActionRequest,

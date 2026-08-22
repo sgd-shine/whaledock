@@ -1,0 +1,14 @@
+{
+  "name": "竹影青黛",
+  "author": "鲸坞 WhaleDock",
+  "base": "dark",
+  "colors": {
+    "background": "#071310",
+    "surface": "#0f241d",
+    "border": "#255c4a",
+    "primary": "#34d399",
+    "accent": "#c4d66a",
+    "text": "#ecfdf5",
+    "textMuted": "#9bbcad"
+  }
+}

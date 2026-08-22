@@ -1,0 +1,14 @@
+{
+  "name": "潮汐靛蓝",
+  "author": "鲸坞 WhaleDock",
+  "base": "dark",
+  "colors": {
+    "background": "#080d1f",
+    "surface": "#111936",
+    "border": "#2e3f78",
+    "primary": "#60a5fa",
+    "accent": "#38bdf8",
+    "text": "#eef4ff",
+    "textMuted": "#9baac9"
+  }
+}

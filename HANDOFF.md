@@ -1,6 +1,6 @@
 # HANDOFF.md — WhaleDock v0.6.0 正式签名、公证与发布交接
 
-更新：2026-08-22 · v0.7 远程批次 1 已整合，视频驾驶舱已改为全宽对话现场；公开稳定版仍为 v0.6.0
+更新：2026-08-22 · v0.7 远程批次 1 已整合，视频驾驶舱已改为全宽对话现场并新增鲸坞全局色系快切；公开稳定版仍为 v0.6.0
 
 ## 当前结论
 
@@ -221,6 +221,7 @@ v0.6.0 工作台包、内置短视频创作台、托盘五态与叫醒阶梯已�
 - Markdown 正文支持块级建议副本、对照、采用、退回与一次撤销；Agent 只改 `00_鲸坞建议/` 下的副本，原稿写回受 hash CAS、工作区实体与目录 inode 约束。
 - 全屏拍摄窗提供清单、进度环、提词速度/字号、空格暂停与 `R` 重来；收工先预览，再把记录另建到 `05_拍摄记录/`、把未确认镜头另建到 `04_素材清单/`，原 `03_口播稿/` 不改。窗口离线、sandbox、无 Node/网络/剪贴板能力。
 - 灵感投递只落本地文件；链接只当文字。发布检查的 AI 状态和“本人已发布”都来自人的显式确认，不冒充平台回读或代发。
+- 顶栏「鲸坞色系」可在七套内置主题和用户主题间直接切换，双色样实时预览；选择是 WhaleDock 全局主题并跨重启保留，旁边「＋」进入现有自制主题设置。工作台包自带 `theme.json` 时选择器锁定，避免半套包配色。
 
 ### 文件合同与写入边界
 
@@ -228,6 +229,7 @@ v0.6.0 工作台包、内置短视频创作台、托盘五态与叫醒阶梯已�
 - 支持的 front matter 与阶段集合已经追加到 `docs/工作台包制作指南.md`。未知字段、未知原始行与 BOM/CRLF 原样保留；目标字段重复、原文变化、工作区同路径换实体或恢复冲突时 fail-closed。
 - 事务 journal 绑定精确 root、父目录、target/tmp inode；temp、journal 与目录均做 durability flush。每次成功受控替换都保留可见 `WhaleDock-recovery-*.bak` 接住旧文件实体与编辑器晚写；特殊 copy-only 冲突可能留下额外恢复证据。它不是第二份正式项目，损坏副本不会自动装入目标。
 - 主 dsh `WebContentsView` 继续无 preload、无 DOM 注入；`⌘K` 只切换、移动并聚焦同一个完整视图，不复制或重写 Harness。切换不 reload，因此会话上下文和未发送草稿保持；顶部「返回现场」不依赖远端页面冒泡快捷键。
+- `shell:cockpit-theme` 只接受精确 `{themeId}`，仍经过可信 shell sender、mainFrame 与 file URL 校验；渲染层只收到 id/name/source/base 与安全色样 token，不收到主题路径或原始 JSON。主题目录扫描有缓存，仅显式重载失效；窗口 generation 丢弃迟到 CSS，先插入新样式再移除旧 handle，快速连切不回跳。
 - 根 `dependencies` 仍为空，`lib/video-cockpit.js` 与 `lib/video-shooting.js` 为纯 Node；不读写 `~/.dsh`，不新增遥测或平台请求。
 
 ### 批次、PR 与自动证据
@@ -235,7 +237,7 @@ v0.6.0 工作台包、内置短视频创作台、托盘五态与叫醒阶梯已�
 1. 批次 0 按 SGD 授权合并 PR [#2](https://github.com/sgd-shine/whaledock/pull/2)，merge `07cbe73`，并从当时最新 `main` 开视频线。
 2. 批次 1 的驾驶舱壳由 PR [#3](https://github.com/sgd-shine/whaledock/pull/3) 合并，merge `3747812`；[CI run 32504924783](https://github.com/sgd-shine/whaledock/actions/runs/32504924783) 三平台 smoke 全绿。
 3. 批次 2–6 因共享的文件状态、token/CAS 与现场路由强耦合，作为一个自洽批次由 PR [#4](https://github.com/sgd-shine/whaledock/pull/4) 合并，merge `457074c`；[CI run 32509488084](https://github.com/sgd-shine/whaledock/actions/runs/32509488084) 的 macOS、Ubuntu、Windows 三项 CI 全绿。
-4. 远程批次与全宽对话修订整合后的源码态 `npm run smoke` 实跑 **450 PASS / ALL PASS**；其中驾驶舱五个子套件仍为 **68 项**：壳 5、主进程运行时 15、文件合同 20、拍摄状态机 16、拍摄窗 12，远程套件为 42＋10 项。`git diff --check`、相关 JS `node --check` 与 runtime dependencies=0 均通过。
+4. 色系批次源码态 `npm run smoke` 实跑 **451 PASS / ALL PASS**；其中驾驶舱五个子套件为 **69 项**：壳 6、主进程运行时 15、文件合同 20、拍摄状态机 16、拍摄窗 12，远程套件为 42＋10 项。`git diff --check`、相关 JS `node --check` 与 runtime dependencies=0 均通过。
 5. 安全只读复核最终为 **P0=0、P1=0**。仍保留 P2 证据边界：没有 Windows 真机/断电子进程崩溃测试，copy-only 异常卷可能留下上述可见恢复副本。
 
 ### 当前证据边界与待 SGD 验收
@@ -244,3 +246,4 @@ v0.6.0 工作台包、内置短视频创作台、托盘五态与叫醒阶梯已�
 - macOS Apple Silicon 的隔离源码 App 已经通过 Chromium 调试通道真实触发 DOM 点击并回读本地文件：进出驾驶舱、选题写回、灵感纯本地投递、脚本对照/采用/撤销、发布 AI 硬灯、提词 `Space`/`R` 与两阶段收工、默认台/电商客服旧布局均走通。测试只连接 loopback 假 dsh，未接生产配置、`~/.dsh` 或 `/Applications/WhaleDock.app`；截图与逐项回读在内部验收记录。
 - SGD 已亲自通过基本操作、快捷键和工作台展开方式；唯一退回项是窄侧栏令 Harness 对话信息看不全。当前修订已移除该窄栏：顶部摘要不变，下面的完整 Harness 以全宽对话现场呈现，按钮和 `⌘K` 均可往返。
 - 隔离源码 App 已用本地假 dsh 真点击验证全宽打开、按钮返回、dsh 获焦、`⌘K` 双向切换，以及未发送草稿在往返后仍存在；验收草稿随后已清空、未发送。Windows 当前只有 CI，不能写成真机 UI/dsh 通过；Intel Mac 仍无真机证据。
+- 色系批次在 macOS Apple Silicon 隔离 userData 的源码 App 中真实切换潮汐靛蓝与日落珊瑚，并在重启后回读日落珊瑚仍被选中、整套鲸坞变量真实生效；`960×620` 与 `1280×820` 的现场、全宽对话及「＋」设置入口均通过。此证据不覆盖 Windows/Intel、v0.7 安装包、签名、公证、tag 或 Release；Harness 内容区仍由 dsh 自身决定外观。

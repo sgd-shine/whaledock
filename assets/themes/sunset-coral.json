@@ -1,0 +1,14 @@
+{
+  "name": "日落珊瑚",
+  "author": "鲸坞 WhaleDock",
+  "base": "dark",
+  "colors": {
+    "background": "#180d11",
+    "surface": "#2a151b",
+    "border": "#6b2f3b",
+    "primary": "#fb7185",
+    "accent": "#fbbf24",
+    "text": "#fff1f2",
+    "textMuted": "#c9a3aa"
+  }
+}
