@@ -14,7 +14,7 @@
 - `package-lock.json`、`compliance/`、`vendor/`、`licenses/`、`THIRD_PARTY_NOTICES.md` 相对 v0.6.0 零变化；root dependencies=0，dsh 仍锁定 `0.1.0-rc.6`，无 S1。Windows 未签名/未真机，Intel 未真机，边界不变。
 - `v0.7.0` tag 已落地，dsh 跟版升级线与远程批次 2 的开工条件已满足；后续状态由各自线程维护，本发版线不代报进度。
 
-## dsh 跟版升级｜批次 0–2 交接（未合并）
+## dsh 跟版升级｜批次 0–3 交接（未合并）
 
 - 路径/分支：`/Users/shine/AI工作台/02_AI项目/02_产品实验室/30_桌面App/harness-desktop-v08-dsh-upgrade`，`codex/v08-dsh-upgrade`，基线 `main@29070d5`。
 - 批次 0 把升级对象刷新为 npm `latest=0.1.1-rc.2`；tarball 33,675 B，registry SHA-1 为 `1a5112369f1c46b13a6e6f21de8af5e6afd45074`，SHA-1/SHA-512 与临时下载一致。内部六门与实施卡在 `docs/验收记录-dsh跟版升级-批次0-2026-08-22.md`（已 exclude）。
@@ -24,8 +24,11 @@
 - rc.2 live contract 全套已过：fresh list=0；create 后 3 条稳定元数据；host/cwd/home 加法字段、WS 只下行、raw/candidate-adapter queue、两个 completed、history 六页回填、dump-config 与退出清理都已重证。provider 是只监听 loopback 的本地 SSE stub，child 环境不继承真实凭据；3080/50213 既有 PID `53336` / `48805` 未变。
 - 本地 `npm run smoke` 为 **462 PASS / ALL PASS**；prompt 13/13、events 23/23、main-events 24/24，语法与 diff check 通过。尚无本批远端 CI、包、真机 UI 或 Release 证据，不能外推为三平台闭环。
 - `lib/config.js`/生产默认、`scripts/bundle-dsh.js`、root/audited lock、vendor/compliance/许可证均未切换；批次 2–4 只能生成显式候选证据，批次 5 获门禁许可后才允许原子替换生产集合。
-- 42 个文件/3,221 次 rc.6 命中已分类：合规闭包留批次 4 全量重生；历史/兼容测试保留；生产锁、工作台 range 与当前用户文档留批次 5 原子更新。下一步批次 3 只在临时 rc.6 DSH_HOME 副本上测试 rc.2 状态迁移，绝不读写真实 `~/.dsh`。
-- 内部完整记录：`docs/验收记录-dsh跟版升级-批次2-2026-08-22.md`（已 exclude），含四轮 fail-closed 迭代、官方 URL、live 数值、清理证明与 rc.6 分类。
+- 42 个文件/3,221 次 rc.6 命中已分类：合规闭包留批次 4 全量重生；历史/兼容测试保留；生产锁、工作台 range 与当前用户文档留批次 5 原子更新。
+- 批次 3 已证明默认 JSONL `sessions/` 为 `PASS_preserved_no_migration`：rc.6 的 36 events/2 completed 在 rc.2 两次冷读中 raw/physical/adapter 均完整保留、provider 零请求；另一副本继续后旧前缀不变，连续追加 15 events，最终 51/3。rc.6 原件与 readback 副本的 `sessions` 树均未改；full DSH_HOME 的 profile/cache 链接会重投影，不在“零变化”结论内。
+- opt-in SQLite 不在放行范围：schema 15→17、rc.2 无 migration。批次 5 的用户提示必须要求手动配置 SQLite 的用户先备份并保留旧 runtime；鲸坞不自动迁移、覆盖或清理。
+- 下一步批次 4 使用独立 candidate capsule 和三个原生 runner 生成 rc.2 audited lock、inventory、许可全文、SOURCES/NOTICES 与 S1/G1 一页卡；不触碰生产锁或正式 compliance。与飞书线的根依赖合并窗口留到批次 5 前，批次 4 不改 `package.json/package-lock.json`。
+- 内部完整记录：`docs/验收记录-dsh跟版升级-批次2-2026-08-22.md`、`docs/验收记录-dsh跟版升级-批次3-2026-08-22.md`（均已 exclude），含 live 数值、fail-closed 迭代、清理与兼容边界。
 
 ## v0.6.0 已发布基线
 

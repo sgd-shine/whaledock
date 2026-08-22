@@ -16,7 +16,7 @@
 - `package-lock.json`、`compliance/`、`vendor/`、`licenses/` 与 `THIRD_PARTY_NOTICES.md` 相对 v0.6.0 零变化；root runtime dependencies=0，dsh 仍锁定 `0.1.0-rc.6`，无 S1。
 - `v0.7.0` tag 已落地，dsh 跟版升级线与远程批次 2 的开工条件已满足；两线的后续状态与证据由各自线程维护，不由本发版结论代替。
 
-## dsh 跟版升级｜批次 0–2（独立分支进行中）
+## dsh 跟版升级｜批次 0–3（独立分支进行中）
 
 - 本线在独立 worktree `harness-desktop-v08-dsh-upgrade`、分支 `codex/v08-dsh-upgrade` 上从最新 `main@29070d5` 开工；没有改动并行飞书线的独占文件。
 - 2026-08-22T12:28Z 实时回读 npm `latest=next=0.1.1-rc.2`，发布时间 `2026-08-21T12:42:19.422Z`，tarball SHA-1 `1a5112369f1c46b13a6e6f21de8af5e6afd45074`；后续探针与候选材料只认该精确版本，若发布前 latest 再漂移则全套重跑。
@@ -26,9 +26,11 @@
 - `host.describe` 的 rc.2 加法字段 `home:string` 已用 synthetic fixture 与 live 值验证，只记录 present/length，不向中性层或报告暴露原文。`--dump-config` 现场回读 15,796 B/503 行/text，SHA-256 `cee7cd4d8c757ddf74a0bca9038ca817e2282f6c79f5c01d57baa89f871d4316`。
 - 自有 rc.2 进程以精确 PID/PGID/bin/父子链核验后 TERM，未用 KILL；web/provider 端口和引用临时根的残留进程均清零。既有 3080/50213 只做 lsof 前后回读，PID `53336` / `48805` 不变，未连接、未停止。
 - 全仓 42 个文件/3,221 次 rc.6 命中已逐类判定：3,031 次正式合规闭包留批次 4 全量重生；历史/兼容 fixture 保留；生产锁、工作台 range、当前用户文档只在批次 5 原子切换，不做盲替换。
+- 批次 3 对当前 audited-lock rc.6 合成状态做停机冷读，再用保留 mode 的副本启动 rc.2：36-event/2-completed raw history 在 rc.2 两次冷启都逐事件相等，物理 `sessions` 树与压缩文件未变，readback 期间 provider 请求为 0。另一副本在旧会话继续一轮后旧前缀完全相等，从 seq 36 连续追加 15 events，最终 51 events/3 completed，鲸坞中性 adapter 同样读到 51/3。rc.2 会重投影 full DSH_HOME 的 profile/cache 链接，因此 PASS 只针对 `sessions/`，不写成整个 DSH_HOME 零变化。
+- 默认 dsh web 两版都使用 JSONL/Zstandard、格式版本 0，因此本次结论是 `PASS_preserved_no_migration`，不是 SQLite 自动迁移。opt-in SQLite schema 15→17 且 rc.2 无 migration；批次 5 的升级提示必须告知手动配置 SQLite 的用户先备份并保留旧 runtime，鲸坞不自动迁移、覆盖或清理。
 - 本地统一 `npm run smoke` 实跑 **462 PASS / ALL PASS**，prompt 13/13、events 23/23、main-events 24/24，`node --check`、`git diff --check` 通过。这是本地纯 Node + 隔离 live 候选证据；尚未推送、未跑本批三平台 CI、未打包、未安装或发布。
 - `lib/config.js`、`scripts/bundle-dsh.js`、`package-lock.json` 与 audited lock 的 SHA-256 均和 `HEAD` 一致，生产 dsh 仍锁定 `0.1.0-rc.6`；vendor/compliance/许可材料零变化，无 S1 结论变化。
-- 下一步是批次 3：只克隆临时 rc.6 DSH_HOME 副本，用 rc.2 启动副本并重证会话/历史迁移；绝不碰真实 `~/.dsh`。若迁移有损，只设计如实升级提示，不代用户迁移。
+- 下一步是批次 4：只在隔离候选胶囊与 macOS arm64、macOS Intel x64、Windows x64 原生 runner 生成 rc.2 audited lock、inventory、许可证全文、SOURCES/NOTICES 与 S1/G1 一页卡；生产锁和正式 compliance 仍不替换。
 
 **v0.6.0 历史发布基线：工作台包通过三平台 CI，macOS arm64/x64 成品使用 Developer ID Application 正式签名、开启 Hardened Runtime 并获 Apple 公证。**
 
