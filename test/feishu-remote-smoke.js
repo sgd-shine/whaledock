@@ -60,6 +60,8 @@ function fakeSdk(options = {}) {
       this.params = params;
       this.dispatcher = null;
       this.closeCalls = [];
+      this.closeSawReconnectTimer = [];
+      this.reconnectTimer = null;
       instances.push(this);
     }
 
@@ -76,7 +78,25 @@ function fakeSdk(options = {}) {
 
     close(value) {
       this.closeCalls.push(value);
+      this.closeSawReconnectTimer.push(this.reconnectTimer !== null);
+      if (this.reconnectTimer !== null) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
       if (options.closeError) throw options.closeError;
+    }
+
+    reConnectAfterCallback() {
+      this.params.onReconnecting();
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+      }, 60_000);
+      this.reconnectTimer.unref();
+    }
+
+    clearFakeReconnectTimer() {
+      if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
 
     emit(data) {
@@ -464,6 +484,54 @@ function fixture(overrides = {}) {
     await nextTurn();
     assert.deepEqual(closed, ['transport-lost']);
     await session.disconnect('test');
+  });
+
+  await test('SDK 回调返回后才创建的重连 timer 会由核心 cleanup 收回', async () => {
+    const owner = fixture();
+    const lifecycleReasons = [];
+    let session;
+    session = await owner.adapter.connect(hooks({
+      onClose: async (reason) => {
+        lifecycleReasons.push(reason);
+        await session.disconnect('core-lifecycle');
+      }
+    }));
+    const ws = owner.fake.instances[0];
+    try {
+      ws.reConnectAfterCallback();
+      await nextTurn();
+      assert.deepEqual(lifecycleReasons, ['transport-lost']);
+      assert.deepEqual(ws.closeSawReconnectTimer, [true]);
+      assert.equal(ws.reconnectTimer, null);
+    } finally {
+      ws.clearFakeReconnectTimer();
+      await session.disconnect('test');
+    }
+  });
+
+  await test('核心 lifecycle hook 挂起时仍有延后关闭兜底，且不重复上报', async () => {
+    const owner = fixture();
+    const hookRelease = deferred();
+    let lifecycleCalls = 0;
+    const session = await owner.adapter.connect(hooks({
+      onClose: () => {
+        lifecycleCalls += 1;
+        return hookRelease.promise;
+      }
+    }));
+    const ws = owner.fake.instances[0];
+    try {
+      ws.reConnectAfterCallback();
+      ws.params.onReconnecting();
+      await nextTurn();
+      assert.equal(lifecycleCalls, 1);
+      assert.deepEqual(ws.closeSawReconnectTimer, [true]);
+      assert.equal(ws.reconnectTimer, null);
+    } finally {
+      hookRelease.resolve();
+      ws.clearFakeReconnectTimer();
+      await session.disconnect('test');
+    }
   });
 
   await test('未持久绑定、已取消或去重存储失败均 fail-closed', async () => {
