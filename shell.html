@@ -123,6 +123,12 @@
     body.cockpit-active #rail { display:none; }
     body.cockpit-active #video-cockpit { display:block; }
     body.cockpit-active #toast { left:18px; max-width:min(640px,calc(100vw - 36px)); }
+    /* child WebContentsView 会覆盖 y=136 以下的 DOM；对话打开时把瞬时提示压成顶栏内单行，
+       避免现场操作的成功/失败消息在切换后被完整对话视图挡住。 */
+    body.cockpit-active.chat-open #toast {
+      top:98px; bottom:auto; height:30px; padding:5px 10px;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
     body.chat-open #cockpit-scene { visibility:hidden; pointer-events:none; }
     #enter-cockpit { display:none; }
     body.cockpit-available:not(.cockpit-active) #enter-cockpit { display:block; color:var(--accent); }

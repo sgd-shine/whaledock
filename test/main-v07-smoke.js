@@ -104,6 +104,7 @@ async function run() {
     assert.doesNotMatch(html, /clamp\(340px,31vw,420px\)/);
     assert.match(html, /#cockpit-route[\s\S]*?height:136px/);
     assert.match(html, /#cockpit-scene[\s\S]*?top:136px/);
+    assert.match(html, /body\.cockpit-active\.chat-open #toast[\s\S]*?top:98px; bottom:auto; height:30px/);
     assert.match(html, /connect-src 'none'/);
     assert.equal(/innerHTML|insertAdjacentHTML|outerHTML/.test(renderer), false);
     assert.match(renderer, /event\.key\.toLowerCase\(\) === 'k'/);
