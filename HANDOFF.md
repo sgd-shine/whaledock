@@ -14,6 +14,16 @@
 - `package-lock.json`、`compliance/`、`vendor/`、`licenses/`、`THIRD_PARTY_NOTICES.md` 相对 v0.6.0 零变化；root dependencies=0，dsh 仍锁定 `0.1.0-rc.6`，无 S1。Windows 未签名/未真机，Intel 未真机，边界不变。
 - `v0.7.0` tag 已落地，dsh 跟版升级线与远程批次 2 的开工条件已满足；后续状态由各自线程维护，本发版线不代报进度。
 
+## dsh 跟版升级｜批次 0–1 交接（未合并）
+
+- 路径/分支：`/Users/shine/AI工作台/02_AI项目/02_产品实验室/30_桌面App/harness-desktop-v08-dsh-upgrade`，`codex/v08-dsh-upgrade`，基线 `main@29070d5`。
+- 批次 0 把升级对象刷新为 npm `latest=0.1.1-rc.2`；tarball 33,675 B，registry SHA-1 为 `1a5112369f1c46b13a6e6f21de8af5e6afd45074`，SHA-1/SHA-512 与临时下载一致。内部六门与实施卡在 `docs/验收记录-dsh跟版升级-批次0-2026-08-22.md`（已 exclude）。
+- 批次 1 只改 `lib/backend.js` 与纯 Node 测试：能力阈值固定在 rc.8；npx 由精确版本或显式 `latest` 判断，bundled 由已校验 manifest 判断，system 只有界读官方 npm shim/symlink 布局与 `package.json`，不起版本子进程；未知时沿用旧参数。该版本只控制 `--no-open`，不会进入 `packageVersionProof`。
+- rc.6 的 system/npx/bundled 完整命令 fixture 未变化。`0.1.1-rc.2` 的 system/npx 可生成只在 web argv 末尾多 `--no-open` 的计划；bundled 在批次 5 切生产锁前仍明确拒绝 rc.2，本批只验证同样的纯 argv planner。Windows `.cmd/.bat` 启动仍经引号、`shell:true`、`windowsHide:true`；版本识别不运行 shim；custom 分支在 PATH/版本探针之前返回。
+- 本地 `npm run smoke` 为 **458 PASS / ALL PASS**；语法与 diff check 通过。尚无本批远端 CI、包、真机 UI 或 Release 证据，不能外推为三平台闭环。
+- `lib/config.js`/生产默认、`scripts/bundle-dsh.js`、root/audited lock、vendor/compliance/许可证均未切换；批次 2–4 只能生成显式候选证据，批次 5 获门禁许可后才允许原子替换生产集合。
+- 批次 2 开始前再次回读 npm latest；若不再是 rc.2，停止并对新版本重做批次 0。所有实验只用 `/tmp` 隔离根，绝不读写真实 `~/.dsh`，也不停止用户已有服务。
+
 ## v0.6.0 已发布基线
 
 v0.6.0 工作台包、内置短视频创作台、托盘五态与叫醒阶梯已完成实现和发布。在 v0.6.0 发布时，它是公开稳定版；macOS arm64/x64 已正式签名并通过 Apple 公证。

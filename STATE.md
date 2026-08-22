@@ -16,6 +16,15 @@
 - `package-lock.json`、`compliance/`、`vendor/`、`licenses/` 与 `THIRD_PARTY_NOTICES.md` 相对 v0.6.0 零变化；root runtime dependencies=0，dsh 仍锁定 `0.1.0-rc.6`，无 S1。
 - `v0.7.0` tag 已落地，dsh 跟版升级线与远程批次 2 的开工条件已满足；两线的后续状态与证据由各自线程维护，不由本发版结论代替。
 
+## dsh 跟版升级｜批次 0–1（独立分支进行中）
+
+- 本线在独立 worktree `harness-desktop-v08-dsh-upgrade`、分支 `codex/v08-dsh-upgrade` 上从最新 `main@29070d5` 开工；没有改动并行飞书线的独占文件。
+- 2026-08-22T12:28Z 实时回读 npm `latest=next=0.1.1-rc.2`，发布时间 `2026-08-21T12:42:19.422Z`，tarball SHA-1 `1a5112369f1c46b13a6e6f21de8af5e6afd45074`；后续探针与候选材料只认该精确版本，若发布前 latest 再漂移则全套重跑。
+- 批次 1 已让 system dsh 与 npx 生产计划按已知版本决定 `--no-open`；bundled 仍被生产锁限制为 rc.6，本批只对 rc.2 验证纯 argv planner，不能启动 rc.2 bundled。rc.8 及以后追加旗标，rc.6 的完整命令对象保持原样。PATH 中 system dsh 不起版本子进程，只有界读取官方 npm shim/symlink 布局与 `package.json`；未知即沿用旧参数，结果不作为事件/prompt 根包证明；custom 命令零探测、零改写。
+- 本地统一 `npm run smoke` 实跑 **458 PASS / ALL PASS**，`node --check`、`git diff --check` 通过。这是本地纯 Node 证据；尚未推送、未跑本批三平台 CI、未打包、未安装或发布。
+- `lib/config.js`、`scripts/bundle-dsh.js`、`package-lock.json` 与 audited lock 的 SHA-256 均和 `HEAD` 一致，生产 dsh 仍锁定 `0.1.0-rc.6`；vendor/compliance/许可材料零变化，无 S1 结论变化。
+- 下一步是批次 2：在独立 DSH_HOME/XDG/npm cache/workspace/高位端口下对 `0.1.1-rc.2` 重跑 host.describe、list/history、WebSocket、prompt queue、cwd proof、dump-config 与退出清理；现有 3080/50213 服务不操作。
+
 **v0.6.0 历史发布基线：工作台包通过三平台 CI，macOS arm64/x64 成品使用 Developer ID Application 正式签名、开启 Hardened Runtime 并获 Apple 公证。**
 
 - 在 v0.6.0 发布时：[`v0.6.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.6.0) 为非 draft、非 prerelease 的最新稳定版，正式 tag 指向 `7ae619d8b7cbad81412e098706737d7e1490b9e8`。

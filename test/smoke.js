@@ -464,6 +464,7 @@ async function main() {
     env: windowsEnv,
     pathValue: windowsPath,
     findCommand: (name) => name === 'dsh' ? 'C:\\Program Files\\nodejs\\dsh.cmd' : null,
+    probeDshVersion: () => '0.1.0-rc.6',
     spawn: (file, args, options) => {
       windowsSpawnCall = { file, args, options };
       return fakeWindowsChild;
@@ -475,6 +476,38 @@ async function main() {
       && windowsSpawnCall.options.detached === false
       && windowsSpawnCall.options.windowsHide === true);
   fakeWindowsChild.emit('exit', 0, null);
+
+  const targetSystemChild = new EventEmitter();
+  targetSystemChild.pid = 6790;
+  targetSystemChild.stdout = new EventEmitter();
+  targetSystemChild.stderr = new EventEmitter();
+  targetSystemChild.kill = () => true;
+  let targetVersionProbe = null;
+  let targetSystemSpawn = null;
+  backend.start({ workdir: '/test/work' }, {}, {
+    platform: 'darwin',
+    env: { PATH: '/test/bin' },
+    homeDir: '/test/home',
+    pathValue: '/test/bin',
+    findCommand: (name) => name === 'dsh' ? '/test/bin/dsh' : null,
+    probeDshVersion: (file) => {
+      targetVersionProbe = file;
+      return '0.1.1-rc.2';
+    },
+    spawn: (file, args, options) => {
+      targetSystemSpawn = { file, args, options };
+      return targetSystemChild;
+    }
+  });
+  check('backend: start 先证明 system 版本再生成支持版启动参数',
+    targetVersionProbe === '/test/bin/dsh'
+      && targetSystemSpawn.file === '/test/bin/dsh'
+      && JSON.stringify(targetSystemSpawn.args) === JSON.stringify([
+        'web', '--port', '3080', '--no-open'
+      ])
+      && targetSystemSpawn.options.shell === false
+      && targetSystemSpawn.options.detached === true);
+  targetSystemChild.emit('exit', 0, null);
 
   const bundledResources = path.join(tmp, 'packaged-resources');
   const bundledRoot = path.join(bundledResources, 'dsh-runtime');
@@ -514,6 +547,18 @@ async function main() {
   });
   check('backend: 内置引擎第四级探测与 preferBundled 次序',
     bundledFallback
+      && JSON.stringify(bundledFallback) === JSON.stringify({
+        file: fakeRuntimeInfo.execPath,
+        args: [
+          '--expose-internals', path.join(bundledPackage, 'lib', 'bin.js'),
+          'web', '--port', '3080'
+        ],
+        shell: false,
+        env: { ELECTRON_RUN_AS_NODE: '1' },
+        bundled: true,
+        label: '内置 dsh@0.1.0-rc.6 web --port 3080',
+        version: '0.1.0-rc.6'
+      })
       && bundledFallback.bundled === true
       && bundledFallback.env.ELECTRON_RUN_AS_NODE === '1'
       && bundledFallback.args[0] === '--expose-internals'
@@ -522,6 +567,39 @@ async function main() {
       && pathFirst.file === '/test/bin/dsh'
       && missingBundled === null,
     bundledFallback ? bundledFallback.label : 'null');
+
+  const bundledCandidateBlocked = backend.resolveCommand({ dshVersion: '0.1.1-rc.2' }, {
+    findCommand: () => null,
+    runtimeInfo: fakeRuntimeInfo
+  });
+  const bundledCandidatePlan = backend.buildBundledCommandPlan(
+    fakeRuntimeInfo.execPath,
+    path.join(bundledPackage, 'lib', 'bin.js'),
+    '0.1.1-rc.2',
+    '3080'
+  );
+  check('backend: bundled 纯 planner 覆盖 rc.6/rc.2 完整对象且不绕过生产锁',
+    bundledCandidateBlocked === null
+      && JSON.stringify(bundledFallback) === JSON.stringify(
+        backend.buildBundledCommandPlan(
+          fakeRuntimeInfo.execPath,
+          path.join(bundledPackage, 'lib', 'bin.js'),
+          '0.1.0-rc.6',
+          '3080'
+        )
+      )
+      && JSON.stringify(bundledCandidatePlan) === JSON.stringify({
+        file: fakeRuntimeInfo.execPath,
+        args: [
+          '--expose-internals', path.join(bundledPackage, 'lib', 'bin.js'),
+          'web', '--port', '3080', '--no-open'
+        ],
+        shell: false,
+        env: { ELECTRON_RUN_AS_NODE: '1' },
+        bundled: true,
+        label: '内置 dsh@0.1.1-rc.2 web --port 3080 --no-open',
+        version: '0.1.1-rc.2'
+      }));
 
   // 端口应当未开
   check('backend: 端口初始未开', !(await backend.isPortOpen(PORT)));
@@ -558,9 +636,17 @@ async function main() {
   const onlyNpx = (name) => name === 'npx' ? '/test/bin/npx' : null;
   const pinned = backend.resolveCommand({ dshVersion: '0.1.0-rc.6' }, onlyNpx);
   const latest = backend.resolveCommand({ dshVersion: 'latest' }, onlyNpx);
+  const target = backend.resolveCommand({ dshVersion: '0.1.1-rc.2' }, onlyNpx);
   const empty = backend.resolveCommand({ dshVersion: '  ' }, onlyNpx);
   check('backend: npx 回退命令带版本锁',
-    pinned.file === '/test/bin/npx'
+    JSON.stringify(pinned) === JSON.stringify({
+      file: '/test/bin/npx',
+      args: ['-y', '@deepseek-ai/dsh@0.1.0-rc.6', 'web', '--port', '3080'],
+      shell: false,
+      label: 'npx -y @deepseek-ai/dsh@0.1.0-rc.6 web --port 3080',
+      version: '0.1.0-rc.6'
+    })
+      && pinned.file === '/test/bin/npx'
       && pinned.shell === false
       && pinned.version === '0.1.0-rc.6'
       && JSON.stringify(pinned.args) === JSON.stringify([
@@ -569,8 +655,216 @@ async function main() {
       && pinned.label === 'npx -y @deepseek-ai/dsh@0.1.0-rc.6 web --port 3080'
       && latest.args[1] === '@deepseek-ai/dsh@latest'
       && latest.version === 'latest'
+      && JSON.stringify(latest.args) === JSON.stringify([
+        '-y', '@deepseek-ai/dsh@latest', 'web', '--port', '3080', '--no-open'
+      ])
+      && JSON.stringify(target.args) === JSON.stringify([
+        '-y', '@deepseek-ai/dsh@0.1.1-rc.2', 'web', '--port', '3080', '--no-open'
+      ])
       && empty.args[1] === '@deepseek-ai/dsh@0.1.0-rc.6',
     pinned.label);
+
+  const systemRc6 = backend.resolveCommand({ dshVersion: '0.1.1-rc.2' }, {
+    findCommand: (name) => name === 'dsh' ? '/test/bin/dsh' : null,
+    probeDshVersion: () => '0.1.0-rc.6'
+  });
+  const systemTarget = backend.resolveCommand({ dshVersion: '0.1.0-rc.6' }, {
+    findCommand: (name) => name === 'dsh' ? '/test/bin/dsh' : null,
+    probeDshVersion: () => '0.1.1-rc.2'
+  });
+  const systemUnknown = backend.resolveCommand({}, {
+    findCommand: (name) => name === 'dsh' ? '/test/bin/dsh' : null,
+    probeDshVersion: () => null
+  });
+  let customVersionProbes = 0;
+  const customUntouched = backend.resolveCommand({ command: 'my-dsh-wrapper --safe' }, {
+    findCommand: () => { throw new Error('custom 不得探测 PATH'); },
+    probeDshVersion: () => { customVersionProbes += 1; return '0.1.1-rc.2'; }
+  });
+  check('backend: system dsh 版本感知且 custom 命令零改写零探测',
+    JSON.stringify(systemRc6) === JSON.stringify({
+      file: '/test/bin/dsh',
+      args: ['web', '--port', '3080'],
+      shell: false,
+      label: 'dsh web --port 3080',
+      version: 'PATH 中的已安装版本'
+    })
+      && JSON.stringify(systemTarget.args) === JSON.stringify([
+        'web', '--port', '3080', '--no-open'
+      ])
+      && systemTarget.label === 'dsh web --port 3080 --no-open'
+      && JSON.stringify(systemUnknown.args) === JSON.stringify([
+        'web', '--port', '3080'
+      ])
+      && customVersionProbes === 0
+      && JSON.stringify(customUntouched) === JSON.stringify({
+        file: 'my-dsh-wrapper --safe',
+        args: [],
+        shell: true,
+        label: 'my-dsh-wrapper --safe',
+        version: '由自定义命令决定'
+      }));
+
+  const windowsNpmRoot = path.join(tmp, 'system-windows');
+  const windowsPackageRoot = path.join(
+    windowsNpmRoot, 'node_modules', '@deepseek-ai', 'dsh'
+  );
+  fs.mkdirSync(path.join(windowsPackageRoot, 'lib'), { recursive: true });
+  const windowsShim = path.join(windowsNpmRoot, 'dsh.cmd');
+  const modernV9Shim = [
+    '@ECHO off',
+    'GOTO start',
+    ':find_dp0',
+    'SET dp0=%~dp0',
+    'EXIT /b',
+    ':start',
+    'SETLOCAL',
+    'CALL :find_dp0',
+    'IF EXIST "%dp0%\\node.exe" (',
+    '  SET "_prog=%dp0%\\node.exe"',
+    ') ELSE (',
+    '  SET "_prog=node"',
+    ')',
+    '',
+    'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & '
+      + 'set PATHEXT=%PATHEXT:;.JS;=;% & "%_prog%"  '
+      + '"%dp0%\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js" %*',
+    ''
+  ].join('\r\n');
+  fs.writeFileSync(windowsShim, modernV9Shim);
+  const windowsManifest = JSON.stringify({
+    name: '@deepseek-ai/dsh', version: '0.1.1-rc.2', bin: { dsh: 'lib/bin.js' }
+  });
+  fs.writeFileSync(path.join(windowsPackageRoot, 'package.json'), windowsManifest);
+  const probedTarget = backend.probeSystemDshVersion(windowsShim, {
+    platform: 'win32',
+    pathImpl: path
+  });
+
+  // 真实临时文件始终走 runner 当前 OS 的 path；另用纯内存 C:\ 布局
+  // 显式证明生产 Windows path.win32 join，避免 mac 上模拟通过、Windows CI 却假红。
+  const virtualWindowsShim = 'C:\\Tools\\dsh.cmd';
+  const virtualWindowsPackage = path.win32.join(
+    path.win32.dirname(virtualWindowsShim),
+    'node_modules', '@deepseek-ai', 'dsh', 'package.json'
+  );
+  const virtualFiles = new Map([
+    [virtualWindowsShim, Buffer.from(modernV9Shim)],
+    [virtualWindowsPackage, Buffer.from(windowsManifest)]
+  ]);
+  const virtualPositions = new Map();
+  const virtualWindowsFs = {
+    constants: fs.constants,
+    openSync(file) {
+      if (!virtualFiles.has(file)) throw Object.assign(new Error('missing fixture'), { code: 'ENOENT' });
+      virtualPositions.set(file, 0);
+      return file;
+    },
+    fstatSync(fd) {
+      const value = virtualFiles.get(fd);
+      return { isFile: () => true, size: value.length };
+    },
+    readSync(fd, destination, offset, length) {
+      const value = virtualFiles.get(fd);
+      const sourceOffset = virtualPositions.get(fd) || 0;
+      const count = Math.min(length, value.length - sourceOffset);
+      if (count > 0) value.copy(destination, offset, sourceOffset, sourceOffset + count);
+      virtualPositions.set(fd, sourceOffset + count);
+      return count;
+    },
+    closeSync(fd) { virtualPositions.delete(fd); }
+  };
+  const probedWin32Join = backend.probeSystemDshVersion(virtualWindowsShim, {
+    platform: 'win32', fsImpl: virtualWindowsFs, pathImpl: path.win32
+  });
+  fs.writeFileSync(windowsShim, [
+    '@ECHO off',
+    'GOTO start',
+    ':find_dp0',
+    'SET dp0=%~dp0',
+    'EXIT /b',
+    ':start',
+    'SETLOCAL',
+    'CALL :find_dp0',
+    'IF EXIST "%dp0%\\node.exe" (',
+    '  SET "_prog=%dp0%\\node.exe"',
+    ') ELSE (',
+    '  SET "_prog=node"',
+    '  SET PATHEXT=%PATHEXT:;.JS;=;%',
+    ')',
+    '',
+    'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & '
+      + '"%_prog%"  "%dp0%\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js" %*',
+    ''
+  ].join('\r\n'));
+  const probedV7Target = backend.probeSystemDshVersion(windowsShim, {
+    platform: 'win32', pathImpl: path
+  });
+  fs.writeFileSync(windowsShim, [
+    '@IF EXIST "%~dp0\\node.exe" (',
+    '  "%~dp0\\node.exe" "%~dp0\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js" %*',
+    ') ELSE (',
+    '  @SETLOCAL',
+    '  @SET PATHEXT=%PATHEXT:;.JS;=;%',
+    '  node  "%~dp0\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js" %*',
+    ')',
+    ''
+  ].join('\r\n'));
+  const probedLegacyTarget = backend.probeSystemDshVersion(windowsShim, {
+    platform: 'win32', pathImpl: path
+  });
+
+  const posixPackageRoot = path.join(
+    tmp, 'system-posix', 'node_modules', '@deepseek-ai', 'dsh'
+  );
+  const posixBin = path.join(posixPackageRoot, 'lib', 'bin.js');
+  fs.mkdirSync(path.dirname(posixBin), { recursive: true });
+  fs.writeFileSync(posixBin, '// official npm bin fixture\n');
+  fs.writeFileSync(path.join(posixPackageRoot, 'package.json'), JSON.stringify({
+    name: '@deepseek-ai/dsh', version: '0.1.0-rc.6', bin: { dsh: 'lib/bin.js' }
+  }));
+  const probedRc6 = backend.probeSystemDshVersion(posixBin, {
+    platform: 'darwin', pathImpl: path
+  });
+  fs.writeFileSync(path.join(posixPackageRoot, 'package.json'), JSON.stringify({
+    name: '@deepseek-ai/not-dsh', version: '0.1.1-rc.2', bin: { dsh: 'lib/bin.js' }
+  }));
+  const rejectedWrongPackage = backend.probeSystemDshVersion(posixBin, {
+    platform: 'darwin', pathImpl: path
+  });
+  fs.writeFileSync(path.join(posixPackageRoot, 'package.json'), ' '.repeat(64 * 1024 + 1));
+  const rejectedLargeManifest = backend.probeSystemDshVersion(posixBin, {
+    platform: 'darwin', pathImpl: path
+  });
+  fs.writeFileSync(windowsShim,
+    '@rem node_modules\\@deepseek-ai\\dsh\\lib\\bin.js\r\n@echo this-is-not-dsh\r\n');
+  const rejectedCommentShim = backend.probeSystemDshVersion(windowsShim, {
+    platform: 'win32', pathImpl: path
+  });
+  fs.writeFileSync(windowsShim,
+    `@rem ${'x'.repeat(16 * 1024)} node_modules\\@deepseek-ai\\dsh\\lib\\bin.js\r\n`);
+  const rejectedLargeShim = backend.probeSystemDshVersion(windowsShim, {
+    platform: 'win32', pathImpl: path
+  });
+  check('backend: system 版本只读官方 npm 布局且有界 fail-closed',
+    probedTarget === '0.1.1-rc.2'
+      && probedWin32Join === '0.1.1-rc.2'
+      && probedV7Target === '0.1.1-rc.2'
+      && probedLegacyTarget === '0.1.1-rc.2'
+      && probedRc6 === '0.1.0-rc.6'
+      && rejectedWrongPackage === null
+      && rejectedLargeManifest === null
+      && rejectedCommentShim === null
+      && rejectedLargeShim === null
+      && backend.probeSystemDshVersion(path.join(windowsNpmRoot, 'dsh.exe'), {
+        platform: 'win32', pathImpl: path
+      }) === null
+      && backend.dshSupportsNoOpen('0.1.0-rc.6') === false
+      && backend.dshSupportsNoOpen('0.1.0-rc.7') === false
+      && backend.dshSupportsNoOpen('0.1.0-rc.8') === true
+      && backend.dshSupportsNoOpen('0.1.1-rc.2') === true
+      && backend.dshSupportsNoOpen('latest') === true
+      && backend.dshSupportsNoOpen('not-a-version') === false);
 
   // v0.3 分层直测必须由统一 smoke 真实执行，避免 CI 只跑旧用例而假绿。
   for (const [file, label] of [
