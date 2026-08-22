@@ -22,5 +22,14 @@ contextBridge.exposeInMainWorld('whaleSettings', Object.freeze({
   listWorkbenches: () => ipcRenderer.invoke('settings:list-workbenches'),
   switchWorkbench: (workbenchId) => ipcRenderer.invoke('settings:switch-workbench', workbenchId),
   removeWorkbench: (workbenchId) => ipcRenderer.invoke('settings:remove-workbench', workbenchId),
-  rescanWorkbenches: () => ipcRenderer.invoke('settings:rescan-workbenches')
+  rescanWorkbenches: () => ipcRenderer.invoke('settings:rescan-workbenches'),
+  // v0.7 远程板块：一键断开是独立的受控动作，不接受通道名或任意命令。
+  disconnectRemote: () => ipcRenderer.invoke('settings:remote-disconnect-all'),
+  // 状态变化只订阅主进程固定的脱敏 runtime 快照；返回清理函数，窗口卸载即去重解绑。
+  onRuntime: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('settings:runtime', listener);
+    return () => ipcRenderer.removeListener('settings:runtime', listener);
+  }
 }));

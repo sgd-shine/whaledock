@@ -650,6 +650,22 @@ async function main() {
       result.status === 0 ? file : `${file} exit=${result.status}`);
   }
 
+  // v0.7 远程板块：纯 Node 通道核心与 Electron 薄层必须一起拿到证据。
+  for (const [file, label] of [
+    ['remote-smoke.js', '远程收推批、绑定与生命周期'],
+    ['main-remote-smoke.js', '远程设置与 Electron 薄层']
+  ]) {
+    const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
+      cwd: path.join(__dirname, '..'),
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024
+    });
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    check(`v0.7: ${label}直测纳入统一 smoke`, result.status === 0,
+      result.status === 0 ? file : `${file} exit=${result.status}`);
+  }
+
   // v0.5 宠物包与主题包解析同样必须由统一 smoke 真实执行。
   for (const [file, label] of [
     ['pets-themes-smoke.js', '宠物包与主题包解析'],
