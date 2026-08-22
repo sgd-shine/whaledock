@@ -24,27 +24,36 @@ async function test(name, fn) {
 }
 
 async function run() {
-  await test('经典、驾驶舱、原生逃生门与折叠对话四种布局有明确边界', async () => {
+  await test('经典、创作现场、全宽对话现场与原生逃生门有明确边界', async () => {
     assert.deepEqual(main.mainViewLayout({ width: 1280, height: 820 }), {
       mode: 'classic', visible: true, bounds: { x: 132, y: 0, width: 1148, height: 820 }
     });
-    const cockpit = main.mainViewLayout({
+    assert.deepEqual(main.mainViewLayout({
       width: 1280, height: 820, cockpit: 'video', cockpitMode: 'cockpit'
+    }), {
+      mode: 'cockpit', visible: false,
+      bounds: { x: 0, y: 136, width: 1280, height: 684 }
     });
-    assert.equal(cockpit.mode, 'cockpit');
-    assert.equal(cockpit.visible, true);
-    assert.ok(cockpit.bounds.x >= 860 && cockpit.bounds.x <= 940);
-    assert.ok(cockpit.bounds.y >= 200, '任务条与对话标题必须留在 dsh 上方');
-    assert.equal(cockpit.bounds.x + cockpit.bounds.width, 1280);
-    assert.equal(cockpit.bounds.y + cockpit.bounds.height, 820);
+    assert.deepEqual(main.mainViewLayout({
+      width: 1280, height: 820, cockpit: 'video', cockpitMode: 'cockpit', chatOpen: true
+    }), {
+      mode: 'cockpit-chat', visible: true,
+      bounds: { x: 0, y: 136, width: 1280, height: 684 }
+    });
+    assert.deepEqual(main.mainViewLayout({
+      width: 960, height: 620, cockpit: 'video', cockpitMode: 'cockpit', chatOpen: true
+    }), {
+      mode: 'cockpit-chat', visible: true,
+      bounds: { x: 0, y: 136, width: 960, height: 484 }
+    });
     assert.deepEqual(main.mainViewLayout({
       width: 1280, height: 820, cockpit: 'video', cockpitMode: 'native'
     }), {
       mode: 'classic', visible: true, bounds: { x: 132, y: 0, width: 1148, height: 820 }
     });
     assert.equal(main.mainViewLayout({
-      width: 1280, height: 820, cockpit: 'video', cockpitMode: 'cockpit', chatCollapsed: true
-    }).visible, false);
+      width: 960, height: 120, cockpit: 'video', cockpitMode: 'cockpit', chatOpen: true
+    }).visible, false, '顶部控件区不能被 child view 覆盖');
   });
 
   await test('任务条只接收匿名五态、计数与最近结果', async () => {
@@ -68,16 +77,17 @@ async function run() {
 
   await test('驾驶舱视图请求严格白名单且不接受任意命令', async () => {
     assert.deepEqual(main.cockpitViewRequest({ mode: 'native' }), {
-      mode: 'native', chatCollapsed: null, focusChat: false
+      mode: 'native', chatOpen: null, focusChat: false
     });
-    assert.deepEqual(main.cockpitViewRequest({ chatCollapsed: true }), {
-      mode: null, chatCollapsed: true, focusChat: false
+    assert.deepEqual(main.cockpitViewRequest({ chatOpen: true }), {
+      mode: null, chatOpen: true, focusChat: false
     });
     assert.deepEqual(main.cockpitViewRequest({ focusChat: true }), {
-      mode: null, chatCollapsed: null, focusChat: true
+      mode: null, chatOpen: null, focusChat: true
     });
     assert.throws(() => main.cockpitViewRequest({ mode: 'evil' }));
     assert.throws(() => main.cockpitViewRequest({ focusChat: false }));
+    assert.throws(() => main.cockpitViewRequest({ mode: 'cockpit', chatOpen: true }));
     assert.throws(() => main.cockpitViewRequest({ mode: 'cockpit', command: 'executeJavaScript' }));
   });
 
@@ -89,11 +99,19 @@ async function run() {
     assert.match(html, /id="video-cockpit"/);
     assert.match(html, /id="cockpit-route"/);
     assert.match(html, /id="cockpit-task-flow"/);
-    assert.match(html, /id="cockpit-chat-placeholder"/);
+    assert.match(html, /id="toggle-chat"/);
+    assert.doesNotMatch(html, /id="cockpit-panel"|id="cockpit-chat-placeholder"/);
+    assert.doesNotMatch(html, /clamp\(340px,31vw,420px\)/);
+    assert.match(html, /#cockpit-route[\s\S]*?height:136px/);
+    assert.match(html, /#cockpit-scene[\s\S]*?top:136px/);
+    assert.match(html, /body\.cockpit-active\.chat-open #toast[\s\S]*?top:98px; bottom:auto; height:30px/);
     assert.match(html, /connect-src 'none'/);
     assert.equal(/innerHTML|insertAdjacentHTML|outerHTML/.test(renderer), false);
     assert.match(renderer, /event\.key\.toLowerCase\(\) === 'k'/);
+    assert.match(renderer, /chatOpen/);
     assert.match(preload, /shell:cockpit-view/);
+    assert.match(mainSource, /const COCKPIT_HEADER_HEIGHT = 136/);
+    assert.doesNotMatch(mainSource, /COCKPIT_PANEL_|COCKPIT_DSH_TOP|cockpitChatCollapsed/);
     const viewBlock = mainSource.slice(
       mainSource.indexOf('const view = new WebContentsView'),
       mainSource.indexOf('win.contentView.addChildView(view)')
@@ -102,15 +120,21 @@ async function run() {
     assert.equal(/executeJavaScript/.test(mainSource), false);
   });
 
-  await test('Cmd/Ctrl+K 只聚焦 dsh 视图，未伪称定位远程输入框', async () => {
+  await test('Cmd/Ctrl+K 先打开全宽对话再聚焦 dsh，未伪称定位远程输入框', async () => {
     const value = source('main.js');
     const block = value.slice(
       value.indexOf('function focusCockpitChat('),
       value.indexOf('function cockpitViewRequest(')
     );
-    assert.match(block, /dshView\.webContents\.focus\(\)/);
+    assert.match(block, /cockpitChatOpen = true[\s\S]*layoutMainWindow\(\)[\s\S]*dshView\.webContents\.focus\(\)/);
     assert.equal(/executeJavaScript|sendInputEvent|click\(/.test(block), false);
     assert.match(value, /accelerator: 'CommandOrControl\+K'/);
+    const nativeToggle = value.slice(
+      value.indexOf("label: cockpitNativeMode ? '返回视频驾驶舱'"),
+      value.indexOf("{ type: 'separator' },", value.indexOf("label: cockpitNativeMode ? '返回视频驾驶舱'"))
+    );
+    assert.match(nativeToggle, /dshView\.webContents\.focus\(\)/);
+    assert.match(nativeToggle, /mainWindow\.webContents\.focus\(\)/);
   });
 
   console.log(`\nMAIN V07 ALL PASS (${passed})`);

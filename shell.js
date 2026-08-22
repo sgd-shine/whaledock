@@ -173,6 +173,9 @@ function renderRoute() {
     button.title = stage.unavailable ? '侦察中，未接通'
       : (stage.deferred ? '后续批次接通' : `进入${stage.label}现场`);
     button.addEventListener('click', () => {
+      if (state.cockpit && state.cockpit.chatOpen === true) {
+        void api.setCockpitView({ chatOpen: false });
+      }
       activeScene = stage.id;
       currentDocument = null;
       selectedBlockToken = null;
@@ -836,9 +839,12 @@ function renderCockpit() {
   const active = Boolean(available && cockpit.mode === 'cockpit');
   document.body.classList.toggle('cockpit-available', available);
   document.body.classList.toggle('cockpit-active', active);
-  document.body.classList.toggle('chat-collapsed', active && cockpit.chatCollapsed === true);
+  document.body.classList.toggle('chat-open', active && cockpit.chatOpen === true);
   cockpitName.textContent = state.current ? state.current.name : '短视频创作台';
-  toggleChat.textContent = cockpit && cockpit.chatCollapsed ? '展开' : '折叠';
+  const chatOpen = Boolean(active && cockpit.chatOpen === true);
+  toggleChat.textContent = chatOpen ? '返回现场' : '对话 ⌘K';
+  toggleChat.setAttribute('aria-pressed', chatOpen ? 'true' : 'false');
+  toggleChat.title = chatOpen ? '返回视频创作现场' : '打开完整 dsh 对话现场';
   renderTaskFlow(cockpit && cockpit.taskFlow);
   renderRoute();
   renderScene();
@@ -989,8 +995,8 @@ el('enter-cockpit').addEventListener('click', () => {
   void api.setCockpitView({ mode: 'cockpit' });
 });
 toggleChat.addEventListener('click', () => {
-  const collapsed = Boolean(state.cockpit && state.cockpit.chatCollapsed);
-  void api.setCockpitView({ chatCollapsed: !collapsed });
+  const chatOpen = Boolean(state.cockpit && state.cockpit.chatOpen);
+  void api.setCockpitView(chatOpen ? { chatOpen: false } : { focusChat: true });
 });
 
 confirmOk.addEventListener('click', () => {
@@ -1017,6 +1023,11 @@ document.addEventListener('keydown', (event) => {
       && event.key.toLowerCase() === 'k' && state.cockpit) {
     event.preventDefault();
     void api.setCockpitView({ focusChat: true });
+    return;
+  }
+  if (event.key === 'Escape' && state.cockpit && state.cockpit.chatOpen === true) {
+    event.preventDefault();
+    void api.setCockpitView({ chatOpen: false });
     return;
   }
   if (event.key !== 'Escape') return;

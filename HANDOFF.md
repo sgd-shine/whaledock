@@ -1,6 +1,6 @@
 # HANDOFF.md — WhaleDock v0.6.0 正式签名、公证与发布交接
 
-更新：2026-08-22 · v0.7 远程板块批次 1 已在独立分支完成；公开稳定版仍为 v0.6.0
+更新：2026-08-22 · v0.7 远程批次 1 已整合，视频驾驶舱已改为全宽对话现场；公开稳定版仍为 v0.6.0
 
 ## 当前结论
 
@@ -19,11 +19,11 @@ v0.6.0 工作台包、内置短视频创作台、托盘五态与叫醒阶梯已�
 
 2026-08-15 SGD 的发布决定已覆盖旧的 beta-first 流程：不发 beta；Windows 真机验收不再阻断发布，改为“实验性支持（未真机验证）”；Intel 只保留 Rosetta 抽查边界；在没有 S1 冲突且 G1/成品材料闭环时，Codex 获预授权临时设置精确审批值、发布并立即删除变量。
 
-## v0.7 远程板块｜批次 1 交接（独立远程线）
+## v0.7 远程板块｜批次 1 交接（已整合 main）
 
 ### 分支与改动
 
-- 独立 worktree `/Users/shine/AI工作台/02_AI项目/02_产品实验室/30_桌面App/harness-desktop-v07-remote`，分支 `codex/v07-remote`；已等 PR #2 合并，随后变基到含驾驶舱 PR #3–#5 与验收文档的 `origin/main@145ac1c`。本线没有操作 PR #2。
+- 独立 worktree `/Users/shine/AI工作台/02_AI项目/02_产品实验室/30_桌面App/harness-desktop-v07-remote` 的 `codex/v07-remote` 已经 PR [#6](https://github.com/sgd-shine/whaledock/pull/6) 合入 `main`，merge 为 `73bb4ce`。本线从含驾驶舱 PR #3–#5 的 `main@145ac1c` 起步，没有操作 PR #2。
 - 代码面：`lib/remote.js`、`lib/config.js`、`main.js`、`preload-settings.js`、`settings.html`；回归面：`test/remote-smoke.js`、`test/main-remote-smoke.js`、`test/smoke.js`。工作台包 manifest 未加远程字段，远程仍是鲸坞本体底座。
 - 核心是纯 Node/零新运行时依赖，只暴露受控收/推/批与生命周期，无通用命令入口。三通道默认全关；本批不注册真实 adapter，因此零平台网络、零凭据读写。
 - 设置「远程」页已有三通道开关/状态/绑定、三类 IM 内容开关和全部断开；已放入面向所有用户的图文三步自助向导框架。随身网页以同一 Wi-Fi 为默认，Tailscale 仅作可选向导，账号注册/登录/授权留给用户本人。
@@ -37,10 +37,16 @@ v0.6.0 工作台包、内置短视频创作台、托盘五态与叫醒阶梯已�
 
 ### 证据与待做
 
-- focused 实测：`REMOTE ALL PASS (42)`、`MAIN REMOTE ALL PASS (10)`；统一 `npm run smoke` 为 **450 PASS / ALL PASS**，同时执行驾驶舱五个套件与远程两个套件。Electron 43.4.0 已在隔离 userData 的 macOS 源码态回读 `SMOKE_OK`。
+- focused 实测：`REMOTE ALL PASS (42)`、`MAIN REMOTE ALL PASS (10)`；统一 `npm run smoke` 为 **450 PASS / ALL PASS**，同时执行驾驶舱五个套件与远程两个套件。Electron 43.4.0 已在隔离 userData 的 macOS 源码态回读 `SMOKE_OK`；PR #6 的 [CI run 32561913602](https://github.com/sgd-shine/whaledock/actions/runs/32561913602) 三平台全绿。
 - 内部验收记录：`docs/验收记录-远程板块-批次1-2026-08-21.md`（`.git/info/exclude`）；SGD 人工卡待做，预计 3–5 分钟。
-- 本批没有平台凭据框、真实飞书/钉钉连接、真手机收发、HTTP 随身页、二维码、Tailscale 安装、打包或 Release；PR CI 需以 GitHub 回读为准。Windows、Intel Mac、签名与公证都是 `N/A`；没有新包与 runtime 体积可报。
-- 批次 2 开始前先将本批整合 main 并再拉最新 main。飞书若需官方 Node SDK，先按 S1 上报许可证、压缩/安装体积与依赖闭包，等 SGD 批准。真实事项上线前还要补权威来源 ID、持久 `dedupeKey`、真实 binding 恢复路径，并确保 adapter 尊重 `AbortSignal`、disconnect 幂等有界。
+- 本批没有平台凭据框、真实飞书/钉钉连接、真手机收发、HTTP 随身页、二维码、Tailscale 安装、打包或 Release。Windows、Intel Mac、签名与公证都是 `N/A`；没有新包与 runtime 体积可报。
+- 批次 2 必须从最新 `main` 新开分支。飞书若需官方 Node SDK，先按 S1 上报许可证、压缩/安装体积与依赖闭包，等 SGD 批准。真实事项上线前还要补权威来源 ID、持久 `dedupeKey`、真实 binding 恢复路径，并确保 adapter 尊重 `AbortSignal`、disconnect 幂等有界。
+
+## v0.7 视频平台数据舱门｜纯文档侦察线
+
+- 内部报告 `docs/侦察-视频平台数据舱门-2026-08-21.md` 已完成：430 行、40,870 B，SHA-256 `03f8993ed4bd3bd61cb302bec761bd95c8dd6b6648a117c63d29251a14e0d9b1`。它由 `.git/info/exclude` 排除、未进入公开 `main`，与代码交付刻意分开。
+- 结论是：Phase II 只继续评估抖音自有账号经正式授权的累计作品指标/评论；小红书与视频号普通短视频自动取数暂不开发；三平台同行公开页自动采集为红灯。未查到的能力不靠登录、抓取或样例数据补齐。
+- 本线没有代码、网络采集、平台写入或账号动作。只有 Phase II 真正启动时，账号所有人才需完成后台字段/导出、抖音 scope/quota 与 AI 标识入口回读；当前无新增人工动作。
 
 ## v0.5 批次 13 交接（已发布）
 
@@ -210,7 +216,7 @@ v0.6.0 工作台包、内置短视频创作台、托盘五态与叫醒阶梯已�
 
 ### 用户可见交付
 
-- 内置「短视频创作台」声明 `cockpit: "video"` 后进入第一方驾驶舱；默认台、电商客服与其他未声明工作台继续走原布局。驾驶舱含顶部九段航道、中央现场和右侧任务条＋原生 dsh 停靠区，并保留一键退出驾驶舱的逃生门。
+- 内置「短视频创作台」声明 `cockpit: "video"` 后进入第一方驾驶舱；默认台、电商客服与其他未声明工作台继续走原布局。驾驶舱顶部常驻九段航道与紧凑任务摘要，下面在创作现场与完整 dsh 对话现场之间切换，并保留一键退出驾驶舱的逃生门。
 - 今日、选题、脚本、拍摄、灵感、打法、发布检查、数据/复盘/素材现场均已接线。没有平台通道的数据位只显示“侦察中，未接通”，没有示意播放量、漏斗或合规结论。
 - Markdown 正文支持块级建议副本、对照、采用、退回与一次撤销；Agent 只改 `00_鲸坞建议/` 下的副本，原稿写回受 hash CAS、工作区实体与目录 inode 约束。
 - 全屏拍摄窗提供清单、进度环、提词速度/字号、空格暂停与 `R` 重来；收工先预览，再把记录另建到 `05_拍摄记录/`、把未确认镜头另建到 `04_素材清单/`，原 `03_口播稿/` 不改。窗口离线、sandbox、无 Node/网络/剪贴板能力。
@@ -221,7 +227,7 @@ v0.6.0 工作台包、内置短视频创作台、托盘五态与叫醒阶梯已�
 - 驾驶舱只扫描七个批准位置内的普通 UTF-8 `.md/.txt`，拒绝软链接，单文件 512 KiB、扫描 512 文件/4096 目录项封顶。旧稿无 front matter 也可按目录/标题/文件名只读兼容。
 - 支持的 front matter 与阶段集合已经追加到 `docs/工作台包制作指南.md`。未知字段、未知原始行与 BOM/CRLF 原样保留；目标字段重复、原文变化、工作区同路径换实体或恢复冲突时 fail-closed。
 - 事务 journal 绑定精确 root、父目录、target/tmp inode；temp、journal 与目录均做 durability flush。每次成功受控替换都保留可见 `WhaleDock-recovery-*.bak` 接住旧文件实体与编辑器晚写；特殊 copy-only 冲突可能留下额外恢复证据。它不是第二份正式项目，损坏副本不会自动装入目标。
-- 主 dsh `WebContentsView` 继续无 preload、无 DOM 注入；`⌘K` 只能把焦点交给该视图，不能在不破坏此边界的前提下证明远端网页内具体输入框已聚焦。
+- 主 dsh `WebContentsView` 继续无 preload、无 DOM 注入；`⌘K` 只切换、移动并聚焦同一个完整视图，不复制或重写 Harness。切换不 reload，因此会话上下文和未发送草稿保持；顶部「返回现场」不依赖远端页面冒泡快捷键。
 - 根 `dependencies` 仍为空，`lib/video-cockpit.js` 与 `lib/video-shooting.js` 为纯 Node；不读写 `~/.dsh`，不新增遥测或平台请求。
 
 ### 批次、PR 与自动证据
@@ -229,12 +235,12 @@ v0.6.0 工作台包、内置短视频创作台、托盘五态与叫醒阶梯已�
 1. 批次 0 按 SGD 授权合并 PR [#2](https://github.com/sgd-shine/whaledock/pull/2)，merge `07cbe73`，并从当时最新 `main` 开视频线。
 2. 批次 1 的驾驶舱壳由 PR [#3](https://github.com/sgd-shine/whaledock/pull/3) 合并，merge `3747812`；[CI run 32504924783](https://github.com/sgd-shine/whaledock/actions/runs/32504924783) 三平台 smoke 全绿。
 3. 批次 2–6 因共享的文件状态、token/CAS 与现场路由强耦合，作为一个自洽批次由 PR [#4](https://github.com/sgd-shine/whaledock/pull/4) 合并，merge `457074c`；[CI run 32509488084](https://github.com/sgd-shine/whaledock/actions/runs/32509488084) 的 macOS、Ubuntu、Windows 三项 CI 全绿。
-4. 最新源码态 `npm run smoke` 实跑 **396 PASS / ALL PASS**；其中 v0.7 五个子套件共 **68 项**：壳 5、主进程运行时 15、文件合同 20、拍摄状态机 16、拍摄窗 12。`git diff --check`、相关 JS `node --check` 与 runtime dependencies=0 均通过。
+4. 远程批次与全宽对话修订整合后的源码态 `npm run smoke` 实跑 **450 PASS / ALL PASS**；其中驾驶舱五个子套件仍为 **68 项**：壳 5、主进程运行时 15、文件合同 20、拍摄状态机 16、拍摄窗 12，远程套件为 42＋10 项。`git diff --check`、相关 JS `node --check` 与 runtime dependencies=0 均通过。
 5. 安全只读复核最终为 **P0=0、P1=0**。仍保留 P2 证据边界：没有 Windows 真机/断电子进程崩溃测试，copy-only 异常卷可能留下上述可见恢复副本。
 
 ### 当前证据边界与待 SGD 验收
 
 - 当前 v0.7 是已合入 `main` 的源码功能，**没有改 package version、没有创建 v0.7 tag/Release、没有生成 v0.7 安装包**；因此 v0.7 包体积/runtime 体积均为 N/A。公开稳定版仍是 v0.6.0，既有签名/公证/安装证据不能替代 v0.7。
 - macOS Apple Silicon 的隔离源码 App 已经通过 Chromium 调试通道真实触发 DOM 点击并回读本地文件：进出驾驶舱、选题写回、灵感纯本地投递、脚本对照/采用/撤销、发布 AI 硬灯、提词 `Space`/`R` 与两阶段收工、默认台/电商客服旧布局均走通。测试只连接 loopback 假 dsh，未接生产配置、`~/.dsh` 或 `/Applications/WhaleDock.app`；截图与逐项回读在内部验收记录。
-- 本机当时锁屏，`computer-use` 无权代解锁；因此上述是程序化源码态交互证据，**不是 SGD 亲眼观察的视觉/手感验收**。Windows 当前只有 CI，不能写成真机 UI/dsh 通过；Intel Mac 仍无真机证据。
-- SGD 最终体验点：亲眼确认一屏一个主角、中文可读性与动画手感；真实桌面键盘焦点；右侧聊天折叠与 `⌘K` 把焦点交给真实 dsh 视图。主视图无注入，所以仍不把远端 composer 输入框焦点写成已证明。
+- SGD 已亲自通过基本操作、快捷键和工作台展开方式；唯一退回项是窄侧栏令 Harness 对话信息看不全。当前修订已移除该窄栏：顶部摘要不变，下面的完整 Harness 以全宽对话现场呈现，按钮和 `⌘K` 均可往返。
+- 隔离源码 App 已用本地假 dsh 真点击验证全宽打开、按钮返回、dsh 获焦、`⌘K` 双向切换，以及未发送草稿在往返后仍存在；验收草稿随后已清空、未发送。Windows 当前只有 CI，不能写成真机 UI/dsh 通过；Intel Mac 仍无真机证据。

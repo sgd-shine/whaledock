@@ -1,6 +1,6 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-22（v0.7 远程板块批次 1 已在独立分支完成；公开稳定版仍为 v0.6.0）
+更新：2026-08-22（v0.7 远程板块批次 1 已并入 main；视频驾驶舱已按体验反馈改为全宽对话现场；公开稳定版仍为 v0.6.0）
 
 ## 阶段结论
 
@@ -38,11 +38,11 @@
 
 Windows/Intel 真机、Windows 签名与线上更新仍是独立证据边界。它们不阻断本次发布，但不得改写为已经通过。
 
-## v0.7 远程板块｜批次 1（独立远程线，待整合）
+## v0.7 远程板块｜批次 1（已整合 main）
 
 ### 已实现
 
-- 分支 `codex/v07-remote` 已变基到 `origin/main@145ac1c`（已含驾驶舱 PR #3–#5 与验收文档），本线没有操作 PR #2，也没有删改驾驶舱功能。
+- 远程线经 PR [#6](https://github.com/sgd-shine/whaledock/pull/6) 合入 `main`，merge 为 `73bb4ce`；该线从含驾驶舱 PR #3–#5 的 `main@145ac1c` 起步，没有删改驾驶舱功能。
 - `lib/remote.js` 为纯 Node、零运行时依赖的三通道核心：只有收/推/批固定原语与生命周期，没有通用命令/RPC 入口。三通道默认全关；未配 adapter 只显示「未配置」，不伪造在线。
 - 单人绑定使用双端六位码、五分钟 TTL 与权威 store 回读合同；确认项要求权威层原子/持久/幂等 apply。公开快照与审计不含 actor、正文、token、绑定码、路径或平台原始异常。
 - 连接代、`AbortSignal`、连接与断开硬超时、按通道串行/跨通道隔离、操作数+字节双背压已固定。旧 session 未确认断开前不得开新代假绿；adapter lifecycle 的原始原因只映射为自有固定枚举。
@@ -50,8 +50,8 @@ Windows/Intel 真机、Windows 签名与线上更新仍是独立证据边界。�
 
 ### 当前证据与边界
 
-- 变基后本地 `npm run smoke` 实际为 **450 PASS / ALL PASS**；其中 `remote-smoke.js` 42 项、`main-remote-smoke.js` 10 项，并包含最新 main 的驾驶舱五个套件。Electron 43.4.0 在隔离 userData 的 macOS 源码态回读 `SMOKE_OK`。
-- 根 `dependencies` 仍为空，本批没有 SDK、新许可闭包、dsh runtime 变化、打包或产物体积。本地未跑 CI，未创建 Release；Windows、Intel Mac、安装包、签名/公证均为 `N/A`。
+- 整合后的本地 `npm run smoke` 实际为 **450 PASS / ALL PASS**；其中 `remote-smoke.js` 42 项、`main-remote-smoke.js` 10 项，并包含驾驶舱五个套件。Electron 43.4.0 在隔离 userData 的 macOS 源码态回读 `SMOKE_OK`。
+- PR #6 的 [CI run 32561913602](https://github.com/sgd-shine/whaledock/actions/runs/32561913602) 已回读 macOS、Ubuntu、Windows 三项全绿。根 `dependencies` 仍为空，本批没有 SDK、新许可闭包、dsh runtime 变化、打包、Release 或新增产物体积；Windows/Intel 真机、安装包、签名/公证仍为 `N/A`。
 - 本批不含真实飞书/钉钉 adapter、凭据输入/本地安全存储、真手机收发、随身网页 HTTP 监听、二维码或 Tailscale 安装。设置页向导是批次 1 信息架构，不得写成平台已可绑定。
 - SGD 人工目视卡待执行：预计 3–5 分钟，检查三通道默认关闭、向导文案、未配置不假绿与全部断开回读。内部记录为 `docs/验收记录-远程板块-批次1-2026-08-21.md`（已 exclude）。
 
@@ -60,6 +60,12 @@ Windows/Intel 真机、Windows 签名与线上更新仍是独立证据边界。�
 - 批次 2 真实飞书长连接前，若确需官方 Node SDK，必须先以 S1 口径报许可证、体积和依赖闭包，获 SGD 批准后才能加依赖。
 - 批次 4 接真实事项前，内容分级必须接可回查的受信 event/approval/workspace ID，客服来源缺失时 fail-closed；`dedupeKey` 必须接持久去重。
 - 真实 adapter/store 必须完整实现核心合同：权威幂等 apply、同一绑定 store、网络方法响应 `AbortSignal`、断开幂等；回调不得反向等待同通道 service 操作。
+
+## v0.7 视频平台数据舱门侦察（内部只读线）
+
+- 纯文档侦察已完成，内部报告为 `docs/侦察-视频平台数据舱门-2026-08-21.md`，共 430 行、40,870 B，SHA-256 `03f8993ed4bd3bd61cb302bec761bd95c8dd6b6648a117c63d29251a14e0d9b1`。报告按约定由 `.git/info/exclude` 排除，未进入公开 `main`；这不是漏提交。
+- 当前只把“抖音自有账号、经正式授权的作品累计指标与评论”列为 Phase II 候选。小红书、视频号普通短视频自动取数未获得足够官方证据，三平台同行公开页自动采集均为红灯，不实现、不试跑灰色通道。
+- 本线没有代码、网络采集、登录、凭据、平台写入或发布动作。Phase II 若启动，账号所有人还需回读当前后台字段/导出能力、抖音 scope 与 quota、三平台 AI 内容标识入口；在此之前均为 `NEEDS-HUMAN`，不阻断当前Ⅰ期源码闭环。
 
 ## v0.5 批次 13 已实现并发布
 
@@ -222,8 +228,8 @@ Windows/Intel 真机、Windows 签名与线上更新仍是独立证据边界。�
 
 ## v0.7 视频驾驶舱Ⅰ期源码状态（2026-08-21）
 
-- 视频线 PR [#3](https://github.com/sgd-shine/whaledock/pull/3) 与 [#4](https://github.com/sgd-shine/whaledock/pull/4) 已合入 `main`；最新功能 merge 为 `457074c`。公开稳定版仍是 v0.6.0，v0.7 尚未改版本、打包、打 tag 或发布。
-- 内置短视频创作台已接通第一方驾驶舱：航道/今天、脚本块级建议、全屏拍摄、灵感/选题/打法、发布灯和离线数据占位均来自本地文件真相。普通工作台继续走原布局；电商客服包零改动。
+- 视频线 PR [#3](https://github.com/sgd-shine/whaledock/pull/3)、[#4](https://github.com/sgd-shine/whaledock/pull/4) 与验收文档 PR [#5](https://github.com/sgd-shine/whaledock/pull/5) 均已合入 `main`。公开稳定版仍是 v0.6.0，v0.7 尚未改版本、打包、打 tag 或发布。
+- 内置短视频创作台已接通第一方驾驶舱：航道/今天、脚本块级建议、全屏拍摄、灵感/选题/打法、发布灯和离线数据占位均来自本地文件真相。普通工作台继续走原布局；电商客服包零改动。SGD 已通过基本操作、快捷键与工作台展开手感；唯一退回项“窄侧栏对话”已改成顶部摘要常驻、下方完整 Harness 全宽切换，返回现场不刷新对话或草稿。
 - 写入受 opaque token、源 hash CAS、root/父目录 inode 与恢复 journal 约束；未知 front matter 原样保留，平台数据未接通就不显示数字。主 dsh 视图继续无 preload/注入，根运行时依赖仍为 0。
-- 本地最新 `npm run smoke` 为 **396 PASS / ALL PASS**，v0.7 新增/扩展 68 项；PR #3/#4 的 macOS、Ubuntu、Windows CI 均全绿。安全复核为 P0=0、P1=0。
-- macOS Apple Silicon 隔离源码 App 已通过调试通道走完关键 DOM 点击与文件回读；本机锁屏使 SGD 亲眼视觉/手感仍为 `NEEDS-HUMAN`。尚未闭环：真实 dsh composer 焦点、Windows/Intel 真机、Windows 断电/子进程崩溃恢复，以及 v0.7 安装包、体积、签名、公证、tag 与 Release。成功受控替换会保留 `WhaleDock-recovery-*.bak`，特殊 copy-only 冲突可能留下额外恢复证据，均需人核对后处理。
+- 与远程批次整合后的本地最新 `npm run smoke` 为 **450 PASS / ALL PASS**；全宽对话布局、IPC 白名单、快捷键与“不注入 dsh DOM”均有纯 Node 回归。PR #3/#4/#6 的 macOS、Ubuntu、Windows CI 均全绿；安全复核仍为 P0=0、P1=0。
+- macOS Apple Silicon 隔离源码 App 已真实点击进入/返回全宽对话，并用未发送草稿证明切换未重载同一个 dsh 视图；⌘K 从 dsh 焦点返回现场、再次打开均通过。尚未闭环：Windows/Intel 真机、Windows 断电/子进程崩溃恢复，以及 v0.7 安装包、体积、签名、公证、tag 与 Release。成功受控替换会保留 `WhaleDock-recovery-*.bak`，特殊 copy-only 冲突可能留下额外恢复证据，均需人核对后处理。
