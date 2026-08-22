@@ -955,7 +955,9 @@ async function main() {
   // dsh 跟版候选门：manifest/lock/原生目标/临时路径只做纯 Node fail-closed 校验。
   for (const [file, label] of [
     ['dsh-candidate-smoke.js', 'dsh 候选 runtime 严格入口'],
-    ['dsh-candidate-evidence-smoke.js', 'dsh 候选原生证据收集器']
+    ['dsh-candidate-evidence-smoke.js', 'dsh 候选原生证据收集器'],
+    ['dsh-candidate-capsule-smoke.js', 'dsh 三平台合规胶囊聚合器'],
+    ['dsh-candidate-capsule-verify-smoke.js', 'dsh 候选合规胶囊回读器']
   ]) {
     const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
       cwd: path.join(__dirname, '..'),

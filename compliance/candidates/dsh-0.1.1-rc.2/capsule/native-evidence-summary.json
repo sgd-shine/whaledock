@@ -1,0 +1,1058 @@
+{
+  "schemaVersion": 1,
+  "candidateVersion": "0.1.1-rc.2",
+  "expectedCommit": "6f3b79bf3afa03e73c1a6a712015f16e9b06c8ed",
+  "auditedLockSha256": "c084af82305715116ac5bd30d586be94e0fce9e00c31db0a309c3eecdd099527",
+  "targets": [
+    {
+      "platform": "darwin",
+      "arch": "arm64",
+      "inventorySha256": "bf6f7be72a8d6f02ee7e1809f0763494c01d75f3fee3f137724c3dec51cc77eb",
+      "fullEvidenceSha256": "ac36e1555465baf02cd4f6f3e164acaed4f73fb53748b6a837cc791c9c1b1da9",
+      "runtimeManifestSha256": "2b3b5e7ba6547c5fb6f01b42c5d13db0d873003a2ba8446f7301f29e3a653863",
+      "materialManifestSha256": "d3a992448603ce305664c3866f85a1ab85711614c52077e0e4e4130494d6c771",
+      "runtime": {
+        "version": "0.1.1-rc.2",
+        "platform": "darwin",
+        "arch": "arm64",
+        "hostPlatform": "darwin",
+        "hostArch": "arm64",
+        "manifestSha256": "2b3b5e7ba6547c5fb6f01b42c5d13db0d873003a2ba8446f7301f29e3a653863",
+        "packageSha256": "4cc92f30bb0a90314aaccb08ccd259e2ef1fb3e422346096d690f4409b007e62",
+        "lockSha256": "c084af82305715116ac5bd30d586be94e0fce9e00c31db0a309c3eecdd099527",
+        "installedPackageSha256": "dc930c0b18158f49ae3753ceaf6b1b7ae71dc6c8f45c85a2d679b142024addf7",
+        "packageIntegrity": "sha512-UP1UIh6q3Gme/yXRn/QL2P8IsVlv8Shpg22TRJIZPsCRWLm4CBiA1MUvXmJAfsOEETBMLAl+xWPtFw6ICsN3wg==",
+        "lockPackages": 512,
+        "installScriptsIgnored": true,
+        "installScriptPackages": [
+          "@deepseek-ai/dsh-subprocess-local",
+          "@google/genai",
+          "koffi",
+          "node-pty",
+          "protobufjs"
+        ],
+        "exactBinRelative": "node_modules/@deepseek-ai/dsh/lib/bin.js"
+      },
+      "tree": {
+        "directoryCount": 3151,
+        "fileCount": 29474,
+        "symlinkCount": 12,
+        "logicalBytes": 209815821,
+        "symlinkTargetBytes": 296,
+        "canonicalBytes": 6254323,
+        "canonicalSha256": "6f2eea2ebd2056212632534f25074a7738e66d0dab10d6773b8443cf7b3b71b6",
+        "compression": "node:zlib-gzip-level-9-mtime-0",
+        "compressionNodeVersion": "v22.23.2",
+        "compressionZlibVersion": "1.3.1-e00f703",
+        "compressedBytes": 1281446,
+        "compressedSha256": "c0c39afb85471917e17fcd627acc0b8c9bc664dc7777671151d456f588788ee6"
+      },
+      "nativeBinaries": [
+        {
+          "path": "node_modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64-0.35.3.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 280256,
+          "sha256": "5efbf349396808af22ae4f6b67c327767297a97b54a1ecf04dedec63aeff4d46"
+        },
+        {
+          "path": "node_modules/@img/sharp-libvips-darwin-arm64/lib/libvips-cpp.8.18.3.dylib",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 17765992,
+          "sha256": "50090a3a7c8f455de3c6cf2b274d231ddcc92901f4b1957c3b3391b6b9877989"
+        },
+        {
+          "path": "node_modules/@koromix/koffi-darwin-arm64/darwin_arm64/koffi.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 1240344,
+          "sha256": "bf296624ec91e73749f4a743b3b39226ed5e297b64f0a7ec93e15993ba846844"
+        },
+        {
+          "path": "node_modules/@vscode/ripgrep-darwin-arm64/bin/rg",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 4528512,
+          "sha256": "6ef40346bf31fcce79d9614c7745c198542925a0c7d4911e1ffe794c53392ac1"
+        },
+        {
+          "path": "node_modules/node-addon-require-builtin-darwin-arm64/prebuilt/darwin-arm64-napi-v9.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 222856,
+          "sha256": "d9ac5486c7b0229217bed61f1cab1e6d4d63a28deffad6a5781c831e44dfa3ea"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/darwin-arm64/pty.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 86904,
+          "sha256": "0aae85518beb134a666f8e415f78bf528b2e9d40b47498af97433dc459661366"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 50480,
+          "sha256": "08bc83a084651d095645010d34783f94b9af443614747e953e66d6578027e999"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/darwin-x64/pty.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 58576,
+          "sha256": "811f4a357e260fc0e520c250a3de5990483761d82afd635effbdf4b793b8a0e9"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/darwin-x64/spawn-helper",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 9248,
+          "sha256": "a3bed36ae3ed83b2ac2fce475bd578c51f5b536041f0b2dfe116987f565e9758"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-arm64/conpty/OpenConsole.exe",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 1110560,
+          "sha256": "7fa560be0c9b6c81db5d1b855a4a6e0f3ee5a2ea75d36eebb3ae44443b8d4866"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-arm64/conpty/conpty.dll",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 106528,
+          "sha256": "b3a9f975c51d5b9b96d290bf784e990e3f85203b063c21614457353f566266ff"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-arm64/conpty.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 279040,
+          "sha256": "6da15dc84b864bb4630d95faef97da5f323a078b53d73f395b5efd6f7952c3e0"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-arm64/conpty_console_list.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 122368,
+          "sha256": "327cf47db8b524a75813c98871037bc60f0a08660e75635897aed957a059b690"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-x64/conpty/OpenConsole.exe",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 1062472,
+          "sha256": "7f68c840226505004215c0b82d4e502c24b5bc3f4b93c4baaaa19bd679c0def8"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-x64/conpty/conpty.dll",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 110152,
+          "sha256": "3319b484b80bb53d1f4d0a9eb0ea60fd0f61da69db7280ca43b84215f19245ff"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-x64/conpty.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 291328,
+          "sha256": "ec2fd8545c30e051ee3fa17d26127f7e615919814879c7f746cf4c80845226e0"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-x64/conpty_console_list.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 134656,
+          "sha256": "d46800643f90fc56b9fd67398f04a04a871521de0e825211c8382d187859d3ed"
+        },
+        {
+          "path": "node_modules/node-pty/third_party/conpty/1.25.260303002/win10-arm64/OpenConsole.exe",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 1110560,
+          "sha256": "7fa560be0c9b6c81db5d1b855a4a6e0f3ee5a2ea75d36eebb3ae44443b8d4866"
+        },
+        {
+          "path": "node_modules/node-pty/third_party/conpty/1.25.260303002/win10-arm64/conpty.dll",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 106528,
+          "sha256": "b3a9f975c51d5b9b96d290bf784e990e3f85203b063c21614457353f566266ff"
+        },
+        {
+          "path": "node_modules/node-pty/third_party/conpty/1.25.260303002/win10-x64/OpenConsole.exe",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 1062472,
+          "sha256": "7f68c840226505004215c0b82d4e502c24b5bc3f4b93c4baaaa19bd679c0def8"
+        },
+        {
+          "path": "node_modules/node-pty/third_party/conpty/1.25.260303002/win10-x64/conpty.dll",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 110152,
+          "sha256": "3319b484b80bb53d1f4d0a9eb0ea60fd0f61da69db7280ca43b84215f19245ff"
+        }
+      ],
+      "targetNativeProofs": [
+        {
+          "label": "sharp-addon",
+          "path": "node_modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64-0.35.3.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 280256,
+          "sha256": "5efbf349396808af22ae4f6b67c327767297a97b54a1ecf04dedec63aeff4d46"
+        },
+        {
+          "label": "koffi-addon",
+          "path": "node_modules/@koromix/koffi-darwin-arm64/darwin_arm64/koffi.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 1240344,
+          "sha256": "bf296624ec91e73749f4a743b3b39226ed5e297b64f0a7ec93e15993ba846844"
+        },
+        {
+          "label": "ripgrep",
+          "path": "node_modules/@vscode/ripgrep-darwin-arm64/bin/rg",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 4528512,
+          "sha256": "6ef40346bf31fcce79d9614c7745c198542925a0c7d4911e1ffe794c53392ac1"
+        },
+        {
+          "label": "builtin-addon",
+          "path": "node_modules/node-addon-require-builtin-darwin-arm64/prebuilt/darwin-arm64-napi-v9.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 222856,
+          "sha256": "d9ac5486c7b0229217bed61f1cab1e6d4d63a28deffad6a5781c831e44dfa3ea"
+        },
+        {
+          "label": "sharp-libvips",
+          "path": "node_modules/@img/sharp-libvips-darwin-arm64/lib/libvips-cpp.8.18.3.dylib",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 17765992,
+          "sha256": "50090a3a7c8f455de3c6cf2b274d231ddcc92901f4b1957c3b3391b6b9877989"
+        },
+        {
+          "label": "node-pty",
+          "path": "node_modules/node-pty/prebuilds/darwin-arm64/pty.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 86904,
+          "sha256": "0aae85518beb134a666f8e415f78bf528b2e9d40b47498af97433dc459661366"
+        },
+        {
+          "label": "node-pty-spawn-helper",
+          "path": "node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 50480,
+          "sha256": "08bc83a084651d095645010d34783f94b9af443614747e953e66d6578027e999"
+        }
+      ],
+      "dumpConfig": {
+        "exit": 0,
+        "bytes": 15796,
+        "lines": 503,
+        "sha256": "cee7cd4d8c757ddf74a0bca9038ca817e2282f6c79f5c01d57baa89f871d4316",
+        "stderrBytes": 0,
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "platform": "darwin",
+      "arch": "x64",
+      "inventorySha256": "5477b28b7e3478ecd0bb895c09c870a9b22c915391357ad0b5b71a8d15bc3253",
+      "fullEvidenceSha256": "1f474fe1a09eaa48ce2fa9d5d91e89161f83468de070e4b5370dfed80af93ce5",
+      "runtimeManifestSha256": "5c13c133ed54b15531dc30c3593e6cf0ce35c60c5bd31f1e7254649b7ffe7582",
+      "materialManifestSha256": "b65365145bf93bb37b56ecaac24a7f887b0690144b7fcd401a5b689472ea67a8",
+      "runtime": {
+        "version": "0.1.1-rc.2",
+        "platform": "darwin",
+        "arch": "x64",
+        "hostPlatform": "darwin",
+        "hostArch": "x64",
+        "manifestSha256": "5c13c133ed54b15531dc30c3593e6cf0ce35c60c5bd31f1e7254649b7ffe7582",
+        "packageSha256": "4cc92f30bb0a90314aaccb08ccd259e2ef1fb3e422346096d690f4409b007e62",
+        "lockSha256": "c084af82305715116ac5bd30d586be94e0fce9e00c31db0a309c3eecdd099527",
+        "installedPackageSha256": "dc930c0b18158f49ae3753ceaf6b1b7ae71dc6c8f45c85a2d679b142024addf7",
+        "packageIntegrity": "sha512-UP1UIh6q3Gme/yXRn/QL2P8IsVlv8Shpg22TRJIZPsCRWLm4CBiA1MUvXmJAfsOEETBMLAl+xWPtFw6ICsN3wg==",
+        "lockPackages": 512,
+        "installScriptsIgnored": true,
+        "installScriptPackages": [
+          "@deepseek-ai/dsh-subprocess-local",
+          "@google/genai",
+          "koffi",
+          "node-pty",
+          "protobufjs"
+        ],
+        "exactBinRelative": "node_modules/@deepseek-ai/dsh/lib/bin.js"
+      },
+      "tree": {
+        "directoryCount": 3151,
+        "fileCount": 29474,
+        "symlinkCount": 12,
+        "logicalBytes": 212451977,
+        "symlinkTargetBytes": 296,
+        "canonicalBytes": 6254241,
+        "canonicalSha256": "c997267ec2d7254378c8b38a273c909d1c3ad113978df9ff6dc63353cee22556",
+        "compression": "node:zlib-gzip-level-9-mtime-0",
+        "compressionNodeVersion": "v22.23.2",
+        "compressionZlibVersion": "1.3.1-e00f703",
+        "compressedBytes": 1281459,
+        "compressedSha256": "2d13108245a30eb69bbda002074310a7535b8f951c3c314427a6093e6e9b769d"
+      },
+      "nativeBinaries": [
+        {
+          "path": "node_modules/@img/sharp-darwin-x64/lib/sharp-darwin-x64-0.35.3.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 255312,
+          "sha256": "d3e0be8e1019e3418b3a6724bc40e203a5fe52ca0c3fde0aec4c603ae9c3fd2e"
+        },
+        {
+          "path": "node_modules/@img/sharp-libvips-darwin-x64/lib/libvips-cpp.8.18.3.dylib",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 19894448,
+          "sha256": "48f6294a40b86fc2edb2d1629ade909efecbf07cc06678b299a79b750594e499"
+        },
+        {
+          "path": "node_modules/@koromix/koffi-darwin-x64/darwin_x64/koffi.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 1591592,
+          "sha256": "196d77be4b774d0f8c5d6ca916982edc765dbe70204f3bbb123353c804fd3dfe"
+        },
+        {
+          "path": "node_modules/@vscode/ripgrep-darwin-x64/bin/rg",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 4742676,
+          "sha256": "f999495980a5e6f1e7d26461ef5768b4013a62df610ed7d77a8b2de247a5b228"
+        },
+        {
+          "path": "node_modules/node-addon-require-builtin-darwin-x64/prebuilt/darwin-x64-napi-v9.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 190192,
+          "sha256": "ed934b7d319dd65d22930caf106cebb4ffa5f1d5d7b4ed5546d6c0359d3a03c1"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/darwin-arm64/pty.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 86904,
+          "sha256": "0aae85518beb134a666f8e415f78bf528b2e9d40b47498af97433dc459661366"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 50480,
+          "sha256": "08bc83a084651d095645010d34783f94b9af443614747e953e66d6578027e999"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/darwin-x64/pty.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 58576,
+          "sha256": "811f4a357e260fc0e520c250a3de5990483761d82afd635effbdf4b793b8a0e9"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/darwin-x64/spawn-helper",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 9248,
+          "sha256": "a3bed36ae3ed83b2ac2fce475bd578c51f5b536041f0b2dfe116987f565e9758"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-arm64/conpty/OpenConsole.exe",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 1110560,
+          "sha256": "7fa560be0c9b6c81db5d1b855a4a6e0f3ee5a2ea75d36eebb3ae44443b8d4866"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-arm64/conpty/conpty.dll",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 106528,
+          "sha256": "b3a9f975c51d5b9b96d290bf784e990e3f85203b063c21614457353f566266ff"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-arm64/conpty.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 279040,
+          "sha256": "6da15dc84b864bb4630d95faef97da5f323a078b53d73f395b5efd6f7952c3e0"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-arm64/conpty_console_list.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 122368,
+          "sha256": "327cf47db8b524a75813c98871037bc60f0a08660e75635897aed957a059b690"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-x64/conpty/OpenConsole.exe",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 1062472,
+          "sha256": "7f68c840226505004215c0b82d4e502c24b5bc3f4b93c4baaaa19bd679c0def8"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-x64/conpty/conpty.dll",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 110152,
+          "sha256": "3319b484b80bb53d1f4d0a9eb0ea60fd0f61da69db7280ca43b84215f19245ff"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-x64/conpty.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 291328,
+          "sha256": "ec2fd8545c30e051ee3fa17d26127f7e615919814879c7f746cf4c80845226e0"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-x64/conpty_console_list.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 134656,
+          "sha256": "d46800643f90fc56b9fd67398f04a04a871521de0e825211c8382d187859d3ed"
+        },
+        {
+          "path": "node_modules/node-pty/third_party/conpty/1.25.260303002/win10-arm64/OpenConsole.exe",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 1110560,
+          "sha256": "7fa560be0c9b6c81db5d1b855a4a6e0f3ee5a2ea75d36eebb3ae44443b8d4866"
+        },
+        {
+          "path": "node_modules/node-pty/third_party/conpty/1.25.260303002/win10-arm64/conpty.dll",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 106528,
+          "sha256": "b3a9f975c51d5b9b96d290bf784e990e3f85203b063c21614457353f566266ff"
+        },
+        {
+          "path": "node_modules/node-pty/third_party/conpty/1.25.260303002/win10-x64/OpenConsole.exe",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 1062472,
+          "sha256": "7f68c840226505004215c0b82d4e502c24b5bc3f4b93c4baaaa19bd679c0def8"
+        },
+        {
+          "path": "node_modules/node-pty/third_party/conpty/1.25.260303002/win10-x64/conpty.dll",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 110152,
+          "sha256": "3319b484b80bb53d1f4d0a9eb0ea60fd0f61da69db7280ca43b84215f19245ff"
+        }
+      ],
+      "targetNativeProofs": [
+        {
+          "label": "sharp-addon",
+          "path": "node_modules/@img/sharp-darwin-x64/lib/sharp-darwin-x64-0.35.3.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 255312,
+          "sha256": "d3e0be8e1019e3418b3a6724bc40e203a5fe52ca0c3fde0aec4c603ae9c3fd2e"
+        },
+        {
+          "label": "koffi-addon",
+          "path": "node_modules/@koromix/koffi-darwin-x64/darwin_x64/koffi.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 1591592,
+          "sha256": "196d77be4b774d0f8c5d6ca916982edc765dbe70204f3bbb123353c804fd3dfe"
+        },
+        {
+          "label": "ripgrep",
+          "path": "node_modules/@vscode/ripgrep-darwin-x64/bin/rg",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 4742676,
+          "sha256": "f999495980a5e6f1e7d26461ef5768b4013a62df610ed7d77a8b2de247a5b228"
+        },
+        {
+          "label": "builtin-addon",
+          "path": "node_modules/node-addon-require-builtin-darwin-x64/prebuilt/darwin-x64-napi-v9.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 190192,
+          "sha256": "ed934b7d319dd65d22930caf106cebb4ffa5f1d5d7b4ed5546d6c0359d3a03c1"
+        },
+        {
+          "label": "sharp-libvips",
+          "path": "node_modules/@img/sharp-libvips-darwin-x64/lib/libvips-cpp.8.18.3.dylib",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 19894448,
+          "sha256": "48f6294a40b86fc2edb2d1629ade909efecbf07cc06678b299a79b750594e499"
+        },
+        {
+          "label": "node-pty",
+          "path": "node_modules/node-pty/prebuilds/darwin-x64/pty.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 58576,
+          "sha256": "811f4a357e260fc0e520c250a3de5990483761d82afd635effbdf4b793b8a0e9"
+        },
+        {
+          "label": "node-pty-spawn-helper",
+          "path": "node_modules/node-pty/prebuilds/darwin-x64/spawn-helper",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 9248,
+          "sha256": "a3bed36ae3ed83b2ac2fce475bd578c51f5b536041f0b2dfe116987f565e9758"
+        }
+      ],
+      "dumpConfig": {
+        "exit": 0,
+        "bytes": 15796,
+        "lines": 503,
+        "sha256": "cee7cd4d8c757ddf74a0bca9038ca817e2282f6c79f5c01d57baa89f871d4316",
+        "stderrBytes": 0,
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "platform": "win32",
+      "arch": "x64",
+      "inventorySha256": "8d79dcd012d7bafe877ba0ef38da9679d29897d439a80cc7de3af710f1a40b24",
+      "fullEvidenceSha256": "400a91604c9d0ee554e3c4d37a15e6918f09c1e16c0cd924edefb4b366710f0e",
+      "runtimeManifestSha256": "82ca1452a53eed53749befe281962d74d48e7461749c2fc8652cffb88ef80304",
+      "materialManifestSha256": "088d5cc6765c3ba97d88c2dce477808e678059eaf6599791b9482d40b3a647f9",
+      "runtime": {
+        "version": "0.1.1-rc.2",
+        "platform": "win32",
+        "arch": "x64",
+        "hostPlatform": "win32",
+        "hostArch": "x64",
+        "manifestSha256": "82ca1452a53eed53749befe281962d74d48e7461749c2fc8652cffb88ef80304",
+        "packageSha256": "4cc92f30bb0a90314aaccb08ccd259e2ef1fb3e422346096d690f4409b007e62",
+        "lockSha256": "c084af82305715116ac5bd30d586be94e0fce9e00c31db0a309c3eecdd099527",
+        "installedPackageSha256": "dc930c0b18158f49ae3753ceaf6b1b7ae71dc6c8f45c85a2d679b142024addf7",
+        "packageIntegrity": "sha512-UP1UIh6q3Gme/yXRn/QL2P8IsVlv8Shpg22TRJIZPsCRWLm4CBiA1MUvXmJAfsOEETBMLAl+xWPtFw6ICsN3wg==",
+        "lockPackages": 512,
+        "installScriptsIgnored": true,
+        "installScriptPackages": [
+          "@deepseek-ai/dsh-subprocess-local",
+          "@google/genai",
+          "koffi",
+          "node-pty",
+          "protobufjs"
+        ],
+        "exactBinRelative": "node_modules/@deepseek-ai/dsh/lib/bin.js"
+      },
+      "tree": {
+        "directoryCount": 3147,
+        "fileCount": 29508,
+        "symlinkCount": 0,
+        "logicalBytes": 211785126,
+        "symlinkTargetBytes": 0,
+        "canonicalBytes": 6256777,
+        "canonicalSha256": "47448130d2c1a98eb7559d619ffcae4bc371229b1f51f535d96d281b4a8359b6",
+        "compression": "node:zlib-gzip-level-9-mtime-0",
+        "compressionNodeVersion": "v22.23.2",
+        "compressionZlibVersion": "1.3.1-e00f703",
+        "compressedBytes": 1282089,
+        "compressedSha256": "0718661760e4f10cc484fb9288dfd2a50736a99276c3340528a4a39ef5ef9558"
+      },
+      "nativeBinaries": [
+        {
+          "path": "node_modules/@img/sharp-win32-x64/lib/libvips-42.dll",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 18406400,
+          "sha256": "6d8ec83a826a1b46ef25a670501fd186475568dd3e48893cb4f756d0f2f428d8"
+        },
+        {
+          "path": "node_modules/@img/sharp-win32-x64/lib/libvips-cpp-8.18.3.dll",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 333312,
+          "sha256": "d6eb3395e6f7799c9e2c997aba38068f1ab0684dc08a853013dbe528649306b9"
+        },
+        {
+          "path": "node_modules/@img/sharp-win32-x64/lib/sharp-win32-x64-0.35.3.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 442368,
+          "sha256": "45dbb968dff27a1e8d8870d2a34e6f5418fa2a1a4fe27a7ed13ab2fb3f895468"
+        },
+        {
+          "path": "node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 1044480,
+          "sha256": "939156f310bd7a7d9d1db1b5249a5d135739b049c24c79fd3c201701333ddbf3"
+        },
+        {
+          "path": "node_modules/@vscode/ripgrep-win32-x64/bin/rg.exe",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 5429760,
+          "sha256": "f9dde63498b3193f098355dbec97af99dc4f6b8fa0df5ed04114a03012c042cb"
+        },
+        {
+          "path": "node_modules/node-addon-require-builtin-win32-x64-msvc/prebuilt/win32-x64-msvc-napi-v9.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 338432,
+          "sha256": "57845c9e7c184b564b35a59c9012f7682f06f33877bb01c550e01f48210f98d5"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/darwin-arm64/pty.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 86904,
+          "sha256": "0aae85518beb134a666f8e415f78bf528b2e9d40b47498af97433dc459661366"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 50480,
+          "sha256": "08bc83a084651d095645010d34783f94b9af443614747e953e66d6578027e999"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/darwin-x64/pty.node",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 58576,
+          "sha256": "811f4a357e260fc0e520c250a3de5990483761d82afd635effbdf4b793b8a0e9"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/darwin-x64/spawn-helper",
+          "format": "mach-o",
+          "kind": "thin",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 9248,
+          "sha256": "a3bed36ae3ed83b2ac2fce475bd578c51f5b536041f0b2dfe116987f565e9758"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-arm64/conpty/OpenConsole.exe",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 1110560,
+          "sha256": "7fa560be0c9b6c81db5d1b855a4a6e0f3ee5a2ea75d36eebb3ae44443b8d4866"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-arm64/conpty/conpty.dll",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 106528,
+          "sha256": "b3a9f975c51d5b9b96d290bf784e990e3f85203b063c21614457353f566266ff"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-arm64/conpty.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 279040,
+          "sha256": "6da15dc84b864bb4630d95faef97da5f323a078b53d73f395b5efd6f7952c3e0"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-arm64/conpty_console_list.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 122368,
+          "sha256": "327cf47db8b524a75813c98871037bc60f0a08660e75635897aed957a059b690"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-x64/conpty/OpenConsole.exe",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 1062472,
+          "sha256": "7f68c840226505004215c0b82d4e502c24b5bc3f4b93c4baaaa19bd679c0def8"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-x64/conpty/conpty.dll",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 110152,
+          "sha256": "3319b484b80bb53d1f4d0a9eb0ea60fd0f61da69db7280ca43b84215f19245ff"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-x64/conpty.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 291328,
+          "sha256": "ec2fd8545c30e051ee3fa17d26127f7e615919814879c7f746cf4c80845226e0"
+        },
+        {
+          "path": "node_modules/node-pty/prebuilds/win32-x64/conpty_console_list.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 134656,
+          "sha256": "d46800643f90fc56b9fd67398f04a04a871521de0e825211c8382d187859d3ed"
+        },
+        {
+          "path": "node_modules/node-pty/third_party/conpty/1.25.260303002/win10-arm64/OpenConsole.exe",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 1110560,
+          "sha256": "7fa560be0c9b6c81db5d1b855a4a6e0f3ee5a2ea75d36eebb3ae44443b8d4866"
+        },
+        {
+          "path": "node_modules/node-pty/third_party/conpty/1.25.260303002/win10-arm64/conpty.dll",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "arm64"
+          ],
+          "bytes": 106528,
+          "sha256": "b3a9f975c51d5b9b96d290bf784e990e3f85203b063c21614457353f566266ff"
+        },
+        {
+          "path": "node_modules/node-pty/third_party/conpty/1.25.260303002/win10-x64/OpenConsole.exe",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 1062472,
+          "sha256": "7f68c840226505004215c0b82d4e502c24b5bc3f4b93c4baaaa19bd679c0def8"
+        },
+        {
+          "path": "node_modules/node-pty/third_party/conpty/1.25.260303002/win10-x64/conpty.dll",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 110152,
+          "sha256": "3319b484b80bb53d1f4d0a9eb0ea60fd0f61da69db7280ca43b84215f19245ff"
+        }
+      ],
+      "targetNativeProofs": [
+        {
+          "label": "sharp-addon",
+          "path": "node_modules/@img/sharp-win32-x64/lib/sharp-win32-x64-0.35.3.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 442368,
+          "sha256": "45dbb968dff27a1e8d8870d2a34e6f5418fa2a1a4fe27a7ed13ab2fb3f895468"
+        },
+        {
+          "label": "koffi-addon",
+          "path": "node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 1044480,
+          "sha256": "939156f310bd7a7d9d1db1b5249a5d135739b049c24c79fd3c201701333ddbf3"
+        },
+        {
+          "label": "ripgrep",
+          "path": "node_modules/@vscode/ripgrep-win32-x64/bin/rg.exe",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 5429760,
+          "sha256": "f9dde63498b3193f098355dbec97af99dc4f6b8fa0df5ed04114a03012c042cb"
+        },
+        {
+          "label": "builtin-addon",
+          "path": "node_modules/node-addon-require-builtin-win32-x64-msvc/prebuilt/win32-x64-msvc-napi-v9.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 338432,
+          "sha256": "57845c9e7c184b564b35a59c9012f7682f06f33877bb01c550e01f48210f98d5"
+        },
+        {
+          "label": "node-pty-conpty",
+          "path": "node_modules/node-pty/prebuilds/win32-x64/conpty.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 291328,
+          "sha256": "ec2fd8545c30e051ee3fa17d26127f7e615919814879c7f746cf4c80845226e0"
+        },
+        {
+          "label": "node-pty-console-list",
+          "path": "node_modules/node-pty/prebuilds/win32-x64/conpty_console_list.node",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 134656,
+          "sha256": "d46800643f90fc56b9fd67398f04a04a871521de0e825211c8382d187859d3ed"
+        },
+        {
+          "label": "node-pty-open-console",
+          "path": "node_modules/node-pty/prebuilds/win32-x64/conpty/OpenConsole.exe",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 1062472,
+          "sha256": "7f68c840226505004215c0b82d4e502c24b5bc3f4b93c4baaaa19bd679c0def8"
+        },
+        {
+          "label": "node-pty-conpty-dll",
+          "path": "node_modules/node-pty/prebuilds/win32-x64/conpty/conpty.dll",
+          "format": "pe",
+          "kind": "image",
+          "machines": [
+            "x86_64"
+          ],
+          "bytes": 110152,
+          "sha256": "3319b484b80bb53d1f4d0a9eb0ea60fd0f61da69db7280ca43b84215f19245ff"
+        }
+      ],
+      "dumpConfig": {
+        "exit": 0,
+        "bytes": 15796,
+        "lines": 503,
+        "sha256": "cee7cd4d8c757ddf74a0bca9038ca817e2282f6c79f5c01d57baa89f871d4316",
+        "stderrBytes": 0,
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  ]
+}

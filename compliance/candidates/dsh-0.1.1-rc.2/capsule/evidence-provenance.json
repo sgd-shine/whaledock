@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "candidateVersion": "0.1.1-rc.2",
+  "sourceCommit": "6f3b79bf3afa03e73c1a6a712015f16e9b06c8ed",
+  "workflowRun": {
+    "id": 32578195678,
+    "url": "https://github.com/sgd-shine/whaledock/actions/runs/32578195678",
+    "conclusion": "success",
+    "createdAt": "2026-08-22T14:15:58Z",
+    "toolchain": {
+      "node": "22.23.2",
+      "npm": "10.9.8"
+    }
+  },
+  "artifacts": [
+    {
+      "target": "darwin/arm64",
+      "jobId": 97043536650,
+      "jobUrl": "https://github.com/sgd-shine/whaledock/actions/runs/32578195678/job/97043536650",
+      "artifactId": 9477100677,
+      "artifactName": "dsh-candidate-darwin-arm64",
+      "artifactDigest": "sha256:7ad886390c1f7b8bb7786ab56cae69eefcb077c6c0564e25ee5723ada320bbd6",
+      "artifactCompressedBytes": 1645398,
+      "artifactExpiresAt": "2026-08-29T14:16:36Z",
+      "inventorySha256": "bf6f7be72a8d6f02ee7e1809f0763494c01d75f3fee3f137724c3dec51cc77eb",
+      "fullEvidenceSha256": "ac36e1555465baf02cd4f6f3e164acaed4f73fb53748b6a837cc791c9c1b1da9",
+      "runtimeManifestSha256": "2b3b5e7ba6547c5fb6f01b42c5d13db0d873003a2ba8446f7301f29e3a653863"
+    },
+    {
+      "target": "darwin/x64",
+      "jobId": 97043536833,
+      "jobUrl": "https://github.com/sgd-shine/whaledock/actions/runs/32578195678/job/97043536833",
+      "artifactId": 9477105408,
+      "artifactName": "dsh-candidate-darwin-x64",
+      "artifactDigest": "sha256:dfaf908f94aa22a002af96867fd9cc8ae5f2c1d6870c87a05f8e53a513fed449",
+      "artifactCompressedBytes": 1645365,
+      "artifactExpiresAt": "2026-08-29T14:16:58Z",
+      "inventorySha256": "5477b28b7e3478ecd0bb895c09c870a9b22c915391357ad0b5b71a8d15bc3253",
+      "fullEvidenceSha256": "1f474fe1a09eaa48ce2fa9d5d91e89161f83468de070e4b5370dfed80af93ce5",
+      "runtimeManifestSha256": "5c13c133ed54b15531dc30c3593e6cf0ce35c60c5bd31f1e7254649b7ffe7582"
+    },
+    {
+      "target": "win32/x64",
+      "jobId": 97043536782,
+      "jobUrl": "https://github.com/sgd-shine/whaledock/actions/runs/32578195678/job/97043536782",
+      "artifactId": 9477146330,
+      "artifactName": "dsh-candidate-win32-x64",
+      "artifactDigest": "sha256:93f2d3d6ea1a5e7b3e698aafa632507ed24a37ecbbbdd15cb2b860b10289988e",
+      "artifactCompressedBytes": 1650688,
+      "artifactExpiresAt": "2026-08-29T14:20:28Z",
+      "inventorySha256": "8d79dcd012d7bafe877ba0ef38da9679d29897d439a80cc7de3af710f1a40b24",
+      "fullEvidenceSha256": "400a91604c9d0ee554e3c4d37a15e6918f09c1e16c0cd924edefb4b366710f0e",
+      "runtimeManifestSha256": "82ca1452a53eed53749befe281962d74d48e7461749c2fc8652cffb88ef80304"
+    }
+  ],
+  "boundary": "The raw evidence artifacts retain every canonical runtime-tree entry until their stated expiry. This capsule preserves their exact hashes plus the runtime, aggregate tree, native binary, target-native proof and dump-config summaries. It is candidate evidence only and does not activate the production dsh lock."
+}

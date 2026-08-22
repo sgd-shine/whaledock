@@ -266,7 +266,12 @@ jobs:
           const fs = require('fs');
           const path = require('path');
           const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
-          const expectedPath = path.join(process.env.CANDIDATE_DIR, `inventory-${process.env.CANDIDATE_TARGET}.json`);
+          const expectedPath = path.join(
+            process.env.CANDIDATE_DIR,
+            'capsule',
+            'compliance',
+            `inventory-${process.env.CANDIDATE_TARGET}.json`
+          );
           if (!fs.existsSync(expectedPath)) {
             console.log(`CANDIDATE_CAPTURE_ONLY no committed inventory for ${process.env.CANDIDATE_TARGET}`);
             process.exit(0);
@@ -306,5 +311,220 @@ jobs:
             fs.rmSync(resolved, { recursive: true, force: false });
             if (fs.existsSync(resolved)) throw new Error(`candidate cleanup incomplete: ${name}`);
             console.log(`CANDIDATE_TEMP_REMOVED ${name}`);
+          }
+          NODE
+
+  aggregate-candidate-capsule:
+    if: github.ref == 'refs/heads/codex/v08-dsh-upgrade'
+    needs: native-candidate-audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      CANDIDATE_DIR: compliance/candidates/dsh-0.1.1-rc.2
+
+    steps:
+      - name: Check out exact candidate commit
+        uses: actions/checkout@v4
+
+      - name: Set up pinned Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+
+      - name: Verify pinned Node and npm toolchain
+        run: |
+          node <<'NODE'
+          'use strict';
+          const { spawnSync } = require('child_process');
+          const result = spawnSync('npm', ['--version'], { encoding: 'utf8', shell: false });
+          if (result.error) throw result.error;
+          const npmVersion = String(result.stdout || '').trim();
+          if (process.version !== 'v22.23.2' || result.status !== 0 || npmVersion !== '10.9.8') {
+            throw new Error(`Expected Node v22.23.2 / npm 10.9.8, got ${process.version} / ${npmVersion}`);
+          }
+          console.log(`TOOLCHAIN_VERIFIED ${process.version} npm/${npmVersion} ${process.platform}/${process.arch}`);
+          NODE
+
+      - name: Prepare isolated aggregate paths
+        run: |
+          node <<'NODE'
+          'use strict';
+          const fs = require('fs');
+          const os = require('os');
+          const path = require('path');
+          const temporaryRoot = fs.realpathSync(os.tmpdir());
+          const values = {
+            ARTIFACT_DARWIN_ARM64: fs.mkdtempSync(path.join(temporaryRoot, 'whaledock-dsh-artifact-darwin-arm64-')),
+            ARTIFACT_DARWIN_X64: fs.mkdtempSync(path.join(temporaryRoot, 'whaledock-dsh-artifact-darwin-x64-')),
+            ARTIFACT_WIN32_X64: fs.mkdtempSync(path.join(temporaryRoot, 'whaledock-dsh-artifact-win32-x64-')),
+            CAPSULE_ROOT: fs.mkdtempSync(path.join(temporaryRoot, 'whaledock-dsh-capsule-')),
+            MIRROR_DIR: fs.mkdtempSync(path.join(temporaryRoot, 'whaledock-dsh-capsule-mirror-'))
+          };
+          values.GENERATED_DIR = path.join(values.CAPSULE_ROOT, 'generated');
+          values.AGGREGATE_UPLOAD_DIR = path.join(values.CAPSULE_ROOT, 'upload');
+          fs.appendFileSync(process.env.GITHUB_ENV,
+            Object.entries(values).map(([name, value]) => `${name}=${value}\n`).join(''));
+          console.log(`CANDIDATE_AGGREGATE_PATHS_READY ${values.CAPSULE_ROOT}`);
+          NODE
+
+      - name: Download darwin arm64 candidate artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dsh-candidate-darwin-arm64
+          path: ${{ env.ARTIFACT_DARWIN_ARM64 }}
+
+      - name: Download darwin x64 candidate artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dsh-candidate-darwin-x64
+          path: ${{ env.ARTIFACT_DARWIN_X64 }}
+
+      - name: Download win32 x64 candidate artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dsh-candidate-win32-x64
+          path: ${{ env.ARTIFACT_WIN32_X64 }}
+
+      - name: Aggregate the three native candidate artifacts
+        run: |
+          node <<'NODE'
+          'use strict';
+          const path = require('path');
+          const { spawnSync } = require('child_process');
+          const result = spawnSync(process.execPath, [
+            'scripts/dsh-candidate-capsule.js',
+            `--artifact=${process.env.ARTIFACT_DARWIN_ARM64}`,
+            `--artifact=${process.env.ARTIFACT_DARWIN_X64}`,
+            `--artifact=${process.env.ARTIFACT_WIN32_X64}`,
+            `--repository-root=${process.env.GITHUB_WORKSPACE}`,
+            `--candidate-dir=${path.join(process.env.GITHUB_WORKSPACE, process.env.CANDIDATE_DIR)}`,
+            `--output-dir=${process.env.GENERATED_DIR}`,
+            `--expected-commit=${process.env.GITHUB_SHA}`
+          ], { stdio: 'inherit', shell: false });
+          if (result.error) throw result.error;
+          if (result.status !== 0) process.exit(result.status || 1);
+          NODE
+
+      - name: Generate and verify candidate sources and notices in a clean mirror
+        run: |
+          node <<'NODE'
+          'use strict';
+          const fs = require('fs');
+          const path = require('path');
+          const { spawnSync } = require('child_process');
+          const mirror = process.env.MIRROR_DIR;
+          fs.mkdirSync(path.join(mirror, 'scripts'), { recursive: true });
+          fs.copyFileSync('scripts/third-party-inventory.js', path.join(mirror, 'scripts', 'third-party-inventory.js'));
+          fs.cpSync(path.join(process.env.GENERATED_DIR, 'compliance'), path.join(mirror, 'compliance'), {
+            recursive: true,
+            errorOnExist: true
+          });
+          fs.cpSync(path.join(process.env.GENERATED_DIR, 'licenses'), path.join(mirror, 'licenses'), {
+            recursive: true,
+            errorOnExist: true
+          });
+
+          const inventoryScript = path.join(mirror, 'scripts', 'third-party-inventory.js');
+          const sourcesOutput = path.join(mirror, 'compliance', 'SOURCES.md');
+          const noticesOutput = path.join(mirror, 'THIRD_PARTY_NOTICES.md');
+          const common = [
+            `--inventories=${path.join(mirror, 'compliance')}`,
+            `--sources=${path.join(mirror, 'compliance', 'SOURCES.json')}`
+          ];
+          const commands = [
+            ['sources', ...common, `--output=${sourcesOutput}`],
+            ['notices', ...common, `--output=${noticesOutput}`],
+            ['sources', '--check', ...common, `--output=${sourcesOutput}`],
+            ['notices', '--check', ...common, `--output=${noticesOutput}`]
+          ];
+          for (const args of commands) {
+            const result = spawnSync(process.execPath, [inventoryScript, ...args], { stdio: 'inherit', shell: false });
+            if (result.error) throw result.error;
+            if (result.status !== 0) process.exit(result.status || 1);
+          }
+          fs.cpSync(process.env.GENERATED_DIR, process.env.AGGREGATE_UPLOAD_DIR, {
+            recursive: true,
+            errorOnExist: true
+          });
+          fs.copyFileSync(sourcesOutput, path.join(process.env.AGGREGATE_UPLOAD_DIR, 'compliance', 'SOURCES.md'));
+          fs.copyFileSync(noticesOutput, path.join(process.env.AGGREGATE_UPLOAD_DIR, 'THIRD_PARTY_NOTICES.md'));
+          console.log('CANDIDATE_MARKDOWN_VERIFIED');
+          NODE
+
+      - name: Upload complete candidate capsule evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-candidate-capsule-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 7
+          path: ${{ env.AGGREGATE_UPLOAD_DIR }}
+
+      - name: Verify generated capsule against the committed candidate
+        run: |
+          node <<'NODE'
+          'use strict';
+          const path = require('path');
+          const { spawnSync } = require('child_process');
+          const result = spawnSync(process.execPath, [
+            'scripts/dsh-candidate-capsule-verify.js',
+            `--repository-root=${process.env.GITHUB_WORKSPACE}`,
+            `--candidate-dir=${path.join(process.env.GITHUB_WORKSPACE, process.env.CANDIDATE_DIR)}`,
+            `--generated-dir=${process.env.GENERATED_DIR}`,
+            `--mirror-dir=${process.env.MIRROR_DIR}`
+          ], { stdio: 'inherit', shell: false });
+          if (result.error) throw result.error;
+          if (result.status !== 0) process.exit(result.status || 1);
+          NODE
+
+      - name: Confirm aggregate audit kept the checkout read-only
+        if: always()
+        run: |
+          node <<'NODE'
+          'use strict';
+          const { spawnSync } = require('child_process');
+          const result = spawnSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
+            encoding: 'utf8',
+            shell: false
+          });
+          if (result.error) throw result.error;
+          if (result.status !== 0 || String(result.stdout || '').trim()) {
+            throw new Error(`candidate aggregate mutated checkout:\n${String(result.stdout || '').trim()}`);
+          }
+          console.log('CANDIDATE_AGGREGATE_CHECKOUT_READ_ONLY');
+          NODE
+
+      - name: Remove exact aggregate temporary roots
+        if: always()
+        run: |
+          node <<'NODE'
+          'use strict';
+          const fs = require('fs');
+          const os = require('os');
+          const path = require('path');
+          const temporaryRoot = fs.realpathSync(os.tmpdir());
+          for (const [name, prefix] of [
+            ['ARTIFACT_DARWIN_ARM64', 'whaledock-dsh-artifact-darwin-arm64-'],
+            ['ARTIFACT_DARWIN_X64', 'whaledock-dsh-artifact-darwin-x64-'],
+            ['ARTIFACT_WIN32_X64', 'whaledock-dsh-artifact-win32-x64-'],
+            ['CAPSULE_ROOT', 'whaledock-dsh-capsule-'],
+            ['MIRROR_DIR', 'whaledock-dsh-capsule-mirror-']
+          ]) {
+            const requested = process.env[name];
+            if (!requested || !fs.existsSync(requested)) continue;
+            const stat = fs.lstatSync(requested);
+            const resolved = fs.realpathSync(requested);
+            const relative = path.relative(temporaryRoot, resolved);
+            if (!stat.isDirectory() || stat.isSymbolicLink()
+                || !relative || relative.startsWith(`..${path.sep}`) || relative === '..'
+                || path.isAbsolute(relative) || relative.includes(path.sep)
+                || !path.basename(resolved).startsWith(prefix)) {
+              throw new Error(`refuse unsafe aggregate cleanup: ${name}`);
+            }
+            fs.rmSync(resolved, { recursive: true, force: false });
+            if (fs.existsSync(resolved)) throw new Error(`aggregate cleanup incomplete: ${name}`);
+            console.log(`CANDIDATE_AGGREGATE_TEMP_REMOVED ${name}`);
           }
           NODE
