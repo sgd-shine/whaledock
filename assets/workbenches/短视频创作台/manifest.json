@@ -6,7 +6,7 @@
   "author": "SGD",
   "license": "MIT",
   "homepage": "https://github.com/sgd-shine/whaledock",
-  "dshRange": "0.1.0-rc.6",
+  "dshRange": "0.1.1-rc.2",
   "accent": "#f97316",
   "cockpit": "video"
 }

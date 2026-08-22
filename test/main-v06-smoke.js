@@ -719,7 +719,9 @@ async function main06() {
     ]) {
       assert.ok(pkg.build.files.includes(entry), entry);
     }
-    assert.deepEqual(pkg.dependencies || {}, {});
+    assert.deepEqual(pkg.dependencies || {}, {
+      '@larksuiteoapi/node-sdk': '1.73.0'
+    });
     assert.ok(fs.existsSync(path.join(ROOT, 'assets', 'workbenches', '短视频创作台', 'manifest.json')));
   });
 

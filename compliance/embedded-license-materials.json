@@ -1,20 +1,20 @@
 {
   "schemaVersion": 1,
   "auditedAt": "2026-08-15",
-  "scope": "WhaleDock bundled dsh runtime: declared embedded sharp/libvips components for darwin/arm64, darwin/x64, win32/x64 and the shared wasm32 fallback",
+  "scope": "WhaleDock dsh 0.1.1-rc.2 candidate bundled runtime: reachable embedded components only",
   "evidenceBasis": {
     "inventories": [
       {
         "path": "compliance/inventory-darwin-arm64.json",
-        "sha256": "b6f936d57a8ebe327fd52c67503f8bde386717672c53a4a2994aa0a4cd83f652"
+        "sha256": "bf6f7be72a8d6f02ee7e1809f0763494c01d75f3fee3f137724c3dec51cc77eb"
       },
       {
         "path": "compliance/inventory-darwin-x64.json",
-        "sha256": "f998c1092c7e1bf380549b789cbbd88039235399250a29b22f2b61ee5103bf11"
+        "sha256": "5477b28b7e3478ecd0bb895c09c870a9b22c915391357ad0b5b71a8d15bc3253"
       },
       {
         "path": "compliance/inventory-win32-x64.json",
-        "sha256": "27dfe3481633345cd9fef204250b9383f919de3671d08ed292c0cc8f44b41f10"
+        "sha256": "8d79dcd012d7bafe877ba0ef38da9679d29897d439a80cc7de3af710f1a40b24"
       }
     ],
     "declarations": [
@@ -54,7 +54,7 @@
     "confirmedAttributionDiscrepancies": [
       "cairo@1.18.4"
     ],
-    "status": "complete for every component explicitly declared by the pinned package README/versions vectors; libnsgif is pinned as exact vendored bytes without inventing an independent upstream version"
+    "status": "complete for components reachable from the three pinned candidate inventories"
   },
   "targets": [
     {
@@ -66,33 +66,33 @@
       "readmeSha256": "47083f1ae7e990f74a56f576bcb8434051cb84ed1982fa57932720869e5147fe",
       "componentIds": [
         "aom@3.14.1",
-        "libarchive@3.8.8",
         "cairo@1.18.4",
         "cgif@0.5.3",
-        "libexif@0.6.26",
         "expat@2.8.2",
-        "libffi@3.6.0",
         "fontconfig@2.18.1",
         "freetype@2.14.3",
         "fribidi@1.0.16",
         "glib@2.89.1",
         "harfbuzz@14.2.1",
-        "libheif@1.23.1",
         "highway@1.4.0",
+        "libarchive@3.8.8",
+        "libexif@0.6.26",
+        "libffi@3.6.0",
+        "libheif@1.23.1",
         "libimagequant@2.4.1",
-        "little-cms@2.19.1",
-        "mozjpeg@08265790774cd0714832c9e675522acbe5581437",
-        "pango@1.58.0",
-        "pixman@0.46.4",
+        "libnsgif@vendored-libvips-8.18.3",
         "libpng@1.6.58",
-        "proxy-libintl@0.5",
         "librsvg@2.62.90",
         "libtiff@d01a94be176f5f6a87f7ee1c0b32e65416aa2b4d",
         "libultrahdr@1acdbed8c712e6923ebf9de4e7c8d8dda06509e9",
         "libvips@8.18.3",
-        "libnsgif@vendored-libvips-8.18.3",
         "libwebp@1.6.0",
         "libxml2@2.15.3",
+        "little-cms@2.19.1",
+        "mozjpeg@08265790774cd0714832c9e675522acbe5581437",
+        "pango@1.58.0",
+        "pixman@0.46.4",
+        "proxy-libintl@0.5",
         "zlib-ng@2.3.3"
       ]
     },
@@ -105,33 +105,33 @@
       "readmeSha256": "bbb84e1fa86b44508e893afe1a84a640cd452c0e671f001256959352bfacb7e5",
       "componentIds": [
         "aom@3.14.1",
-        "libarchive@3.8.8",
         "cairo@1.18.4",
         "cgif@0.5.3",
-        "libexif@0.6.26",
         "expat@2.8.2",
-        "libffi@3.6.0",
         "fontconfig@2.18.1",
         "freetype@2.14.3",
         "fribidi@1.0.16",
         "glib@2.89.1",
         "harfbuzz@14.2.1",
-        "libheif@1.23.1",
         "highway@1.4.0",
+        "libarchive@3.8.8",
+        "libexif@0.6.26",
+        "libffi@3.6.0",
+        "libheif@1.23.1",
         "libimagequant@2.4.1",
-        "little-cms@2.19.1",
-        "mozjpeg@08265790774cd0714832c9e675522acbe5581437",
-        "pango@1.58.0",
-        "pixman@0.46.4",
+        "libnsgif@vendored-libvips-8.18.3",
         "libpng@1.6.58",
-        "proxy-libintl@0.5",
         "librsvg@2.62.90",
         "libtiff@d01a94be176f5f6a87f7ee1c0b32e65416aa2b4d",
         "libultrahdr@1acdbed8c712e6923ebf9de4e7c8d8dda06509e9",
         "libvips@8.18.3",
-        "libnsgif@vendored-libvips-8.18.3",
         "libwebp@1.6.0",
         "libxml2@2.15.3",
+        "little-cms@2.19.1",
+        "mozjpeg@08265790774cd0714832c9e675522acbe5581437",
+        "pango@1.58.0",
+        "pixman@0.46.4",
+        "proxy-libintl@0.5",
         "zlib-ng@2.3.3"
       ]
     },
@@ -144,33 +144,33 @@
       "readmeSha256": "280e7d164420cfc1a1b192a582bf53e3dba97b86a5c3575f878b674ad1d41e13",
       "componentIds": [
         "aom@3.14.1",
-        "libarchive@3.8.7",
         "cairo@1.18.4",
         "cgif@0.5.3",
-        "libexif@0.6.26",
         "expat@2.8.1",
-        "libffi@3.5.2",
         "fontconfig@2.18.1",
         "freetype@2.14.3",
         "fribidi@1.0.16",
         "glib@2.89.0",
         "harfbuzz@14.2.1",
-        "libheif@1.23.0",
         "highway@1.4.0",
+        "libarchive@3.8.7",
+        "libexif@0.6.26",
+        "libffi@3.5.2",
+        "libheif@1.23.0",
         "libimagequant@2.4.1",
-        "little-cms@2.19.1",
-        "mozjpeg@08265790774cd0714832c9e675522acbe5581437",
-        "pango@1.57.1",
-        "pixman@0.46.4",
+        "libnsgif@vendored-libvips-8.18.3",
         "libpng@1.6.58",
-        "proxy-libintl@0.5",
         "librsvg@2.62.3",
         "libtiff@732665c2c8785cec3e1f46ba9908575f0f3a8059",
         "libultrahdr@13a058f452d846e43d4691f6885eeeaa8b0ea8d0",
         "libvips@8.18.3",
-        "libnsgif@vendored-libvips-8.18.3",
         "libwebp@1.6.0",
         "libxml2@2.15.3",
+        "little-cms@2.19.1",
+        "mozjpeg@08265790774cd0714832c9e675522acbe5581437",
+        "pango@1.57.1",
+        "pixman@0.46.4",
+        "proxy-libintl@0.5",
         "zlib-ng@2.3.3"
       ]
     },
@@ -184,24 +184,24 @@
       "componentIds": [
         "aom@3.14.1",
         "cgif@0.5.3",
-        "libexif@0.6.26",
+        "emscripten@6.0.1",
         "expat@2.8.2",
-        "libffi@3.6.0",
         "glib@2.89.1",
-        "libheif@1.23.1",
         "highway@1.4.0",
+        "libexif@0.6.26",
+        "libffi@3.6.0",
+        "libheif@1.23.1",
         "libimagequant@2.4.1",
-        "little-cms@2.19.1",
-        "mozjpeg@08265790774cd0714832c9e675522acbe5581437",
+        "libnsgif@vendored-libvips-8.18.3",
         "libpng@1.6.58",
         "libtiff@4.7.2rc2",
         "libultrahdr@1acdbed8c712e6923ebf9de4e7c8d8dda06509e9",
         "libvips@8.18.3",
-        "libnsgif@vendored-libvips-8.18.3",
         "libwebp@1.6.0",
-        "zlib-ng@2.3.3",
-        "emscripten@6.0.1",
-        "resvg@0.47.0"
+        "little-cms@2.19.1",
+        "mozjpeg@08265790774cd0714832c9e675522acbe5581437",
+        "resvg@0.47.0",
+        "zlib-ng@2.3.3"
       ],
       "excludedConditionalBuildInputs": [
         {
@@ -1607,27 +1607,13 @@
       "id": "sharp-libvips-third-party-notices",
       "repositoryPath": "licenses/embedded-components/sharp-libvips-v1.3.2-THIRD-PARTY-NOTICES.md",
       "repositorySha256": "25ffcfa69e28b1913ced27ec778b90f24911a1bb3021253577e8b0af55db0d49",
-      "upstreamCopies": [
-        {
-          "componentIds": [],
-          "upstreamUrl": "https://raw.githubusercontent.com/lovell/sharp-libvips/4da6d14c0d59866adfb9d8cf52bcaa53846dc4f6/THIRD-PARTY-NOTICES.md",
-          "upstreamByteSha256": "25ffcfa69e28b1913ced27ec778b90f24911a1bb3021253577e8b0af55db0d49",
-          "sourceRef": "4da6d14c0d59866adfb9d8cf52bcaa53846dc4f6"
-        }
-      ]
+      "upstreamCopies": []
     },
     {
       "id": "wasm-vips-third-party-notices",
       "repositoryPath": "licenses/embedded-components/wasm-vips-9ff73c-THIRD-PARTY-NOTICES.md",
       "repositorySha256": "0f52de00dd217125646ae85177def3e144de48d11f76368f257ba6468d3f7d8d",
-      "upstreamCopies": [
-        {
-          "componentIds": [],
-          "upstreamUrl": "https://raw.githubusercontent.com/kleisauke/wasm-vips/9ff73c569c91ded6f8d8c7570967d0dadcf0134d/THIRD-PARTY-NOTICES.md",
-          "upstreamByteSha256": "0f52de00dd217125646ae85177def3e144de48d11f76368f257ba6468d3f7d8d",
-          "sourceRef": "9ff73c569c91ded6f8d8c7570967d0dadcf0134d"
-        }
-      ]
+      "upstreamCopies": []
     }
   ],
   "verificationRules": [

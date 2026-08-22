@@ -29,7 +29,7 @@ async function main() {
   // config
   const data = config.init(tmp);
   check('config: 默认值加载', data.port === 3080 && data.autoStartBackend === true);
-  check('config: 默认锁定后端版本', data.dshVersion === '0.1.0-rc.6');
+  check('config: 默认锁定后端版本', data.dshVersion === '0.1.1-rc.2');
   check('config: v0.2 五个新字段默认值正确',
     data.preferBundled === false
       && data.openAtLogin === false
@@ -517,78 +517,37 @@ async function main() {
   fs.mkdirSync(path.join(bundledPackage, 'lib'), { recursive: true });
   fs.writeFileSync(path.join(bundledPackage, 'lib', 'bin.js'), '// smoke fixture\n');
   fs.writeFileSync(path.join(bundledRoot, 'manifest.json'), JSON.stringify({
-    dshVersion: '0.1.0-rc.6'
+    dshVersion: '0.1.1-rc.2'
   }));
   const fakeRuntimeInfo = {
     execPath: '/Applications/WhaleDock.app/Contents/MacOS/WhaleDock',
     resourcesPath: bundledResources
   };
-  const bundledFallback = backend.resolveCommand({ dshVersion: '0.1.0-rc.6' }, {
+  const bundledFallback = backend.resolveCommand({ dshVersion: '0.1.1-rc.2' }, {
     findCommand: () => null,
     runtimeInfo: fakeRuntimeInfo
   });
   const bundledPreferred = backend.resolveCommand({
-    dshVersion: '0.1.0-rc.6',
+    dshVersion: '0.1.1-rc.2',
     preferBundled: true
   }, {
     findCommand: () => { throw new Error('preferBundled 不应继续 PATH 探测'); },
     runtimeInfo: fakeRuntimeInfo
   });
   const pathFirst = backend.resolveCommand({
-    dshVersion: '0.1.0-rc.6',
+    dshVersion: '0.1.1-rc.2',
     preferBundled: false
   }, {
     findCommand: (name) => name === 'dsh' ? '/test/bin/dsh' : null,
     runtimeInfo: fakeRuntimeInfo
   });
-  const missingBundled = backend.resolveCommand({ dshVersion: '0.1.0-rc.6' }, {
+  const missingBundled = backend.resolveCommand({ dshVersion: '0.1.1-rc.2' }, {
     findCommand: () => null,
     runtimeInfo: { execPath: '/test/WhaleDock', resourcesPath: path.join(tmp, 'missing') }
   });
   check('backend: 内置引擎第四级探测与 preferBundled 次序',
     bundledFallback
       && JSON.stringify(bundledFallback) === JSON.stringify({
-        file: fakeRuntimeInfo.execPath,
-        args: [
-          '--expose-internals', path.join(bundledPackage, 'lib', 'bin.js'),
-          'web', '--port', '3080'
-        ],
-        shell: false,
-        env: { ELECTRON_RUN_AS_NODE: '1' },
-        bundled: true,
-        label: '内置 dsh@0.1.0-rc.6 web --port 3080',
-        version: '0.1.0-rc.6'
-      })
-      && bundledFallback.bundled === true
-      && bundledFallback.env.ELECTRON_RUN_AS_NODE === '1'
-      && bundledFallback.args[0] === '--expose-internals'
-      && bundledFallback.args[1].endsWith(path.join('@deepseek-ai', 'dsh', 'lib', 'bin.js'))
-      && bundledPreferred.bundled === true
-      && pathFirst.file === '/test/bin/dsh'
-      && missingBundled === null,
-    bundledFallback ? bundledFallback.label : 'null');
-
-  const bundledCandidateBlocked = backend.resolveCommand({ dshVersion: '0.1.1-rc.2' }, {
-    findCommand: () => null,
-    runtimeInfo: fakeRuntimeInfo
-  });
-  const bundledCandidatePlan = backend.buildBundledCommandPlan(
-    fakeRuntimeInfo.execPath,
-    path.join(bundledPackage, 'lib', 'bin.js'),
-    '0.1.1-rc.2',
-    '3080'
-  );
-  check('backend: bundled 纯 planner 覆盖 rc.6/rc.2 完整对象且不绕过生产锁',
-    bundledCandidateBlocked === null
-      && JSON.stringify(bundledFallback) === JSON.stringify(
-        backend.buildBundledCommandPlan(
-          fakeRuntimeInfo.execPath,
-          path.join(bundledPackage, 'lib', 'bin.js'),
-          '0.1.0-rc.6',
-          '3080'
-        )
-      )
-      && JSON.stringify(bundledCandidatePlan) === JSON.stringify({
         file: fakeRuntimeInfo.execPath,
         args: [
           '--expose-internals', path.join(bundledPackage, 'lib', 'bin.js'),
@@ -599,6 +558,47 @@ async function main() {
         bundled: true,
         label: '内置 dsh@0.1.1-rc.2 web --port 3080 --no-open',
         version: '0.1.1-rc.2'
+      })
+      && bundledFallback.bundled === true
+      && bundledFallback.env.ELECTRON_RUN_AS_NODE === '1'
+      && bundledFallback.args[0] === '--expose-internals'
+      && bundledFallback.args[1].endsWith(path.join('@deepseek-ai', 'dsh', 'lib', 'bin.js'))
+      && bundledPreferred.bundled === true
+      && pathFirst.file === '/test/bin/dsh'
+      && missingBundled === null,
+    bundledFallback ? bundledFallback.label : 'null');
+
+  const bundledLegacyBlocked = backend.resolveCommand({ dshVersion: '0.1.0-rc.6' }, {
+    findCommand: () => null,
+    runtimeInfo: fakeRuntimeInfo
+  });
+  const bundledLegacyPlan = backend.buildBundledCommandPlan(
+    fakeRuntimeInfo.execPath,
+    path.join(bundledPackage, 'lib', 'bin.js'),
+    '0.1.0-rc.6',
+    '3080'
+  );
+  check('backend: bundled 纯 planner 锁定 rc.2 且保留 rc.6 历史参数回归',
+    bundledLegacyBlocked === null
+      && JSON.stringify(bundledFallback) === JSON.stringify(
+        backend.buildBundledCommandPlan(
+          fakeRuntimeInfo.execPath,
+          path.join(bundledPackage, 'lib', 'bin.js'),
+          '0.1.1-rc.2',
+          '3080'
+        )
+      )
+      && JSON.stringify(bundledLegacyPlan) === JSON.stringify({
+        file: fakeRuntimeInfo.execPath,
+        args: [
+          '--expose-internals', path.join(bundledPackage, 'lib', 'bin.js'),
+          'web', '--port', '3080'
+        ],
+        shell: false,
+        env: { ELECTRON_RUN_AS_NODE: '1' },
+        bundled: true,
+        label: '内置 dsh@0.1.0-rc.6 web --port 3080',
+        version: '0.1.0-rc.6'
       }));
 
   // 端口应当未开
@@ -661,7 +661,7 @@ async function main() {
       && JSON.stringify(target.args) === JSON.stringify([
         '-y', '@deepseek-ai/dsh@0.1.1-rc.2', 'web', '--port', '3080', '--no-open'
       ])
-      && empty.args[1] === '@deepseek-ai/dsh@0.1.0-rc.6',
+      && empty.args[1] === '@deepseek-ai/dsh@0.1.1-rc.2',
     pinned.label);
 
   const systemRc6 = backend.resolveCommand({ dshVersion: '0.1.1-rc.2' }, {
@@ -967,6 +967,22 @@ async function main() {
     if (result.stdout) process.stdout.write(result.stdout);
     if (result.stderr) process.stderr.write(result.stderr);
     check(`dsh 跟版: ${label}直测纳入统一 smoke`, result.status === 0,
+      result.status === 0 ? file : `${file} exit=${result.status}`);
+  }
+
+  // v0.8 根 App 运行时合规链：与 dsh inventory 分开生成，并回读各安装载体。
+  for (const [file, label] of [
+    ['app-runtime-compliance-smoke.js', '根生产依赖闭包、许可与 install script 门'],
+    ['verify-packaged-app-runtime-smoke.js', '成品 Electron、惰性 SDK 与工作流载体门']
+  ]) {
+    const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
+      cwd: path.join(__dirname, '..'),
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024
+    });
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    check(`v0.8: ${label}直测纳入统一 smoke`, result.status === 0,
       result.status === 0 ? file : `${file} exit=${result.status}`);
   }
 

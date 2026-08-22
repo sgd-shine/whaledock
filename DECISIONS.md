@@ -27,3 +27,9 @@
 **D11 · npx 回退路径锁定 dsh 版本（config.dshVersion，默认 0.1.0-rc.6）。** 原实现 `npx -y @deepseek-ai/dsh` 永远拉最新版，上游 rc 阶段明示可能破坏兼容——等于把所有用户的可用性押在上游每一次发版上。默认锁定已验证版本，用户可设 `latest` 跟随；全局安装的 dsh 不受影响。升级路径：真机验证新 rc 后改默认值发新版本。
 
 **D12 · 隐藏窗口时后端退出采用有上限自愈。** 主窗口可见时继续让用户决定是否重启；窗口隐藏时按 1/2/4 秒最多尝试三次，成功后只重载隐藏窗口，不抢焦点，全部失败后发系统通知。未签名 macOS 构建若 Notification 投递失败，必须记录失败并回退错误对话框，不能静默。
+
+## 2026-08-22 · v0.8 dsh 晋升与飞书运行时（SGD 批准，Codex 执行）
+
+**D13 · 经六门侦察把默认 dsh 从 `0.1.0-rc.6` 晋升到 `0.1.1-rc.2`。** 生产只接受已核验的精确 lock、三平台原生 inventory、NOTICE/SOURCES 与 214 份许可材料；若 npm `latest` 在发版前漂移，不自动追新，停止并重走侦察。旧配置只有字节精确等于历史默认 rc.6 时一次性迁移，`latest`、其他版本、自定义命令和非规范值全部保留。dsh 自有 SQLite schema 15→17 由上游负责，鲸坞仍不读写、迁移或清理 `~/.dsh`。
+
+**D14 · 为飞书低层长连接批准唯一根运行时依赖例外。** `@larksuiteoapi/node-sdk` 精确锁定 `1.73.0`，只使用 `WSClient` 与 `EventDispatcher`，仅在用户启用并连接飞书时惰性加载；关闭态必须零 SDK 加载、零平台网络。该 52 包生产闭包使用独立 `compliance/app-runtime/` inventory、NOTICE、内容哈希许可原文和成品 verifier，不得混入 `vendor/dsh-runtime` 的 inventory/NOTICE/licenses。以后新增或升级根运行时依赖必须重新通过同一 fail-closed 合规门。

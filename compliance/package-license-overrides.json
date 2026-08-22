@@ -1,33 +1,33 @@
 {
   "schemaVersion": 1,
   "packages": {
-    "@aws-sdk/credential-provider-http@3.972.71": {
+    "@aws-sdk/credential-provider-http@3.972.72": {
       "licenseFiles": [
         {
           "path": "licenses/package-texts/edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d.txt",
           "sha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d",
-          "sourceUrl": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/c41e9a98d4227b06099fdc7ea42bcf6fc5a1029f/LICENSE",
-          "sourceCommit": "c41e9a98d4227b06099fdc7ea42bcf6fc5a1029f"
+          "sourceUrl": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/d760a00859a08b5d04590ee047510b49add12361/LICENSE",
+          "sourceCommit": "d760a00859a08b5d04590ee047510b49add12361"
         }
       ]
     },
-    "@aws-sdk/credential-provider-login@3.972.76": {
+    "@aws-sdk/credential-provider-login@3.972.77": {
       "licenseFiles": [
         {
           "path": "licenses/package-texts/edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d.txt",
           "sha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d",
-          "sourceUrl": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/c41e9a98d4227b06099fdc7ea42bcf6fc5a1029f/LICENSE",
-          "sourceCommit": "c41e9a98d4227b06099fdc7ea42bcf6fc5a1029f"
+          "sourceUrl": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/d760a00859a08b5d04590ee047510b49add12361/LICENSE",
+          "sourceCommit": "d760a00859a08b5d04590ee047510b49add12361"
         }
       ]
     },
-    "@aws-sdk/nested-clients@3.997.43": {
+    "@aws-sdk/nested-clients@3.997.44": {
       "licenseFiles": [
         {
           "path": "licenses/package-texts/edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d.txt",
           "sha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d",
-          "sourceUrl": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/c41e9a98d4227b06099fdc7ea42bcf6fc5a1029f/LICENSE",
-          "sourceCommit": "c41e9a98d4227b06099fdc7ea42bcf6fc5a1029f"
+          "sourceUrl": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/d760a00859a08b5d04590ee047510b49add12361/LICENSE",
+          "sourceCommit": "d760a00859a08b5d04590ee047510b49add12361"
         }
       ]
     },
@@ -43,33 +43,33 @@
         }
       ]
     },
-    "@koromix/koffi-darwin-arm64@3.1.5": {
+    "@koromix/koffi-darwin-arm64@3.1.6": {
       "licenseFiles": [
         {
           "path": "licenses/package-texts/22bcbbbacd739b026a8dc484f62a31484ce4c4e31f3408b60b29b4e41d62b290.txt",
           "sha256": "22bcbbbacd739b026a8dc484f62a31484ce4c4e31f3408b60b29b4e41d62b290",
-          "sourceUrl": "https://codeberg.org/Koromix/rygel/raw/commit/9f21705571f7745c6edfec19fadb642240b748f0/src/koffi/LICENSE.txt",
-          "sourceCommit": "9f21705571f7745c6edfec19fadb642240b748f0"
+          "sourceUrl": "https://codeberg.org/Koromix/rygel/raw/commit/08a5cd359094275f19a51893c6693c403b62e307/src/koffi/LICENSE.txt",
+          "sourceCommit": "08a5cd359094275f19a51893c6693c403b62e307"
         }
       ]
     },
-    "@koromix/koffi-darwin-x64@3.1.5": {
+    "@koromix/koffi-darwin-x64@3.1.6": {
       "licenseFiles": [
         {
           "path": "licenses/package-texts/22bcbbbacd739b026a8dc484f62a31484ce4c4e31f3408b60b29b4e41d62b290.txt",
           "sha256": "22bcbbbacd739b026a8dc484f62a31484ce4c4e31f3408b60b29b4e41d62b290",
-          "sourceUrl": "https://codeberg.org/Koromix/rygel/raw/commit/9f21705571f7745c6edfec19fadb642240b748f0/src/koffi/LICENSE.txt",
-          "sourceCommit": "9f21705571f7745c6edfec19fadb642240b748f0"
+          "sourceUrl": "https://codeberg.org/Koromix/rygel/raw/commit/08a5cd359094275f19a51893c6693c403b62e307/src/koffi/LICENSE.txt",
+          "sourceCommit": "08a5cd359094275f19a51893c6693c403b62e307"
         }
       ]
     },
-    "@koromix/koffi-win32-x64@3.1.5": {
+    "@koromix/koffi-win32-x64@3.1.6": {
       "licenseFiles": [
         {
           "path": "licenses/package-texts/22bcbbbacd739b026a8dc484f62a31484ce4c4e31f3408b60b29b4e41d62b290.txt",
           "sha256": "22bcbbbacd739b026a8dc484f62a31484ce4c4e31f3408b60b29b4e41d62b290",
-          "sourceUrl": "https://codeberg.org/Koromix/rygel/raw/commit/9f21705571f7745c6edfec19fadb642240b748f0/src/koffi/LICENSE.txt",
-          "sourceCommit": "9f21705571f7745c6edfec19fadb642240b748f0"
+          "sourceUrl": "https://codeberg.org/Koromix/rygel/raw/commit/08a5cd359094275f19a51893c6693c403b62e307/src/koffi/LICENSE.txt",
+          "sourceCommit": "08a5cd359094275f19a51893c6693c403b62e307"
         }
       ]
     },

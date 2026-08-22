@@ -11,9 +11,9 @@
 | 容器 | 目标 | 再分发 tarball | npm provenance | 构建配方 |
 | --- | --- | --- | --- | --- |
 | @img/sharp-libvips-darwin-arm64@1.3.2 | darwin/arm64 | [精确二进制](https://registry.npmjs.org/@img/sharp-libvips-darwin-arm64/-/sharp-libvips-darwin-arm64-1.3.2.tgz) | [SLSA](https://registry.npmjs.org/-/npm/v1/attestations/@img%2fsharp-libvips-darwin-arm64@1.3.2) | `sharp-libvips@1.3.2` |
+| @img/sharp-wasm32@0.35.3 | darwin/arm64, darwin/x64, win32/x64 | [精确二进制](https://registry.npmjs.org/@img/sharp-wasm32/-/sharp-wasm32-0.35.3.tgz) | [SLSA](https://registry.npmjs.org/-/npm/v1/attestations/@img%2fsharp-wasm32@0.35.3) | `sharp@0.35.3` + `sharp-libvips@1.3.2` + `wasm-vips@9ff73c569c91ded6f8d8c7570967d0dadcf0134d` |
 | @img/sharp-libvips-darwin-x64@1.3.2 | darwin/x64 | [精确二进制](https://registry.npmjs.org/@img/sharp-libvips-darwin-x64/-/sharp-libvips-darwin-x64-1.3.2.tgz) | [SLSA](https://registry.npmjs.org/-/npm/v1/attestations/@img%2fsharp-libvips-darwin-x64@1.3.2) | `sharp-libvips@1.3.2` |
 | @img/sharp-win32-x64@0.35.3 | win32/x64 | [精确二进制](https://registry.npmjs.org/@img/sharp-win32-x64/-/sharp-win32-x64-0.35.3.tgz) | [SLSA](https://registry.npmjs.org/-/npm/v1/attestations/@img%2fsharp-win32-x64@0.35.3) | `sharp@0.35.3` + `sharp-libvips@1.3.2` + `build-win64-mxe@8.18.3` |
-| @img/sharp-wasm32@0.35.3 | darwin/arm64, darwin/x64, win32/x64 | [精确二进制](https://registry.npmjs.org/@img/sharp-wasm32/-/sharp-wasm32-0.35.3.tgz) | [SLSA](https://registry.npmjs.org/-/npm/v1/attestations/@img%2fsharp-wasm32@0.35.3) | `sharp@0.35.3` + `sharp-libvips@1.3.2` + `wasm-vips@9ff73c569c91ded6f8d8c7570967d0dadcf0134d` |
 
 ## 不可变源码归档
 

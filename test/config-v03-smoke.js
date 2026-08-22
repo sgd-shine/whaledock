@@ -46,7 +46,7 @@ try {
   test('config: dsh 包版本与 host 协议版本分开锁定', () => {
     assert(Object.isFrozen(config.DSH_CONTRACT));
     assert.deepStrictEqual(config.DSH_CONTRACT, {
-      packageVersion: '0.1.0-rc.6',
+      packageVersion: '0.1.1-rc.2',
       hostVersion: '0.0.1'
     });
     assert.strictEqual(config.DEFAULTS.dshVersion, config.DSH_CONTRACT.packageVersion);
@@ -57,6 +57,45 @@ try {
     config.init(contractDir);
     const persisted = JSON.parse(fs.readFileSync(path.join(contractDir, 'config.json'), 'utf8'));
     assert(!Object.prototype.hasOwnProperty.call(persisted, 'hostVersion'));
+  });
+
+  test('config: 只把精确旧默认 rc.6 一次性迁移到 rc.2', () => {
+    const migrationDir = path.join(tmp, 'dsh-default-migration');
+    fs.mkdirSync(migrationDir, { recursive: true });
+    const migrationFile = path.join(migrationDir, 'config.json');
+    fs.writeFileSync(migrationFile, JSON.stringify({
+      dshVersion: '0.1.0-rc.6',
+      command: 'node custom-backend.js',
+      port: 4314,
+      checkUpdates: false
+    }, null, 2) + '\n');
+
+    const migrated = config.init(migrationDir);
+    assert.strictEqual(migrated.dshVersion, '0.1.1-rc.2');
+    assert.strictEqual(migrated.command, 'node custom-backend.js');
+    assert.strictEqual(migrated.port, 4314);
+    assert.strictEqual(migrated.checkUpdates, false);
+    const persisted = JSON.parse(fs.readFileSync(migrationFile, 'utf8'));
+    assert.deepStrictEqual(persisted, {
+      dshVersion: '0.1.1-rc.2',
+      command: 'node custom-backend.js',
+      port: 4314,
+      checkUpdates: false
+    });
+
+    for (const [label, stored, normalized] of [
+      ['latest', 'latest', 'latest'],
+      ['custom-version', '0.1.1-rc.1', '0.1.1-rc.1'],
+      ['non-exact-old-default', ' 0.1.0-rc.6 ', '0.1.0-rc.6']
+    ]) {
+      const dir = path.join(tmp, `dsh-default-preserve-${label}`);
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, 'config.json');
+      const original = JSON.stringify({ dshVersion: stored, port: 4315 }, null, 2) + '\n';
+      fs.writeFileSync(file, original);
+      assert.strictEqual(config.init(dir).dshVersion, normalized, label);
+      assert.strictEqual(fs.readFileSync(file, 'utf8'), original, `${label} 不应重写`);
+    }
   });
 
   test('config: v0.3 默认通知、预算与单价', () => {

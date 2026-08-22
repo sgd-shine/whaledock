@@ -431,13 +431,15 @@ async function run() {
     assert.equal(/executeJavaScript/.test(value), false);
   });
 
-  await test('产物清单含完整驾驶舱，运行时依赖仍为空', async () => {
+  await test('产物清单含完整驾驶舱，运行时依赖仅保留精确飞书 SDK', async () => {
     const pkg = JSON.parse(source('package.json'));
     for (const entry of [
       'preload-shell.js', 'shell.html', 'shell.js', 'preload-shooting.js',
       'shooting.html', 'shooting.css', 'shooting.js', 'lib/**/*'
     ]) assert.ok(pkg.build.files.includes(entry), entry);
-    assert.deepEqual(pkg.dependencies || {}, {});
+    assert.deepEqual(pkg.dependencies || {}, {
+      '@larksuiteoapi/node-sdk': '1.73.0'
+    });
   });
 
   console.log(`\nMAIN VIDEO RUNTIME ALL PASS (${passed})`);

@@ -59,7 +59,7 @@ const GOOD_MANIFEST = {
   author: 'SGD',
   license: 'MIT',
   homepage: 'https://github.com/sgd-shine/whaledock',
-  dshRange: '0.1.0-rc.6',
+  dshRange: '0.1.1-rc.2',
   accent: '#22d3ee',
   cockpit: 'video'
 };
@@ -758,7 +758,7 @@ async function main() {
     assert.equal(pkg.version, '0.1.0');
     assert.equal(pkg.license, 'MIT');
     assert.equal(pkg.cockpit, null, '电商客服仍走既有工作台布局');
-    assert.equal(pkg.dshRange, '0.1.0-rc.6');
+    assert.equal(pkg.dshRange, '0.1.1-rc.2');
     assert.equal(pkg.heavy, true);
     assert.deepEqual(
       fs.readdirSync(pkg.dir).sort(),

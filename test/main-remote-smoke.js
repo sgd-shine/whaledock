@@ -283,7 +283,9 @@ async function run() {
   await test('工作台包与远程配置彼此独立，构建仍由 lib 通配符收录', async () => {
     const packageJson = JSON.parse(source('package.json'));
     assert.ok(packageJson.build.files.includes('lib/**/*'));
-    assert.equal(JSON.stringify(packageJson.dependencies || {}), '{}');
+    assert.deepStrictEqual(packageJson.dependencies || {}, {
+      '@larksuiteoapi/node-sdk': '1.73.0'
+    });
     assert.equal(source('lib/workbenches.js').includes('remoteFeishuEnabled'), false);
     assert.equal(source('assets/workbenches/短视频创作台/manifest.json').includes('remote'), false);
   });

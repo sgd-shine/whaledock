@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "packages": [
+    {
+      "name": "protobufjs",
+      "version": "7.6.5",
+      "lockPath": "node_modules/protobufjs",
+      "lifecycle": "postinstall",
+      "command": "node scripts/postinstall",
+      "scriptPath": "scripts/postinstall.js",
+      "sha256": "5af8463b97ee8e309b4a2111f9479bacdf0c180de0ca0155527679b1fc6d9e6c"
+    }
+  ]
+}

@@ -17,11 +17,11 @@
 - **原生体验**：记住窗口位置与大小、全局快捷键、托盘菜单、刷新/缩放/全屏，站外链接交给系统浏览器
 - **启动页与日志**：实时显示启动日志；端口上的服务不像 Harness 时先警告，不会默默接错网页
 
-后端默认锁定 `@deepseek-ai/dsh@0.1.0-rc.6`。上游仍处于 rc 阶段，因此升级锁定版本前需要重新验证；鲸坞不会写入或清理 `~/.dsh`。
+后端默认锁定 `@deepseek-ai/dsh@0.1.1-rc.2`。从 v0.8.0 起，只有旧配置中精确等于旧默认值 `0.1.0-rc.6` 的后端版本会一次性跟随到 `0.1.1-rc.2`；`latest`、其他版本和用户自定义值均原样保留。上游仍处于 rc 阶段，因此升级锁定版本前需要重新验证；鲸坞不会写入或清理 `~/.dsh`。
 
 ## v0.3.0 已公开发布
 
-v0.3.0 已作为当前稳定版公开发布：[正式 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0) 为非 draft、非 prerelease，`releases/latest` 已命中 v0.3 正式版（tag `v0.3.0`）。正式注解 tag 对象 `8af8f86a527a105c9dbe5a204e75afcdd9dba409` 指向提交 `fe2d4def7bb7ef1d9339b71b1e28236fd9e1eabf`；[main CI 31893926627](https://github.com/sgd-shine/whaledock/actions/runs/31893926627) 三平台全绿，[Release run 31894036652](https://github.com/sgd-shine/whaledock/actions/runs/31894036652) 的 attempt 2 publish job [95035294975](https://github.com/sgd-shine/whaledock/actions/runs/31894036652/job/95035294975) 已发布八项资产。
+v0.3.0 已作为历史稳定版公开发布：[正式 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0) 为非 draft、非 prerelease。正式注解 tag 对象 `8af8f86a527a105c9dbe5a204e75afcdd9dba409` 指向提交 `fe2d4def7bb7ef1d9339b71b1e28236fd9e1eabf`；[main CI 31893926627](https://github.com/sgd-shine/whaledock/actions/runs/31893926627) 三平台全绿，[Release run 31894036652](https://github.com/sgd-shine/whaledock/actions/runs/31894036652) 的 attempt 2 publish job [95035294975](https://github.com/sgd-shine/whaledock/actions/runs/31894036652/job/95035294975) 已发布八项资产。
 
 - **任务与用量看板**：独立本地窗口显示今日/本周已观测 token、估算费用、顶层/子代理聚合和最近匿名任务。固定口径是“**dsh 已观测用量，非账单**”。
 - **任务通知**：完成、失败与等待人工事件在本地持久成功后才进入 Electron Notification，并可降级到 Dock、托盘与鲸坞自有 banner。
@@ -55,7 +55,7 @@ v0.3.0 已作为当前稳定版公开发布：[正式 Release](https://github.co
 
 ## v0.4.0 已发布
 
-v0.4.0 的批次 12 已完成实现、三平台 CI 与公开发布，当前稳定下载版是 [`v0.4.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.4.0)；[`v0.3.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0) 保留为历史版本。
+v0.4.0 的批次 12 已完成实现、三平台 CI 与公开发布，[`v0.4.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.4.0) 与 [`v0.3.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0) 现均作为历史版本保留。
 
 - **单工作区管理**：只有 `config.json` 确实不存在的新用户才会创建 `~/Documents/鲸坞工作台/默认工作区`（POSIX 尽量为 `0700`）；既有配置即使 `workdir:null` 也原样尊重，不暗中迁移。
 - **菜单、托盘与标题**：两处都有“工作区”子菜单，可切换最近目录或打开新文件夹；标题显示已提交的工作区名。切换使用串行 journal，必须完成旧后端停止、config 持久、新后端归属与实际 cwd 回读后才提交；失败回滚或 fail-closed。
@@ -67,7 +67,7 @@ v0.4.0 的批次 12 已完成实现、三平台 CI 与公开发布，当前稳�
 
 ## v0.6.0 已发布：工作台包
 
-当前稳定下载版是 [`v0.6.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.6.0)。macOS arm64/x64 安装包已用
+v0.6.0 是已发布的历史版本，macOS arm64/x64 安装包已用
 **Developer ID Application** 正式签名，开启 Hardened Runtime，并通过 Apple 公证；DMG 已附加离线公证票据。
 
 **鲸坞从「一个能开 Harness 的壳」，变成「一个可以停不同船的坞」。**
@@ -125,7 +125,7 @@ SHA-256、Developer ID、Hardened Runtime、stapler 与 Gatekeeper 校验，安�
 托盘图标目前是**程序合成的占位角标**，20 张正式素材是单独一批。
 详见 [v0.6 交付与验收清单](docs/v0.6交付与验收清单-2026-08-20.md)。
 
-## v0.7.0 发布候选：视频驾驶舱、全宽对话与色系快切
+## v0.7.0 已发布：视频驾驶舱、全宽对话与色系快切
 
 - **第一方视频驾驶舱**：今天、选题拍板、脚本块级建议/对照/采用/撤销、全屏拍摄提词器、两阶段收工、发布检查单与打法库连成一条本地创作线。平台数据没有接通时只显示“侦察中，未接通”，不使用示意数字。
 - **全宽对话现场**：在创作现场与完整 dsh/Harness 之间用 `⌘K` / `Ctrl+K` 往返，切换不重载同一个视图，会话与未发送草稿继续保留。
@@ -133,7 +133,17 @@ SHA-256、Developer ID、Hardened Runtime、stapler 与 Gatekeeper 校验，安�
 - **远程板块批次 1**：设置页已有三通道骨架和自助向导，但飞书、钉钉、随身网页默认全关，本版没有接通任何真实平台。
 - **电商客服工作台包**：随附示例话术版，继续遵守纯数据、纯本地和不执行包内内容的边界。
 
-本地 `npm run smoke` 为 **452 PASS / ALL PASS**；三处发版前小修已覆盖灵感成功后即时清空、建议卡标题分行及 `⌘⇧K` / `Ctrl+Shift+K` 不误触。`package.json` 已进入 `0.7.0` 发布候选；正式 tag、签名/公证成品和公开 Release 仍以对应云端回读为准，不能借用 v0.6.0 证据。
+正式 [`v0.7.0` Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.7.0) 为非 draft、非 prerelease；注解 tag 精确指向 `310654e412af38fd0d49f575c57ad9c166d3f7c4`，[main CI 32566512173](https://github.com/sgd-shine/whaledock/actions/runs/32566512173) 三平台全绿。发布链的通配符冲突修复后，本地统一 `npm run smoke` 为 **453 PASS / ALL PASS**；公开 Release 共 8 项资产。Windows 仍未做真机验收，Intel Mac 仍只有 Apple Silicon + Rosetta 抽查，不能由 CI、签名或公证替代。
+
+## v0.8.0 发布候选：dsh 跟版与飞书远程桥
+
+- **dsh 精确升锁**：内置 runtime 与 npx 回退统一锁定 `@deepseek-ai/dsh@0.1.1-rc.2`；仅旧默认 `0.1.0-rc.6` 会一次性迁移，用户自定义选择不被覆盖。
+- **飞书远程桥**：接入自建应用的官方长连接，手机绑定后可进行受控的消息收发。根应用仅精确依赖 `@larksuiteoapi/node-sdk@1.73.0`，且只在飞书通道实际启用时懒加载；飞书关闭时不加载 SDK，也不建立平台网络连接。
+- **双合规身份**：dsh 内置 runtime 继续使用根 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)；根应用 SDK 及其可达闭包单独使用 [`compliance/app-runtime/THIRD_PARTY_NOTICES.md`](compliance/app-runtime/THIRD_PARTY_NOTICES.md)、inventory 和内容哈希许可文本，两条链不混合。
+
+> **手动启用 SQLite 的用户请先备份并保留旧 runtime。** dsh `0.1.1-rc.2` 的 opt-in SQLite schema 从 15 升到 17，当前没有迁移路径；鲸坞不会替你迁移、覆盖或清理这份数据。默认 JSONL 会话存储不受这条提示影响。
+
+v0.8.0 当前仍是**批次 5 进行中的发布候选**：源码锁定与合规材料已进入收口，但正式 tag、三平台最终成品回读、签名/公证和公开 Release 尚未完成。飞书真实企业租户、手机收发与人工绑定也尚未验收，不能由源码测试或成品 probe 代替；此处不声称 v0.8 已发布，也不声称 Windows 或 Intel Mac 真机已通过。
 
 ## v0.5.0 已发布：桌面宠物与皮肤主题
 
@@ -178,7 +188,7 @@ v0.5 给鲸坞加了两件可以完全自定义的东西，**都不需要写代�
 
 安装版已经带有内置引擎，**普通用户不需要另装 Node.js，也不需要打开终端**。首次进入 Harness 后，仍需按[官方说明](https://github.com/deepseek-ai/deepseek-harness)配置所需的模型/API Key。
 
-安装包包含第三方组件；逐包清单、源码地址与完整许可证见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+安装包包含第三方组件；dsh 内置 runtime 的逐包清单、源码地址与完整许可证见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)，根应用运行时（含飞书 SDK）的独立清单与许可文本见 [`compliance/app-runtime/THIRD_PARTY_NOTICES.md`](compliance/app-runtime/THIRD_PARTY_NOTICES.md)。
 
 ### macOS 首次打开
 
@@ -211,7 +221,7 @@ v0.5 给鲸坞加了两件可以完全自定义的东西，**都不需要写代�
 
 1. 你填写的自定义命令；
 2. PATH 中已经安装的 `dsh`；
-3. PATH 中的 `npx`，并锁定 `0.1.0-rc.6`；
+3. PATH 中的 `npx`，并锁定 `0.1.1-rc.2`；
 4. 安装包自带的 dsh 运行环境。
 
 因此，已有 Node/dsh 的开发者仍可沿用自己的环境；没有 Node 的电脑会自动落到内置引擎。若本机 Node 环境混乱，可在「设置 → 后端」勾选「优先使用内置引擎」，让内置引擎排到系统 PATH 探测之前。该开关默认关闭。
@@ -228,7 +238,7 @@ v0.5 给鲸坞加了两件可以完全自定义的东西，**都不需要写代�
 | 自动检查新版本 | 开启 | 保存后立即生效 |
 | 端口 | `3080` | 保存后需重启后端 |
 | 工作区 | 仅新配置默认为 `Documents/鲸坞工作台/默认工作区` | 设置页只读；从菜单/托盘或“选择并切换…”执行完整后端事务 |
-| 后端版本 | `0.1.0-rc.6` | 控制 npx 回退；内置引擎只在该值与包内版本一致时可用；保存后需重启后端 |
+| 后端版本 | `0.1.1-rc.2` | 控制 npx 回退；内置引擎只在该值与包内版本一致时可用；保存后需重启后端 |
 | 优先使用内置引擎 | 关闭 | 保存后需重启后端 |
 | 自定义启动命令 | 留空 | 高级选项；保存后需重启后端 |
 | 启用截图快捷键 | 开启 | 关闭时真实解除注册 |
@@ -298,11 +308,11 @@ node scripts/macos-build-visibility.js --out-dir=release --check
 
 **切换工作区后，AI 就不能读其他目录了吗** — 不是。工作区是 dsh 的默认 cwd 和鲸坞截图的保存根，不是读取沙箱。请仍不要把不希望 AI 访问的敏感文件放在可访问路径。
 
-**截图后为什么只提示复制粘贴** — 锁定的 DeepSeek 通道是 text-only。只有本地 loopback、rc.6 根包/合约证明和目标会话都通过时，鲸坞才会在第二次确认后提交 OCR 文本+图片路径。任一条件不满足就复制已预览的同一份文本，请用户自己粘贴；超时/断线结果不确定时也不自动重试。
+**截图后为什么只提示复制粘贴** — 锁定的 DeepSeek 通道是 text-only。只有本地 loopback、当前锁定 dsh 根包/合约证明和目标会话都通过时，鲸坞才会在第二次确认后提交 OCR 文本+图片路径。任一条件不满足就复制已预览的同一份文本，请用户自己粘贴；超时/断线结果不确定时也不自动重试。
 
 **Windows 退出后还有 node/dsh 进程** — 先从托盘选择「退出」，再查看设置页/日志。Windows 版用 `taskkill /T` 清理托管的进程树；若真机验收失败，第一步应复制日志定位，不要猜测性改命令。
 
-**想跟随最新 dsh** — 可把后端版本改为 `latest`，但上游仍是 rc，可能出现破坏性变化，而且与包内锁定版本不一致时不会走内置引擎。稳定使用建议保留默认 `0.1.0-rc.6`。
+**想跟随最新 dsh** — 可把后端版本改为 `latest`，但上游仍是 rc，可能出现破坏性变化，而且与包内锁定版本不一致时不会走内置引擎。稳定使用建议保留默认 `0.1.1-rc.2`。
 
 ## 文档
 
@@ -329,7 +339,8 @@ node scripts/macos-build-visibility.js --out-dir=release --check
 - **v0.4.0**：批次 12 的单工作区切换与截图入口 v1 已实现、过三平台 CI 并公开发布。并行多开（独立端口/多后端/多主窗口）明确保留为 P2，本版未实现。
 - **v0.5.0**：批次 13 的桌面宠物与皮肤主题，已实现、过三平台 CI 并公开发布。宠物包与主题包都是纯静态资源，不执行包内代码、不联网下载。宠物包热重载、多只同屏与点击查看任务详情保留为 P2。
 - **v0.6.0**：工作台包机制、内置短视频创作台、托盘五态与叫醒阶梯，已实现、过三平台 CI 并公开发布；macOS 成品已正式签名并通过 Apple 公证。社区包目录、`.whaledock` 一键装、提示词输入表单与批量执行仍留待后续版本；`agent.cordis.yml` 继续**只检测不接通**。
-- **v0.7.0**：第一方视频驾驶舱、全宽对话现场、鲸坞全局色系快切、远程板块批次 1 骨架与电商客服示例包已进入发布候选；真实远程平台、Windows/Intel 真机与 Windows 签名仍是独立后续边界。
+- **v0.7.0**：第一方视频驾驶舱、全宽对话现场、鲸坞全局色系快切、远程板块批次 1 骨架与电商客服示例包已公开发布；Windows/Intel 真机与 Windows 签名仍是独立边界。
+- **v0.8.0**：dsh 默认锁定升至 `0.1.1-rc.2`，飞书自建应用长连接与独立 app-runtime 合规链已进入批次 5 发布候选；正式 tag、三平台最终成品和公开 Release 尚未完成。
 - **v1.0**：macOS 签名/公证已在 v0.6.0 提前完成；v1.0 的范围不再把它当作未完前置项。Windows 签名与双平台真机覆盖仍需独立决策和证据。
 
 ## License

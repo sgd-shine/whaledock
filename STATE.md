@@ -16,9 +16,9 @@
 - `package-lock.json`、`compliance/`、`vendor/`、`licenses/` 与 `THIRD_PARTY_NOTICES.md` 相对 v0.6.0 零变化；root runtime dependencies=0，dsh 仍锁定 `0.1.0-rc.6`，无 S1。
 - `v0.7.0` tag 已落地，dsh 跟版升级线与远程批次 2 的开工条件已满足；两线的后续状态与证据由各自线程维护，不由本发版结论代替。
 
-## dsh 跟版升级｜批次 0–4（独立分支，等待 SGD 批次 5 批准）
+## v0.8.0 dsh / 飞书整合｜批次 0–5（已批准，发版门进行中）
 
-- 本线在独立 worktree `harness-desktop-v08-dsh-upgrade`、分支 `codex/v08-dsh-upgrade` 上从最新 `main@29070d5` 开工；没有改动并行飞书线的独占文件。
+- 本线在独立 worktree `harness-desktop-v08-dsh-upgrade`、分支 `codex/v08-dsh-upgrade` 上从 `main@29070d5` 开工。批次 5 已在 dsh 预合并 head `05e489f5…` 之后按原父链合入飞书提交 `8ef005872e6b87d09eaba8ae601d132380151640` 与 `257b8bb60eff8ac97c18037dec03147036ef96fa`，本分支映射为 `e668611…` 与 `c444bfb…`，patch-id 一致，共享 `main.js` / `test/smoke.js` 已小步解冲突。
 - 2026-08-22T12:28Z 实时回读 npm `latest=next=0.1.1-rc.2`，发布时间 `2026-08-21T12:42:19.422Z`，tarball SHA-1 `1a5112369f1c46b13a6e6f21de8af5e6afd45074`；后续探针与候选材料只认该精确版本，若发布前 latest 再漂移则全套重跑。
 - 批次 1 已让 system dsh 与 npx 生产计划按已知版本决定 `--no-open`；bundled 仍被生产锁限制为 rc.6，本批只对 rc.2 验证纯 argv planner，不能启动 rc.2 bundled。rc.8 及以后追加旗标，rc.6 的完整命令对象保持原样。PATH 中 system dsh 不起版本子进程，只有界读取官方 npm shim/symlink 布局与 `package.json`；未知即沿用旧参数，结果不作为事件/prompt 根包证明；custom 命令零探测、零改写。
 - 批次 2 新增统一的根包 exact-proof helper：生产调用省略候选版本时仍只接受 rc.6；隔离探针可显式要求 `0.1.1-rc.2`，但 proof 必须逐字节相等。prompt 与托管事件门共用该 helper；错版、缺 proof、`latest`、system/custom 描述值均 fail-closed。workdir 的 host/cwd 证明与外部 read-only events attach 没有被误绑根包版本。
@@ -33,9 +33,11 @@
 - 胶囊提交 **214** 份许可材料（158 package-texts、33 embedded-components、3 embedded、20 SPDX），并含独立 NOTICE、SOURCES、3 份 inventory、3 份 runtime/material manifest 与原生二进制证明。包级 GPL/AGPL/SSPL 为 0；4 个弱 copyleft 二进制容器及其 14 个 source components 已进入源码/归属闭包，wasm 与 Cairo 差异按原边界保留而未被抹平。
 - 三平台候选 runtime 逻辑字节为 arm64 **209,815,821 B**、x64 **212,451,977 B**、Windows **211,785,126 B**。相对 v0.7 已发布 macOS runtime ZIP 清单未压缩基线，arm64 少 **55,010,936 B（-20.77%）**、x64 少 **55,220,118 B（-20.63%）**；Windows 现行解包基线与批次 5 成品包体均为 `N/A`，不由压缩证据外推。
 - 最终 [candidate CI 32580171385](https://github.com/sgd-shine/whaledock/actions/runs/32580171385) 在精确 head `9e6dfdb…` 上四个 job 全绿：macOS arm64、macOS Intel x64、Windows x64 原生构建/比对及 aggregate 均成功。完整胶囊 artifact 为 **4,883,804 B**，digest `sha256:cccb510e225ee5ad5dd516c2c329525b0112a16c9bb55234ea6064b172fdab8c`；下载后本机再次核验为 3 targets、214 license files、mirror verified `PASS`。
-- **S1/G1 审批边界**：候选现场重证未发现禁止许可、强 copyleft 或安装体积阻断；但再分发闭包确实变化，本卡是 S1 口径的入批次 5 审批请求，不等于 SGD 已批准。candidate G1 已闭环；生产 lock、正式三平台 compliance、成品内材料及安装/签名/公证/发布均未发生，生产 G1 仍待批次 5。
-- 生产边界保持：`scripts/bundle-dsh.js` 只新增显式 manifest 驱动、fail-closed 的隔离 candidate mode；`lib/config.js`、root `package.json/package-lock.json`、正式 `compliance/`、`licenses/`、`THIRD_PARTY_NOTICES.md` 与 vendor 均未切换，生产 dsh 仍锁定 `0.1.0-rc.6`。
-- **STOP**：未获 SGD 明确批准前不进入批次 5，不修改生产锁、不合并飞书提交、不打 tag、不构建或发布 v0.8.0。未来根 lock 合并窗还必须把飞书 SDK 的 app-runtime 52 包闭包作为独立 inventory/NOTICE/licenses/成品 verifier 链闭环，不能混入或由本 dsh-runtime capsule 代替。
+- **SGD 已明确批准进入批次 5**：批准合入 dsh 与飞书代码、升生产锁，并落独立 app-runtime inventory/NOTICE/licenses/成品验证。生产 dsh 现已精确切到 `0.1.1-rc.2`；只有持久配置中字节精确等于旧默认 rc.6 才一次性迁移，`latest`、其他版本、非规范值和 custom command 保留。正式 dsh lock SHA-256 为 `c084af82305715116ac5bd30d586be94e0fce9e00c31db0a309c3eecdd099527`，三平台 inventory 449 / 449 / 448 包，许可材料 214 份，与已核验 capsule 逐字节一致。
+- 根 `package.json/package-lock.json` 已在独立窗精确锁定 `@larksuiteoapi/node-sdk@1.73.0`，未使用 `^` / `~`。最终根 lock 的生产可达闭包是 **52 包**（MIT 40 / BSD-3-Clause 11 / Apache-2.0 1）、源文件 830 个 / 39,607,980 B，许可原文去重 35 份；全量与 `--omit=dev` 的 `npm audit` 五级均为 0。该身份只存于 `compliance/app-runtime/`，没有混入 dsh runtime 材料。
+- 独立 app-runtime 链已基于最终 lock 生成且离线复核：inventory lock SHA-256 `b377ea28421419ee831a76ea93d01f92b45d420532a604c6f3a809b7a7aa88bf`，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`，成品预期树 `b363e6c80bca9296e566e0accae30143e6ce02dc53a660ec706bf8c9cfac1d02`；只有 `protobufjs@7.6.5` 的 postinstall 在精确脚本哈希 allowlist 中。CI/Release/resume 已要求 macOS `.app-bundle` / ZIP / 挂载 DMG 与 Windows unpacked / Setup / portable 全部同时运行 dsh 与 app-runtime verifier。
+- 本地统一 `npm run smoke` 实跑 **579 PASS / ALL PASS**。本机 arm64 真实 `electron-builder --mac dir` 已生成 ad-hoc 成品；dsh 随包材料与签名回读通过。app verifier 由此捕获并修复了 Electron ASAR 虚拟 `fs` 和 electron-builder 依赖 hoist/manifest 重写差异；最终将经确定性清理的 manifest 与必需运行时文件集全部绑定到 inventory，缺文件或改 `main` / `exports` / dependencies 都 fail-closed。真实成品回执 `packages=52 files=449 tree=b363e6c8…`，SDK 懒加载及 `WSClient` / `EventDispatcher` 导出已由成品 Electron 验证。
+- **当前发布边界**：工作树已完成生产切换与本地成品证据，但尚未合入 `main`、未打 `v0.8.0` tag、未获得最终三平台成品、未设置精确审批值也未创建公开 Release。发版前仍必须实时重查 npm `latest`；若不再是 rc.2，则停止并重走侦察/G1。
 
 **v0.6.0 历史发布基线：工作台包通过三平台 CI，macOS arm64/x64 成品使用 Developer ID Application 正式签名、开启 Hardened Runtime 并获 Apple 公证。**
 
@@ -88,10 +90,10 @@ Windows/Intel 真机与 Windows 签名仍是独立证据边界；v0.6.0 → v0.7
 - 本批不含真实飞书/钉钉 adapter、凭据输入/本地安全存储、真手机收发、随身网页 HTTP 监听、二维码或 Tailscale 安装。设置页向导是批次 1 信息架构，不得写成平台已可绑定。
 - SGD 已在 v0.7.0 tag 前完成人工目视卡并回“过”：检查了三通道默认关闭、向导文案、未配置不假绿与全部断开回读。内部记录为 `docs/验收记录-远程板块-批次1-2026-08-21.md`（已 exclude）；这不代表真实平台 adapter 已接通。
 
-### 下批硬门
+### 批次 2 / 批次 5 现状与后续边界
 
-- SGD 已批准未来精确加入 `@larksuiteoapi/node-sdk@1.73.0`，且只使用低层 `WSClient + EventDispatcher`；SDK 必须懒加载，飞书关闭时零加载、零网络。飞书代码线父链为 `main@29070d5` → `8ef005872e6b87d09eaba8ae601d132380151640` → `257b8bb60eff8ac97c18037dec03147036ef96fa`，两提交均未触碰 root manifest/lock，也尚未进入当前 dsh 分支。
-- dependency/lock 只在未来批次 5 的独立合并窗落地。飞书临时候选闭包为 52 包（MIT 40 / BSD-3-Clause 11 / Apache-2.0 1、临时 audit 0），最终值必须基于最终根 lock 重跑；成品必须携带独立 app-runtime inventory/NOTICE/licenses 并通过 packaged verifier。该身份与 dsh-runtime inventory 严格分开，共享 `main.js`、`test/smoke.js`、STATE/HANDOFF 合并前各线先拉最新并小步解冲突。
+- 飞书代码父链与重连 timer 时序修复已进入 v0.8 整合分支；根依赖只有精确 `@larksuiteoapi/node-sdk@1.73.0`，且关闭态零 SDK 加载/零平台网络的源码回归已通过。这不等于真实飞书租户、手机收发或人工绑定已验收。
+- 最终根 lock 的 52 包闭包已通过独立 app-runtime inventory/NOTICE/licenses 与本机 arm64 packaged verifier，没有混入 dsh-runtime 身份。三平台全载体仍等待正式 Release workflow 取证。
 - 批次 4 接真实事项前，内容分级必须接可回查的受信 event/approval/workspace ID，客服来源缺失时 fail-closed；`dedupeKey` 必须接持久去重。
 - 真实 adapter/store 必须完整实现核心合同：权威幂等 apply、同一绑定 store、网络方法响应 `AbortSignal`、断开幂等；回调不得反向等待同通道 service 操作。
 
