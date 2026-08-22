@@ -396,7 +396,10 @@ function renderInspirationScene() {
       const result = await runSceneOperation(spec.label, () => api.runVideoSceneAction({
         action: 'deposit-inspiration', text: payload, askAgent: spec.askAgent
       }));
-      if (result && (result.kind === 'ok' || result.stored === true)) inspirationDraft = '';
+      if (result && (result.kind === 'ok' || result.stored === true)) {
+        inspirationDraft = '';
+        renderScene();
+      }
     });
     actions.appendChild(control);
   }
@@ -506,6 +509,7 @@ function renderProposal() {
   const head = document.createElement('div');
   head.className = 'proposal-head';
   const title = document.createElement('div');
+  title.className = 'proposal-title';
   title.appendChild(text('span', '鲸坞建议 · 黄牌，不会自动生效', 'hero-kicker'));
   title.appendChild(text('strong', `${proposal.title || '当前文档'} · ${proposal.intentLabel || '建议'}`));
   head.appendChild(title);
@@ -1080,6 +1084,7 @@ for (const node of document.querySelectorAll('[data-close]')) {
 
 document.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && !event.altKey
+      && !event.shiftKey
       && event.key.toLowerCase() === 'k' && state.cockpit) {
     event.preventDefault();
     void api.setCockpitView({ focusChat: true });

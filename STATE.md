@@ -1,8 +1,15 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-22（v0.7 远程板块批次 1 已并入 main；视频驾驶舱已改为全宽对话现场并新增鲸坞全局色系快切；公开稳定版仍为 v0.6.0）
+更新：2026-08-22（v0.7.0 发版候选已完成三处体验小修与版本/Release 材料准备；公开稳定版仍为 v0.6.0）
 
 ## 阶段结论
+
+**v0.7.0 发版候选已在独立发布分支完成；在 SGD 5 分钟人工卡回“过”、合入 main 且三平台 CI 全绿以前，不创建 tag。**
+
+- `package.json` 已升至 `0.7.0`；`package-lock.json`、`compliance/`、`vendor/`、`licenses/` 与 `THIRD_PARTY_NOTICES.md` 未改，本轮不升级 Electron/dsh，也没有新增运行时依赖或再分发闭包。
+- 三处小修已完成：灵感成功存入后立即清空输入框且失败保留草稿；建议对照卡黄牌 kicker 与标题分行；页面级 `⌘K` / `Ctrl+K` 明确排除 Shift 组合键，菜单加速器保持不变。
+- 新增最小回归后，本地统一 `npm run smoke` 为 **452 PASS / ALL PASS**；`npm run compliance:verify`、`git diff --check`、runtime dependencies=0 与 `lib/` Electron require=0 均通过。
+- 两条发布路径（Release 与 Resume Notarization）已同步 v0.7.0 用户说明。当前 `v0.7.0` tag/Release 不存在，审批变量为空，v0.7.0 安装包、签名、公证、资产体积与本机安装验收仍为 `N/A`。
 
 **v0.6.0 工作台包已实现、通过三平台 CI，macOS arm64/x64 成品已用 Developer ID Application 正式签名、开启 Hardened Runtime 并获 Apple 公证；公开稳定版已是 v0.6.0。**
 
