@@ -7,18 +7,18 @@
 **v0.7.0 已正式发布并成为 `releases/latest`；本机正式安装已升级到 `/Applications/WhaleDock.app` v0.7.0。**
 
 - SGD 完成远程页、色系、对话往返人工卡并回“过”后，注解 tag `v0.7.0` 精确指向三平台 [main CI 32566512173](https://github.com/sgd-shine/whaledock/actions/runs/32566512173) 全绿的 `310654e412af38fd0d49f575c57ad9c166d3f7c4`。三处体验小修随 PR [#9](https://github.com/sgd-shine/whaledock/pull/9) 发布：灵感成功存入立即清空、失败保留草稿；建议卡标题分行；页面级 `⌘K` / `Ctrl+K` 排除 Shift。
-- 源 [Release run 32567142239](https://github.com/sgd-shine/whaledock/actions/runs/32567142239) 的 macOS/Windows build 均成功：两架构均为 Developer ID Application、`flags=0x10000(runtime)`，四项 Apple submission 全部 `Accepted`，两个 DMG staple/validate 与挂载 App Gatekeeper 均通过；三平台 runtime inventory 为 526 / 526 / 525 包。
+- 首轮 [Release run 32567142239](https://github.com/sgd-shine/whaledock/actions/runs/32567142239) 整体为 failure，但 macOS/Windows build 均成功：两架构均为 Developer ID Application、`flags=0x10000(runtime)`，四项 Apple submission 全部 `Accepted`，两个 DMG staple/validate 与挂载 App Gatekeeper 均通过；三平台 runtime inventory 为 526 / 526 / 525 包。
 - 首轮 publish 被 fail-closed 成品校验及时拦住：通配下载同时合并 pending/final mac artifact，使公证前 arm64 DMG 覆盖公证后同名文件。未创建 Release、未设置审批变量。PR [#10](https://github.com/sgd-shine/whaledock/pull/10) 改为精确下载 final mac 与 Windows，并新增防回归；本地 **453 PASS / ALL PASS**，最终 [main CI 32567814738](https://github.com/sgd-shine/whaledock/actions/runs/32567814738) 三平台全绿。
 - [Resume run 32567660070](https://github.com/sgd-shine/whaledock/actions/runs/32567660070) 只复用原签名资产与四个 submission id，没有重建、重签或重复提交 Apple。六个成品校验全部 `OK`；精确批准摘要为 `96b1a95db9e05f80e9fa68a69e95fde9bbd59d3e3cd8efa84ca8ee47924b162c`。审批变量仅在 publish attempt 2 存在，Release 成功后立即删除并回读为 0。
-- 正式 [Release v0.7.0](https://github.com/sgd-shine/whaledock/releases/tag/v0.7.0) 非 draft、非 prerelease，共 8 项资产：arm64 ZIP/DMG 207,232,507 / 187,641,890 B，x64 ZIP/DMG 212,147,973 / 192,480,811 B，Windows Setup/portable 161,594,468 / 161,406,619 B，两份校验和 372 / 189 B。`releases/latest` 已精确命中 v0.7.0。
+- 正式 [Release v0.7.0](https://github.com/sgd-shine/whaledock/releases/tag/v0.7.0) 非 draft、非 prerelease，共 8 项资产（6 个安装产物 + 2 份校验和）：arm64 ZIP/DMG 207,232,507 / 187,641,890 B，x64 ZIP/DMG 212,147,973 / 192,480,811 B，Windows Setup/portable 161,594,468 / 161,406,619 B，两份校验和 372 / 189 B。`releases/latest` 已精确命中 v0.7.0。
 - macOS runtime 的 ZIP 清单未压缩字节为 arm64 264,826,757 B、x64 267,672,095 B；正式 arm64 安装内 runtime 的本地磁盘占用为 359,784,448 B。Windows 无解包成品/真机，runtime 体积记 `N/A`，只保留 525 包 inventory 证据，不由 EXE 包体反推。
 - 本机仍装 v0.6.0 时已真实点击“立即检查”，回读“发现新版本 0.7.0”；随后从公开 Release 重新下载 arm64 DMG，SHA-256 `c9ebcad88191b2e9f9af18fc93f2a0773abd93f58e46af4cccb1c87951725c15`、Developer ID、Hardened Runtime、stapler、Gatekeeper、v0.7.0/arm64 均通过。安装包自身回读 `SMOKE_OK`，Spotlight 只发现 `/Applications/WhaleDock.app`；旧 v0.6.0 已可恢复地移入废纸篓。
 - `package-lock.json`、`compliance/`、`vendor/`、`licenses/` 与 `THIRD_PARTY_NOTICES.md` 相对 v0.6.0 零变化；root runtime dependencies=0，dsh 仍锁定 `0.1.0-rc.6`，无 S1。
 - `v0.7.0` tag 已落地，dsh 跟版升级线与远程批次 2 的开工条件已满足；两线的后续状态与证据由各自线程维护，不由本发版结论代替。
 
-**v0.6.0 工作台包已实现、通过三平台 CI，macOS arm64/x64 成品已用 Developer ID Application 正式签名、开启 Hardened Runtime 并获 Apple 公证；公开稳定版已是 v0.6.0。**
+**v0.6.0 历史发布基线：工作台包通过三平台 CI，macOS arm64/x64 成品使用 Developer ID Application 正式签名、开启 Hardened Runtime 并获 Apple 公证。**
 
-- 当前稳定版：[`v0.6.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.6.0)；非 draft、非 prerelease，`releases/latest` 已命中 v0.6.0，正式 tag 指向 `7ae619d8b7cbad81412e098706737d7e1490b9e8`。
+- 在 v0.6.0 发布时：[`v0.6.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.6.0) 为非 draft、非 prerelease 的最新稳定版，正式 tag 指向 `7ae619d8b7cbad81412e098706737d7e1490b9e8`。
 - 正式 tag 的 [main CI 32413185966](https://github.com/sgd-shine/whaledock/actions/runs/32413185966) 三平台全绿。源 [Release run 32413319416](https://github.com/sgd-shine/whaledock/actions/runs/32413319416) 构建并保存已签名成品；[Resume run 32440079107](https://github.com/sgd-shine/whaledock/actions/runs/32440079107) 续用同一批成品和 Apple submission id 完成 staple、Gatekeeper 与公开发布，没有重新构建或重复提交。
 - 4 份 macOS 成品均回读 Apple `Accepted`。公开 Release 有 8 项资产：`SHA256SUMS-mac.txt` 372 B、`SHA256SUMS-win.txt` 189 B、arm64 ZIP/DMG 207,138,248 / 187,568,944 B、x64 ZIP/DMG 212,053,773 / 192,382,327 B、Windows Setup/portable 161,526,040 / 161,338,194 B。两份 Actions artifact 已独立下载并通过 6 份成品校验和。
 - v0.6.0 与 v0.5.1 比较没有 `package-lock.json` 或 `compliance/` 变化；源 run 的三平台 inventory、已提交与包内合规材料均成功，没有新增再分发闭包，未触发 S1。
@@ -31,8 +31,8 @@
 - PR [#1](https://github.com/sgd-shine/whaledock/pull/1) 已合并；正式 tag 指向 main 提交 `d8a8a774…`。
 - 批次 7 审计修复：`591f6c1`
 - 批次 9 合规与构建可见性：`4e0c04c`
-- 当前稳定版：[`v0.5.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.5.0)；非 draft、非 prerelease，`releases/latest` 已命中 v0.5 正式版。[`v0.4.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.4.0) 与 [`v0.3.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0) 保留为历史版本。
-- 当前源码版本：`0.5.0` 已发布。
+- 在 v0.5.0 发布时：[`v0.5.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.5.0) 为非 draft、非 prerelease 的最新稳定版；[`v0.4.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.4.0) 与 [`v0.3.0`](https://github.com/sgd-shine/whaledock/releases/tag/v0.3.0) 为更早历史版本。
+- 当时源码版本 `0.5.0` 已发布。
 - v0.5.0 已正式公开发布：[Release v0.5.0](https://github.com/sgd-shine/whaledock/releases/tag/v0.5.0)，非 draft、非 prerelease，`releases/latest` 回读为 `v0.5.0`。正式注解 tag 指向提交 `19c84a4`。
 - 该提交的 main CI [31932130219](https://github.com/sgd-shine/whaledock/actions/runs/31932130219) 三平台全绿；[Release run 31932206962](https://github.com/sgd-shine/whaledock/actions/runs/31932206962) 的 build-mac / build-windows 一次通过，publish job 首次按预期被审批门 fail-closed 阻止，设置精确批准值后重跑成功。
 - 八项资产与精确字节数：`SHA256SUMS-mac.txt` 372 B、`SHA256SUMS-win.txt` 189 B、`WhaleDock-0.5.0-arm64-mac.zip` 204,815,588 B、`WhaleDock-0.5.0-arm64.dmg` 185,292,092 B、`WhaleDock-0.5.0-x64-mac.zip` 207,797,528 B、`WhaleDock-0.5.0-x64.dmg` 188,209,801 B、`WhaleDock-Setup-0.5.0.exe` 161,496,107 B、`WhaleDock-0.5.0-portable.exe` 161,308,254 B。发布前已把两个 Actions artifact 下载到本地，`shasum -a 256 -c` 六项产物全部 OK。
@@ -48,7 +48,7 @@
 - 精确批准值 `release:v0.3.0:sha256:8a7e9f14cfdaee35eb5baaa016547ec0a5d32d110876436185f186a3257407ad` 仅用于本次 publish；Release 回读后已删除，仓库变量回读不存在。
 - 2026-08-15 SGD 决定：不发 beta；Windows 以“实验性支持（未真机验证）”发布；Intel 仅保留 Rosetta 抽查边界；无 S1 且 G1/成品材料闭环后，由 Codex 执行正式发布并临时设置、随即清除精确审批变量。
 
-Windows/Intel 真机、Windows 签名与线上更新仍是独立证据边界。它们不阻断本次发布，但不得改写为已经通过。
+Windows/Intel 真机与 Windows 签名仍是独立证据边界；v0.6.0 → v0.7.0 线上更新提醒已经本机实测。未完成项不阻断本次发布，也不得改写为已经通过。
 
 ## v0.7 远程板块｜批次 1（已整合 main）
 
@@ -63,9 +63,9 @@ Windows/Intel 真机、Windows 签名与线上更新仍是独立证据边界。�
 ### 当前证据与边界
 
 - 整合后的本地 `npm run smoke` 实际为 **450 PASS / ALL PASS**；其中 `remote-smoke.js` 42 项、`main-remote-smoke.js` 10 项，并包含驾驶舱五个套件。Electron 43.4.0 在隔离 userData 的 macOS 源码态回读 `SMOKE_OK`。
-- PR #6 的 [CI run 32561913602](https://github.com/sgd-shine/whaledock/actions/runs/32561913602) 已回读 macOS、Ubuntu、Windows 三项全绿。根 `dependencies` 仍为空，本批没有 SDK、新许可闭包、dsh runtime 变化、打包、Release 或新增产物体积；Windows/Intel 真机、安装包、签名/公证仍为 `N/A`。
+- PR #6 的 [CI run 32561913602](https://github.com/sgd-shine/whaledock/actions/runs/32561913602) 已回读 macOS、Ubuntu、Windows 三项全绿。根 `dependencies` 仍为空；PR #6 这个功能批次本身没有 SDK、新许可闭包、dsh runtime 变化、独立打包、Release 或新增产物体积，不否定顶部最终 v0.7.0 发布证据。
 - 本批不含真实飞书/钉钉 adapter、凭据输入/本地安全存储、真手机收发、随身网页 HTTP 监听、二维码或 Tailscale 安装。设置页向导是批次 1 信息架构，不得写成平台已可绑定。
-- SGD 人工目视卡待执行：预计 3–5 分钟，检查三通道默认关闭、向导文案、未配置不假绿与全部断开回读。内部记录为 `docs/验收记录-远程板块-批次1-2026-08-21.md`（已 exclude）。
+- SGD 已在 v0.7.0 tag 前完成人工目视卡并回“过”：检查了三通道默认关闭、向导文案、未配置不假绿与全部断开回读。内部记录为 `docs/验收记录-远程板块-批次1-2026-08-21.md`（已 exclude）；这不代表真实平台 adapter 已接通。
 
 ### 下批硬门
 
