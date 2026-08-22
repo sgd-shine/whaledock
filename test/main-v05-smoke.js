@@ -14,6 +14,17 @@ const themes = require('../lib/themes');
 const root = path.join(__dirname, '..');
 let passed = 0;
 
+function colorLuminance(hex) {
+  const channels = [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16) / 255)
+    .map((value) => (value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+function contrastRatio(left, right) {
+  const values = [colorLuminance(left), colorLuminance(right)].sort((a, b) => b - a);
+  return (values[0] + 0.05) / (values[1] + 0.05);
+}
+
 async function test(name, run) {
   await run();
   passed += 1;
@@ -36,7 +47,7 @@ async function run() {
   await test('主题只注入自有页面的既有 CSS 变量，且不覆盖 dsh 网页', async () => {
     const theme = themes.builtinFallbackTheme('dark');
     const css = main.themeCssFor('settings.html', theme);
-    assert.equal(css.startsWith(':root{color-scheme:dark;'), true);
+    assert.equal(css.startsWith('html:root{color-scheme:dark;'), true);
     assert.equal(css.includes(`--bg:${theme.colors.background};`), true);
     assert.equal(css.includes('--text:'), true);
     // 主 Harness 页面不在映射表内，拿不到任何注入。
@@ -211,9 +222,21 @@ async function run() {
       roots: [{ dir: path.join(root, 'assets', 'themes'), source: 'builtin' }]
     });
     assert.equal(listedThemes.skipped.length, 0);
-    assert.equal(listedThemes.themes.length, 4);
+    assert.equal(listedThemes.themes.length, 7);
+    assert.deepEqual(new Set(listedThemes.themes.map((item) => item.id)), new Set([
+      'whaledock-dark', 'whaledock-light', 'aurora', 'ink-whale',
+      'sunset-coral', 'jade-night', 'indigo-tide'
+    ]));
     assert.equal(listedThemes.themes.some((item) => item.id === themes.DEFAULT_THEME_ID), true);
     assert.equal(listedThemes.themes.some((item) => item.base === 'light'), true);
+    for (const item of listedThemes.themes) {
+      assert.equal(contrastRatio(item.colors.text, item.colors.background) >= 7, true,
+        `${item.id} 正文与背景至少达到 AAA`);
+      assert.equal(contrastRatio(item.colors.textMuted, item.colors.background) >= 4.5, true,
+        `${item.id} 次要文字与背景至少达到 AA`);
+      assert.equal(contrastRatio(item.colors.background, item.colors.accent) >= 4.5, true,
+        `${item.id} 强调按钮前景与背景至少达到 AA`);
+    }
   });
 
   console.log(`\nMAIN V05 ALL PASS (${passed})`);

@@ -67,7 +67,7 @@ async function main06() {
     const listened = [...preload.matchAll(/ipcRenderer\.on\s*\(\s*['"]([^'"]+)['"]/g)]
       .map((item) => item[1]).sort();
     assert.deepEqual([...new Set(invoked)], [
-      'shell:action', 'shell:cockpit-view', 'shell:get', 'shell:install',
+      'shell:action', 'shell:cockpit-theme', 'shell:cockpit-view', 'shell:get', 'shell:install',
       'shell:onboarding-seen', 'shell:open-settings', 'shell:open-workspace',
       'shell:remove', 'shell:switch', 'shell:video:block-action', 'shell:video:document',
       'shell:video:get', 'shell:video:project-action', 'shell:video:proposal-decision',
@@ -87,7 +87,7 @@ async function main06() {
     const block = value.slice(value.indexOf('function registerShellIpc()'), value.indexOf('function registerSettingsIpc()'));
     const handled = [...block.matchAll(/ipcMain\.handle\('([^']+)'/g)].map((item) => item[1]).sort();
     assert.deepEqual(handled, [
-      'shell:action', 'shell:cockpit-view', 'shell:get', 'shell:install', 'shell:onboarding-seen',
+      'shell:action', 'shell:cockpit-theme', 'shell:cockpit-view', 'shell:get', 'shell:install', 'shell:onboarding-seen',
       'shell:open-settings', 'shell:open-workspace', 'shell:remove', 'shell:switch',
       'shell:video:block-action', 'shell:video:document', 'shell:video:get',
       'shell:video:project-action', 'shell:video:proposal-decision', 'shell:video:scene-action',
@@ -274,7 +274,7 @@ async function main06() {
         primary: '#0a0b0c', accent: '#0d0e0f', text: '#101112', textMuted: '#131415'
       }
     });
-    assert.match(css, /^:root\{color-scheme:dark;/);
+    assert.match(css, /^html:root\{color-scheme:dark;/);
     assert.equal(/url\(|@import|javascript:/.test(css), false);
   });
 

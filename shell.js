@@ -30,6 +30,10 @@ const taskWaiting = el('task-waiting');
 const taskCompleted = el('task-completed');
 const taskRecent = el('task-recent');
 const toggleChat = el('toggle-chat');
+const cockpitThemePicker = el('cockpit-theme-picker');
+const cockpitThemeSelect = el('cockpit-theme-select');
+const cockpitThemeSwatch = el('cockpit-theme-swatch');
+const openThemeSettings = el('open-theme-settings');
 const sceneKicker = el('scene-kicker');
 const sceneHeading = el('scene-heading');
 const sceneSummary = el('scene-summary');
@@ -833,6 +837,48 @@ function applyVideoState(next) {
   renderScene();
 }
 
+function safeThemeColor(value) {
+  return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value) ? value : null;
+}
+
+function renderCockpitTheme(surface) {
+  const value = surface && typeof surface === 'object' ? surface : null;
+  const options = value && Array.isArray(value.themes)
+    ? value.themes.slice(0, 100).filter((item) => item && typeof item.id === 'string'
+      && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(item.id)
+      && typeof item.name === 'string')
+    : [];
+  const signature = options.map((item) => `${item.id}:${item.name}`).join('|');
+  if (cockpitThemeSelect.dataset.catalog !== signature) {
+    clear(cockpitThemeSelect);
+    for (const item of options) {
+      const option = document.createElement('option');
+      option.value = item.id;
+      option.textContent = item.source === 'user' ? `${item.name} · 自制` : item.name;
+      cockpitThemeSelect.appendChild(option);
+    }
+    cockpitThemeSelect.dataset.catalog = signature;
+  }
+  const selectedId = value && typeof value.selected === 'string' ? value.selected : '';
+  if (options.some((item) => item.id === selectedId)) cockpitThemeSelect.value = selectedId;
+  cockpitThemeSelect.disabled = !options.length || Boolean(value && value.locked);
+  const selected = options.find((item) => item.id === cockpitThemeSelect.value) || options[0] || null;
+  const colors = selected && selected.colors && typeof selected.colors === 'object'
+    ? selected.colors : {};
+  for (const [property, color] of [
+    ['--theme-swatch-primary', colors.primary],
+    ['--theme-swatch-accent', colors.accent],
+    ['--theme-swatch-text', colors.text]
+  ]) {
+    const safe = safeThemeColor(color);
+    if (safe) cockpitThemeSwatch.style.setProperty(property, safe);
+    else cockpitThemeSwatch.style.removeProperty(property);
+  }
+  cockpitThemePicker.title = value && value.locked
+    ? '这个工作台使用自带主题；可在设置中查看，但不能从顶栏覆盖'
+    : `鲸坞全局色系；不改变 Harness 对话页${value && value.skipped ? `（已跳过 ${value.skipped} 个无效主题）` : ''}`;
+}
+
 function renderCockpit() {
   const cockpit = state.cockpit && typeof state.cockpit === 'object' ? state.cockpit : null;
   const available = Boolean(cockpit && cockpit.kind === 'video');
@@ -845,6 +891,7 @@ function renderCockpit() {
   toggleChat.textContent = chatOpen ? '返回现场' : '对话 ⌘K';
   toggleChat.setAttribute('aria-pressed', chatOpen ? 'true' : 'false');
   toggleChat.title = chatOpen ? '返回视频创作现场' : '打开完整 dsh 对话现场';
+  renderCockpitTheme(cockpit && cockpit.theme);
   renderTaskFlow(cockpit && cockpit.taskFlow);
   renderRoute();
   renderScene();
@@ -998,6 +1045,19 @@ toggleChat.addEventListener('click', () => {
   const chatOpen = Boolean(state.cockpit && state.cockpit.chatOpen);
   void api.setCockpitView(chatOpen ? { chatOpen: false } : { focusChat: true });
 });
+cockpitThemeSelect.addEventListener('change', () => {
+  const themeId = cockpitThemeSelect.value;
+  cockpitThemeSelect.disabled = true;
+  void api.setCockpitTheme({ themeId }).then((result) => {
+    if (result && result.message) showToast(result.message);
+    else if (result && result.text) showToast(result.text);
+    if (!result || result.kind !== 'ok') void api.getState().then(applyState);
+  }).catch(() => {
+    showToast('色系切换失败，已保留原来的配色。');
+    void api.getState().then(applyState);
+  });
+});
+openThemeSettings.addEventListener('click', () => { void api.openSettings(); });
 
 confirmOk.addEventListener('click', () => {
   const handler = confirmHandler;
