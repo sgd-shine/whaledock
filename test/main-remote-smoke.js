@@ -95,17 +95,52 @@ async function run() {
     assert.equal(/textContent\s*=\s*channel\.reasonCode|\$\{channel\.reasonCode\}/.test(render), false);
   });
 
-  await test('设置 preload 只增加固定断开动作，没有通用 IPC 或任意通道参数', async () => {
+  await test('设置 preload 只暴露固定飞书凭据、自检与断开动作，没有通用 IPC', async () => {
     const preload = source('preload-settings.js');
     assert.match(preload, /disconnectRemote: \(\) => ipcRenderer\.invoke\('settings:remote-disconnect-all'\)/);
+    assert.match(preload, /saveFeishuCredentials: \(value\) => ipcRenderer\.invoke\('settings:remote-feishu-credentials-save', value\)/);
+    assert.match(preload, /clearFeishuCredentials: \(\) => ipcRenderer\.invoke\('settings:remote-feishu-credentials-clear'\)/);
+    assert.match(preload, /testFeishuNotification: \(\) => ipcRenderer\.invoke\('settings:remote-feishu-test-notification'\)/);
     assert.match(preload, /onRuntime: \(callback\)/);
     assert.match(preload, /ipcRenderer\.on\('settings:runtime', listener\)/);
     assert.match(preload, /ipcRenderer\.removeListener\('settings:runtime', listener\)/);
     const remoteChannels = [...preload.matchAll(/ipcRenderer\.invoke\('([^']*remote[^']*)'/g)]
       .map((match) => match[1]);
-    assert.deepEqual(remoteChannels, ['settings:remote-disconnect-all']);
+    assert.deepEqual(remoteChannels, [
+      'settings:remote-feishu-credentials-save',
+      'settings:remote-feishu-credentials-clear',
+      'settings:remote-feishu-test-notification',
+      'settings:remote-disconnect-all'
+    ]);
     assert.equal(/remoteChannel|channelId|command|execute/.test(preload), false);
     assert.equal(/require\(['"](?:fs|child_process|http|https|net)['"]\)/.test(preload), false);
+  });
+
+  await test('飞书凭据使用独立只写表单，Secret 不进入通用设置快照或回填', async () => {
+    const html = source('settings.html');
+    for (const id of [
+      'feishu-app-id', 'feishu-app-secret', 'feishu-credential-status',
+      'feishu-credentials-save', 'feishu-credentials-clear', 'feishu-test-notification'
+    ]) assert.match(html, new RegExp(`id="${id}"`));
+    assert.match(html, /id="feishu-app-secret"[^>]*type="password"[^>]*autocomplete="new-password"/);
+    const fields = html.slice(html.indexOf('const fieldNames = ['), html.indexOf('const booleanFields'));
+    assert.equal(/feishu-app|appSecret|AppSecret/.test(fields), false);
+    assert.match(html, /feishuEls\.appSecret\.value = ''/);
+    const save = html.slice(
+      html.indexOf('async function saveFeishuCredentials()'),
+      html.indexOf('async function clearFeishuCredentials()')
+    );
+    const invokeAt = save.indexOf('api.saveFeishuCredentials');
+    const clearAt = save.indexOf("feishuEls.appSecret.value = ''");
+    const awaitAt = save.indexOf('const result = await pending');
+    const readbackAt = save.indexOf('if (result && result.settings)');
+    const failureAt = save.indexOf('if (responseFailed(result))');
+    assert.ok(invokeAt >= 0 && invokeAt < clearAt && clearAt < awaitAt);
+    assert.ok(awaitAt < readbackAt && readbackAt < failureAt);
+    assert.match(html, /鲸坞官方永远不经手任何用户凭据/);
+    assert.match(html, /im\.message\.receive_v1/);
+    assert.match(html, /im:message\.p2p_msg:readonly/);
+    assert.match(html, /im:message:send_as_bot/);
   });
 
   await test('状态灯订阅脱敏 runtime，全部断开失败也先应用磁盘与运行态回读', async () => {
@@ -134,20 +169,109 @@ async function run() {
     assert.equal(/ipcMain\.(?:handle|on)\('remote:[^']*(?:command|exec|rpc)/.test(main), false);
   });
 
+  await test('主进程凭据接线使用 safeStorage 且 SDK 只在 connect 路径惰性 require', async () => {
+    const main = source('main.js');
+    assert.match(main, /safeStorage/);
+    assert.match(main, /remote-secure-state\.json/);
+    assert.equal(/const\s+\w+\s*=\s*require\(['"]@larksuiteoapi\/node-sdk['"]\)/.test(main), false);
+    assert.match(main, /sdkLoader:\s*\(\)\s*=>\s*require\(['"]@larksuiteoapi\/node-sdk['"]\)/);
+    const block = main.slice(main.indexOf('function registerSettingsIpc()'), main.indexOf('function openSettingsWindow()'));
+    for (const channel of [
+      'settings:remote-feishu-credentials-save',
+      'settings:remote-feishu-credentials-clear',
+      'settings:remote-feishu-test-notification'
+    ]) assert.match(block, new RegExp(channel));
+    assert.equal(/log\.line\([^\n]*(?:appSecret|credentials\.appSecret)/.test(main), false);
+    const settingsWindow = main.slice(main.indexOf('function openSettingsWindow()'), main.indexOf('// ---------- 更新检查'));
+    assert.match(settingsWindow, /contextIsolation:\s*true/);
+    assert.match(settingsWindow, /nodeIntegration:\s*false/);
+    assert.match(settingsWindow, /sandbox:\s*true/);
+  });
+
   await test('远程生命周期从启动同步到退出，退出要等待 close 真正落定', async () => {
     const main = source('main.js');
     const ready = main.slice(main.indexOf('async function onReady()'), main.indexOf('function registerPetIpc()'));
     assert.match(ready, /initRemoteService\(\)/);
     assert.match(ready, /await syncRemoteConfig\(config\.get\(\)\)/);
+    assert.ok(ready.indexOf('initializeWorkspaceCoordinator()') < ready.indexOf('await recoverWorkspaceAtStartup()'));
+    assert.ok(ready.indexOf('await recoverWorkspaceAtStartup()') < ready.indexOf('initRemoteService()'));
+    assert.ok(ready.indexOf('initRemoteService()') < ready.indexOf('await syncRemoteConfig(config.get())'));
     const beforeQuit = main.slice(main.indexOf("app.on('before-quit'"), main.indexOf("app.on('will-quit'"));
     assert.match(beforeQuit, /beginRemoteShutdown\(\)/);
+    assert.match(main, /remoteShutdownRequested = true/);
+    assert.match(main, /if \(remoteShutdownRequested\) \{[\s\S]*?ERR_REMOTE_CLOSED/);
     const willQuit = main.slice(main.indexOf("app.on('will-quit'"), main.indexOf('if \(MAIN_HELPER_TEST\)'));
     assert.match(willQuit, /remoteShutdownPromise/);
   });
 
+  await test('飞书断线仅在开关与凭据仍有效时做有限退避重连', async () => {
+    const main = source('main.js');
+    assert.match(main, /REMOTE_FEISHU_RECONNECT_DELAYS_MS = Object\.freeze\(\[1000, 2000, 5000, 15000, 30000\]\)/);
+    const reconnect = main.slice(
+      main.indexOf('function clearRemoteReconnect('),
+      main.indexOf('function queueFeishuBindingDialog(')
+    );
+    assert.match(reconnect, /remoteShutdownRequested/);
+    assert.match(reconnect, /remoteFeishuEnabled/);
+    assert.match(reconnect, /activeFeishuAppId\(\)/);
+    assert.match(reconnect, /remoteReconnectAttempt >= REMOTE_FEISHU_RECONNECT_DELAYS_MS\.length/);
+    assert.match(reconnect, /owner\.setEnabled\('feishu', true\)/);
+    const service = main.slice(main.indexOf('function initRemoteService()'), main.indexOf('async function replaceRemoteService('));
+    assert.match(service, /onStateChanged:[\s\S]*?scheduleRemoteReconnect\(service, service\.snapshot\(\)\)/);
+    assert.match(main, /function beginRemoteShutdown\([\s\S]*?clearRemoteReconnect\(\)/);
+  });
+
+  await test('飞书收件只写恢复后的权威工作区，并按 App 命名空间幂等', async () => {
+    const main = source('main.js');
+    const receive = main.slice(
+      main.indexOf('function receiveRemoteItem('),
+      main.indexOf('function clearRemoteReconnect(')
+    );
+    assert.match(receive, /workspaceCoordinator\.busy/);
+    assert.match(receive, /workspaceJournalBlocksStartup\(\)/);
+    assert.match(receive, /workspaceCoordinator\.snapshot\(\)/);
+    assert.match(receive, /canonicalWorkspace\(committed\.effectiveWorkdir,[\s\S]*?forbiddenRoots:\s*forbiddenWorkspaceRoots\(\)/);
+    assert.match(receive, /\.receive\(\{\s*appId,/);
+    const service = main.slice(main.indexOf('function initRemoteService()'), main.indexOf('async function replaceRemoteService('));
+    assert.match(service, /receiveRemoteItem\(value, appId\)/);
+  });
+
+  await test('固定本机自检可穿过客服工作台，但真实客服内容仍由受信分级锁住', async () => {
+    const main = source('main.js');
+    assert.match(main, /REMOTE_LOCAL_SELF_TEST_CONTEXT = Object\.freeze\(\{\}\)/);
+    assert.match(main, /request\.classificationContext === REMOTE_LOCAL_SELF_TEST_CONTEXT[\s\S]*?\? 'anonymous' : remoteContentSensitivity\(\)/);
+    const handler = main.slice(
+      main.indexOf("ipcMain.handle('settings:remote-feishu-test-notification'"),
+      main.indexOf("ipcMain.handle('settings:remote-disconnect-all'")
+    );
+    assert.match(handler, /classificationContext:\s*REMOTE_LOCAL_SELF_TEST_CONTEXT/);
+    assert.match(handler, /customer-web-only/);
+    assert.match(handler, /result\.skipped\[0\].*reasonCode/);
+  });
+
+  await test('飞书保存与清除共用串行重配临界区，失败文案按权威开关回读', async () => {
+    const main = source('main.js');
+    const block = main.slice(main.indexOf('function registerSettingsIpc()'), main.indexOf('function openSettingsWindow()'));
+    const save = block.slice(
+      block.indexOf("ipcMain.handle('settings:remote-feishu-credentials-save'"),
+      block.indexOf("ipcMain.handle('settings:remote-feishu-credentials-clear'")
+    );
+    const clear = block.slice(
+      block.indexOf("ipcMain.handle('settings:remote-feishu-credentials-clear'"),
+      block.indexOf("ipcMain.handle('settings:remote-feishu-test-notification'")
+    );
+    assert.match(save, /reconfigureRemoteService\(async \(\) => \{[\s\S]*?rotateCredentials[\s\S]*?remoteFeishuEnabled:\s*true/);
+    assert.match(clear, /reconfigureRemoteService\(async \(\) => \{[\s\S]*?remoteFeishuEnabled:\s*false[\s\S]*?clearCredentials\(\)/);
+    assert.equal(clear.indexOf('config.set(') < clear.indexOf('reconfigureRemoteService('), false);
+    assert.match(clear, /settings\.remoteFeishuEnabled === false/);
+  });
+
   await test('日志接线只接收固定审计字段，不记录正文、账号、凭据或原始异常', async () => {
     const main = source('main.js');
-    const block = main.slice(main.indexOf('function remoteAuditEvent('), main.indexOf('function initRemoteService()'));
+    const block = main.slice(
+      main.indexOf('function remoteAuditEvent('),
+      main.indexOf('function remoteMainError(')
+    );
     assert.ok(block.length > 100, '缺少远程审计收口');
     assert.match(block, /event\.event/);
     assert.match(block, /event\.channelId/);

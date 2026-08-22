@@ -973,6 +973,10 @@ async function main() {
   // v0.7 远程板块：纯 Node 通道核心与 Electron 薄层必须一起拿到证据。
   for (const [file, label] of [
     ['remote-smoke.js', '远程收推批、绑定与生命周期'],
+    ['remote-secure-store-smoke.js', '飞书凭据、绑定与持久去重安全状态'],
+    ['remote-inbox-smoke.js', '飞书文字与链接确定性收件箱'],
+    ['feishu-remote-rest-smoke.js', '飞书固定 REST 发信与内存 token'],
+    ['feishu-remote-smoke.js', '飞书低层长连接 adapter 与惰性 SDK'],
     ['main-remote-smoke.js', '远程设置与 Electron 薄层']
   ]) {
     const result = spawnSync(process.execPath, [path.join(__dirname, file)], {

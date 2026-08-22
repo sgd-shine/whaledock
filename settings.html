@@ -215,7 +215,7 @@
   select:focus { border-color: var(--accent-strong); box-shadow: 0 0 0 3px var(--focus); outline: none; }
   .inline-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
-  input[type="text"], input[type="number"] {
+  input[type="text"], input[type="password"], input[type="number"] {
     min-width: 0;
     height: 34px;
     padding: 6px 10px;
@@ -227,8 +227,8 @@
     box-shadow: inset 0 1px 1px rgba(0,0,0,.22);
     transition: border-color .14s ease, box-shadow .14s ease;
   }
-  input[type="text"]:hover, input[type="number"]:hover { border-color: #52708e; }
-  input[type="text"]:focus, input[type="number"]:focus {
+  input[type="text"]:hover, input[type="password"]:hover, input[type="number"]:hover { border-color: #52708e; }
+  input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:focus {
     border-color: var(--accent-strong);
     box-shadow: 0 0 0 3px var(--focus);
     outline: none;
@@ -448,6 +448,22 @@
     line-height: 1.55;
   }
   .remote-guide-option strong { color: var(--accent); }
+  .remote-feishu-setup {
+    margin: 0 14px 14px;
+    padding: 12px;
+    border: 1px solid rgba(91, 212, 230, .24);
+    border-radius: 9px;
+    background: rgba(13, 29, 42, .78);
+  }
+  .remote-credential-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin: 10px 0;
+  }
+  .remote-credential-grid label { color: var(--muted); font-size: 11px; }
+  .remote-credential-grid input { width: 100%; margin-top: 6px; }
+  .remote-feishu-setup .inline-actions { justify-content: flex-start; }
 
   .faq details { border-top: 1px solid var(--line); }
   .faq details:first-child { border-top: 0; }
@@ -524,7 +540,7 @@
 
   @media (max-width: 620px) {
     .price-grid { grid-template-columns: 1fr; }
-    .remote-guide-steps { grid-template-columns: 1fr; }
+    .remote-guide-steps, .remote-credential-grid { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -916,19 +932,37 @@
               <li class="remote-guide-step">
                 <svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><rect x="4" y="5" width="20" height="18" rx="3" stroke="currentColor" stroke-width="2"/><path d="M9 10h10M9 14h10M9 18h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                 <strong>1. 建自建应用</strong>
-                <p>在你自己的飞书开发者后台创建企业自建应用，启用机器人和官方长连接事件。</p>
+                <p>在 open.feishu.cn/app 创建企业自建应用并启用机器人。只申请 im:message.p2p_msg:readonly 与 im:message:send_as_bot；先不要申请群聊或联系人权限。</p>
               </li>
               <li class="remote-guide-step">
                 <svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><circle cx="9" cy="14" r="5" stroke="currentColor" stroke-width="2"/><path d="M14 14h10M20 14v4M17 14v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                <strong>2. 抄 App ID / Secret</strong>
-                <p>平台接通后，这里会出现本机凭据框；密钥不会写进普通设置、日志或公开仓库。</p>
+                <strong>2. 保存凭据并接长连接</strong>
+                <p>从“凭证与基础信息”抄 App ID / App Secret 到下方，点“保存并连接”；再回事件订阅选择长连接并添加 im.message.receive_v1，发布版本并完成企业审核。</p>
               </li>
               <li class="remote-guide-step">
                 <svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><rect x="7" y="3" width="14" height="22" rx="3" stroke="currentColor" stroke-width="2"/><path d="m10 15 3 3 6-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 <strong>3. 发消息并确认</strong>
-                <p>用本人飞书发首条消息，再回桌面确认绑定；其他账号的消息会静默丢弃。</p>
+                <p>用本人飞书私聊机器人发首条消息。手机会先收到六位绑定码，再回桌面核对并确认；其他账号的消息会静默丢弃。</p>
               </li>
             </ol>
+            <div class="remote-feishu-setup">
+              <div class="row-label">飞书凭据只保存在本机</div>
+              <div id="feishu-credential-status" class="row-note" role="status" aria-live="polite">正在读取本机凭据状态…</div>
+              <div class="remote-credential-grid">
+                <label for="feishu-app-id">App ID
+                  <input id="feishu-app-id" type="text" autocomplete="off" spellcheck="false" placeholder="cli_…">
+                </label>
+                <label for="feishu-app-secret">App Secret
+                  <input id="feishu-app-secret" type="password" autocomplete="new-password" spellcheck="false" placeholder="保存后不会回显">
+                </label>
+              </div>
+              <div class="inline-actions">
+                <button id="feishu-credentials-save" class="button primary">保存并连接</button>
+                <button id="feishu-test-notification" class="button" disabled>发送测试通知到手机</button>
+                <button id="feishu-credentials-clear" class="button ghost" disabled>清除本机凭据</button>
+              </div>
+              <div class="row-note">App Secret 不进入普通设置、日志、错误文案或公开仓库；保存后输入框立即清空。鲸坞官方永远不经手任何用户凭据。</div>
+            </div>
           </details>
 
           <details id="remote-guide-dingtalk">
@@ -1190,8 +1224,17 @@
     petAlwaysOnTop: document.getElementById('petAlwaysOnTop'),
     petClickThrough: document.getElementById('petClickThrough')
   };
+  const feishuEls = {
+    appId: document.getElementById('feishu-app-id'),
+    appSecret: document.getElementById('feishu-app-secret'),
+    status: document.getElementById('feishu-credential-status'),
+    save: document.getElementById('feishu-credentials-save'),
+    clear: document.getElementById('feishu-credentials-clear'),
+    test: document.getElementById('feishu-test-notification')
+  };
   let snapshot = null;
   let runtimeSnapshot = {};
+  let feishuCredentialStatus = { configured: false, appIdHint: null, available: true };
   let busy = false;
 
   function messageOf(value, fallback) {
@@ -1301,6 +1344,35 @@
     updateButton.disabled = busy || !els.checkUpdates.checked;
     els.screenshotHotkey.disabled = busy || !els.screenshotHotkeyEnabled.checked;
     document.getElementById('reset-screenshot-hotkey').disabled = busy || !els.screenshotHotkeyEnabled.checked;
+    updateFeishuActions();
+  }
+
+  function updateFeishuActions() {
+    if (!feishuEls.save) return;
+    const channel = runtimeSnapshot.remote && runtimeSnapshot.remote.channels
+      ? runtimeSnapshot.remote.channels.feishu || {} : {};
+    const available = feishuCredentialStatus.available !== false;
+    feishuEls.save.disabled = busy || !available;
+    feishuEls.clear.disabled = busy || !available || feishuCredentialStatus.configured !== true;
+    feishuEls.test.disabled = busy || feishuCredentialStatus.configured !== true
+      || channel.state !== 'connected' || channel.binding !== 'bound';
+  }
+
+  function renderFeishuCredentialStatus(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    feishuCredentialStatus = {
+      configured: source.configured === true,
+      appIdHint: typeof source.appIdHint === 'string' ? source.appIdHint : null,
+      available: source.available !== false
+    };
+    if (!feishuCredentialStatus.available) {
+      feishuEls.status.textContent = '当前系统安全存储不可用，已拒绝保存明文凭据';
+    } else if (feishuCredentialStatus.configured) {
+      feishuEls.status.textContent = `已安全保存在本机${feishuCredentialStatus.appIdHint ? ` · ${feishuCredentialStatus.appIdHint}` : ''}`;
+    } else {
+      feishuEls.status.textContent = '未配置；通道保持关闭且不会加载飞书 SDK';
+    }
+    updateFeishuActions();
   }
 
   function renderWorkspace(payload) {
@@ -1354,6 +1426,10 @@
       loginNote.style.color = '';
     }
 
+    renderFeishuCredentialStatus(
+      runtime.remoteCredentials && runtime.remoteCredentials.feishu
+        || runtimeSnapshot.remoteCredentials && runtimeSnapshot.remoteCredentials.feishu
+    );
     renderRemoteRuntime(runtime.remote || runtimeSnapshot.remote);
 
     for (const [id, url] of [
@@ -1407,6 +1483,7 @@
 
   function renderRemoteRuntime(value) {
     const channels = value && value.channels ? value.channels : value || {};
+    runtimeSnapshot.remote = value && value.channels ? value : { channels };
     for (const [id, meta] of Object.entries(remoteChannelMeta)) {
       const channel = channels && channels[id] || {};
       const state = Object.prototype.hasOwnProperty.call(remoteStateText, channel.state)
@@ -1427,6 +1504,7 @@
       // 不重写未变化的 live region，避免读屏器在每次计数快照时重复播报三条状态。
       if (noteElement.textContent !== nextNote) noteElement.textContent = nextNote;
     }
+    updateFeishuActions();
   }
 
   function fillSelect(select, items, selected, labelOf) {
@@ -1853,6 +1931,81 @@
     }
   }
 
+  async function saveFeishuCredentials() {
+    const appId = feishuEls.appId.value.trim();
+    const appSecret = feishuEls.appSecret.value.trim();
+    if (!appId || !appSecret) {
+      setStatus('请完整填写飞书 App ID 与 App Secret', 'error');
+      return;
+    }
+    setBusy(true, '正在安全保存并连接飞书…');
+    try {
+      const pending = api.saveFeishuCredentials({ appId, appSecret });
+      // IPC 参数已完成结构化克隆；不等连接结果，立即从 DOM 清掉 Secret。
+      feishuEls.appSecret.value = '';
+      const result = await pending;
+      // 失败回应也可能包含“已写凭据、但连接失败”的权威回读；
+      // 先对齐界面，再显示错误，避免用旧状态覆盖真实落盘结果。
+      if (result && result.settings) {
+        snapshot = normalizedConfig(result.settings);
+        renderConfig(snapshot);
+      }
+      if (result && result.remoteCredentials && result.remoteCredentials.feishu) {
+        runtimeSnapshot.remoteCredentials = result.remoteCredentials;
+        renderFeishuCredentialStatus(result.remoteCredentials.feishu);
+      }
+      if (result && result.remote) renderRemoteRuntime(result.remote);
+      if (responseFailed(result)) throw new Error(messageOf(result, '飞书凭据未保存'));
+      setStatus(messageOf(result, '凭据已安全保存，正在等待飞书长连接'), 'success');
+    } catch (error) {
+      setStatus(messageOf(error, '飞书凭据未保存，请检查后重试'), 'error');
+    } finally {
+      // Secret 与 App ID 都不在 renderer 长期保留，也不会从主进程回填。
+      feishuEls.appSecret.value = '';
+      feishuEls.appId.value = '';
+      setBusy(false);
+    }
+  }
+
+  async function clearFeishuCredentials() {
+    if (!window.confirm('清除后飞书会立即断开，并删除本机绑定。继续吗？')) return;
+    setBusy(true, '正在断开飞书并清除本机凭据…');
+    try {
+      const result = await api.clearFeishuCredentials();
+      if (result && result.settings) {
+        snapshot = normalizedConfig(result.settings);
+        renderConfig(snapshot);
+      }
+      if (result && result.remoteCredentials && result.remoteCredentials.feishu) {
+        runtimeSnapshot.remoteCredentials = result.remoteCredentials;
+        renderFeishuCredentialStatus(result.remoteCredentials.feishu);
+      }
+      if (result && result.remote) renderRemoteRuntime(result.remote);
+      if (responseFailed(result)) throw new Error(messageOf(result, '本机凭据未能完整清除'));
+      setStatus('飞书已断开，本机凭据与绑定已清除', 'success');
+    } catch (error) {
+      setStatus(messageOf(error, '本机凭据未能完整清除'), 'error');
+    } finally {
+      feishuEls.appSecret.value = '';
+      feishuEls.appId.value = '';
+      setBusy(false);
+    }
+  }
+
+  async function testFeishuNotification() {
+    setBusy(true, '正在向已绑定手机发送测试通知…');
+    try {
+      const result = await api.testFeishuNotification();
+      if (responseFailed(result)) throw new Error(messageOf(result, '测试通知未送达'));
+      if (result.remote) renderRemoteRuntime(result.remote);
+      setStatus('测试通知已交给飞书，请看手机', 'success');
+    } catch (error) {
+      setStatus(messageOf(error, '测试通知未送达，请检查连接与绑定状态'), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function activateTab(tab, focus) {
     for (const candidate of document.querySelectorAll('[role="tab"]')) {
       const active = candidate === tab;
@@ -1901,6 +2054,9 @@
   document.getElementById('choose-workdir').addEventListener('click', chooseWorkdir);
   document.getElementById('check-update').addEventListener('click', checkUpdate);
   document.getElementById('restart-now').addEventListener('click', restartBackend);
+  feishuEls.save.addEventListener('click', saveFeishuCredentials);
+  feishuEls.clear.addEventListener('click', clearFeishuCredentials);
+  feishuEls.test.addEventListener('click', testFeishuNotification);
   document.getElementById('remote-disconnect-all').addEventListener('click', disconnectRemote);
   saveButton.addEventListener('click', save);
   cancelButton.addEventListener('click', () => window.close());

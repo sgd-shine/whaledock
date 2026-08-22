@@ -6,7 +6,7 @@ const MAIN_HELPER_TEST = process.env.WHALEDOCK_MAIN_HELPER_TEST === '1' && requi
 const electron = MAIN_HELPER_TEST ? {} : require('electron');
 const {
   app, BrowserWindow, WebContentsView, Tray, Menu, globalShortcut,
-  shell, ipcMain, dialog, clipboard, nativeImage, Notification
+  shell, ipcMain, dialog, clipboard, nativeImage, Notification, safeStorage
 } = electron;
 const path = require('path');
 const fs = require('fs');
@@ -25,6 +25,10 @@ const workbenches = require('./lib/workbenches');
 const videoCockpit = require('./lib/video-cockpit');
 const videoShooting = require('./lib/video-shooting');
 const remote = require('./lib/remote');
+const remoteFeishu = require('./lib/remote-feishu');
+const remoteFeishuRest = require('./lib/remote-feishu-rest');
+const remoteInbox = require('./lib/remote-inbox');
+const remoteSecureStore = require('./lib/remote-secure-store');
 const log = require('./lib/log');
 const update = require('./lib/update');
 
@@ -617,8 +621,17 @@ let captureEpoch = 0;
 let captureShuttingDown = false;
 // v0.7 远程板块生命周期。平台 adapter 后续逐批注册；骨架阶段未配置时必须显示 unavailable。
 let remoteService = null;
+let remoteSecureState = null;
+let remoteReconfigurePromise = Promise.resolve();
 let remoteShutdownPromise = null;
 let remoteShutdownComplete = false;
+let remoteShutdownRequested = false;
+let remoteReconnectTimer = null;
+let remoteReconnectAttempt = 0;
+let remoteReconnectInFlight = false;
+const REMOTE_FEISHU_RECONNECT_DELAYS_MS = Object.freeze([1000, 2000, 5000, 15000, 30000]);
+// 只由下面的固定设置 IPC 持有；对象身份不能由飞书消息或渲染层伪造。
+const REMOTE_LOCAL_SELF_TEST_CONTEXT = Object.freeze({});
 
 // ---------- 单实例 ----------
 if (!MAIN_HELPER_TEST) {
@@ -1034,17 +1047,285 @@ function remoteAuditEvent(event) {
     + (reason ? ':reason=' + reason : ''));
 }
 
+function remoteMainError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function remoteSafeStorageAvailable() {
+  try {
+    if (!safeStorage || typeof safeStorage.isEncryptionAvailable !== 'function'
+        || typeof safeStorage.encryptString !== 'function'
+        || typeof safeStorage.decryptString !== 'function'
+        || safeStorage.isEncryptionAvailable() !== true) return false;
+    // Linux 的 basic_text 不提供凭据机密性，不能把它冒充安全存储。
+    if (process.platform === 'linux'
+        && typeof safeStorage.getSelectedStorageBackend === 'function'
+        && safeStorage.getSelectedStorageBackend() === 'basic_text') return false;
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function initRemoteSecureState() {
+  remoteSecureState = null;
+  if (!remoteSafeStorageAvailable()) {
+    log.line('remote', 'secure-store-unavailable');
+    return;
+  }
+  try {
+    remoteSecureState = remoteSecureStore.createRemoteSecureStore({
+      filePath: path.join(app.getPath('userData'), 'remote-secure-state.json'),
+      encrypt: (value) => {
+        if (!remoteSafeStorageAvailable()) {
+          throw remoteMainError('ERR_REMOTE_SAFE_STORAGE', '系统安全存储不可用');
+        }
+        return safeStorage.encryptString(value);
+      },
+      decrypt: (value) => {
+        if (!remoteSafeStorageAvailable()) {
+          throw remoteMainError('ERR_REMOTE_SAFE_STORAGE', '系统安全存储不可用');
+        }
+        return safeStorage.decryptString(value);
+      }
+    });
+  } catch (error) {
+    remoteSecureState = null;
+    log.line('remote', 'secure-store-init-failed:' + (error && error.code || 'unknown'));
+  }
+}
+
+function remoteCredentialsSnapshot() {
+  if (!remoteSecureState || !remoteSafeStorageAvailable()) {
+    return { feishu: { available: false, configured: false, appIdHint: null } };
+  }
+  try {
+    const status = remoteSecureState.credentialStatus();
+    return {
+      feishu: {
+        available: true,
+        configured: status.configured === true,
+        appIdHint: typeof status.appIdHint === 'string' ? status.appIdHint : null
+      }
+    };
+  } catch (_error) {
+    return { feishu: { available: false, configured: false, appIdHint: null } };
+  }
+}
+
+function activeFeishuAppId() {
+  if (!remoteSecureState) return null;
+  const value = remoteSecureState.readActiveAppId();
+  return typeof value === 'string' ? value : null;
+}
+
+function remoteContentSensitivity() {
+  const active = currentWorkbench();
+  return active && (active.id === 'builtin:电商客服' || active.name === '电商客服')
+    ? 'customer' : 'ordinary';
+}
+
+function receiveRemoteItem(value, appId) {
+  if (!isPlainObject(value) || value.channelId !== 'feishu'
+      || !['text', 'link'].includes(value.kind)
+      || typeof value.sourceId !== 'string' || typeof value.receivedAt !== 'string'
+      || typeof appId !== 'string' || !/^cli_[0-9a-fA-F]{16}$/.test(appId)) {
+    throw remoteMainError('ERR_REMOTE_INBOX_CONTRACT', '飞书收件参数无效');
+  }
+  if (!workspaceCoordinator || workspaceCoordinator.busy || workspaceJournalBlocksStartup()) {
+    throw remoteMainError('ERR_REMOTE_INBOX_WORKSPACE', '当前工作区不可用');
+  }
+  let workspacePath;
+  try {
+    const committed = workspaceCoordinator.snapshot();
+    workspacePath = workspaces.canonicalWorkspace(committed.effectiveWorkdir, {
+      forbiddenRoots: forbiddenWorkspaceRoots()
+    }).path;
+  } catch (_error) {
+    throw remoteMainError('ERR_REMOTE_INBOX_WORKSPACE', '当前工作区不可用');
+  }
+  return remoteInbox.createRemoteInbox({ workspacePath }).receive({
+    appId,
+    kind: value.kind,
+    content: value.content,
+    messageId: value.sourceId,
+    receivedAt: value.receivedAt
+  });
+}
+
+function clearRemoteReconnect(options = {}) {
+  if (remoteReconnectTimer) clearTimeout(remoteReconnectTimer);
+  remoteReconnectTimer = null;
+  remoteReconnectInFlight = false;
+  if (options.keepAttempt !== true) remoteReconnectAttempt = 0;
+}
+
+function remoteReconnectAllowed(owner) {
+  if (!owner || owner !== remoteService || remoteShutdownRequested) return false;
+  try {
+    return config.get('remoteFeishuEnabled') === true && Boolean(activeFeishuAppId());
+  } catch (_error) {
+    return false;
+  }
+}
+
+function scheduleRemoteReconnect(owner, snapshot) {
+  if (!remoteReconnectAllowed(owner)) {
+    if (owner === remoteService) clearRemoteReconnect();
+    return;
+  }
+  const channel = snapshot && snapshot.channels && snapshot.channels.feishu;
+  if (!channel) return;
+  if (channel.state === 'connected') {
+    clearRemoteReconnect();
+    return;
+  }
+  if (!['disconnected', 'error'].includes(channel.state)
+      || remoteReconnectTimer || remoteReconnectInFlight
+      || remoteReconnectAttempt >= REMOTE_FEISHU_RECONNECT_DELAYS_MS.length) return;
+  const delay = REMOTE_FEISHU_RECONNECT_DELAYS_MS[remoteReconnectAttempt];
+  remoteReconnectTimer = setTimeout(() => {
+    remoteReconnectTimer = null;
+    if (!remoteReconnectAllowed(owner)) return;
+    remoteReconnectAttempt += 1;
+    remoteReconnectInFlight = true;
+    void owner.setEnabled('feishu', true).catch((error) => {
+      log.line('remote', 'reconnect-failed:' + (error && error.code || 'unknown'));
+    }).finally(() => {
+      remoteReconnectInFlight = false;
+      if (owner === remoteService && !remoteShutdownRequested) {
+        scheduleRemoteReconnect(owner, owner.snapshot());
+      }
+    });
+  }, delay);
+}
+
+function queueFeishuBindingDialog(value) {
+  if (!isPlainObject(value) || value.channelId !== 'feishu') return false;
+  const owner = remoteService;
+  setImmediate(() => {
+    const parent = settingsWindow && !settingsWindow.isDestroyed() ? settingsWindow
+      : mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+    const options = {
+      type: 'question',
+      title: '确认飞书绑定',
+      message: '手机已收到鲸坞绑定码',
+      detail: `请核对手机上的六位码是否为 ${value.challengeCode}。一致后再确认绑定。`,
+      buttons: ['确认绑定', '拒绝'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    };
+    const shown = parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
+    Promise.resolve(shown).then(async (result) => {
+      if (owner !== remoteService) return;
+      if (result && result.response === 0) {
+        await owner.confirmBinding('feishu', {
+          bindingToken: value.bindingToken,
+          challengeCode: value.challengeCode
+        });
+      } else {
+        await owner.rejectBinding('feishu', value.bindingToken);
+      }
+    }).catch((error) => {
+      log.line('remote', 'binding-dialog-failed:' + (error && error.code || 'unknown'));
+    });
+  });
+  // 核心正在该通道串行队列内等待；确认动作必须由上面的下一轮异步执行。
+  return true;
+}
+
 function initRemoteService() {
-  remoteService = remote.createRemoteService({
+  let appId = null;
+  let initialBinding = null;
+  try {
+    appId = activeFeishuAppId();
+    if (appId && config.get('remoteFeishuEnabled') === true) {
+      initialBinding = remoteSecureState.readBinding(appId);
+    }
+  } catch (error) {
+    log.line('remote', 'binding-read-failed:' + (error && error.code || 'unknown'));
+  }
+  let service = null;
+  service = remote.createRemoteService({
+    receiveSink: async (value) => receiveRemoteItem(value, appId),
+    classifyContent: async (request) => (
+      request && request.classificationContext === REMOTE_LOCAL_SELF_TEST_CONTEXT
+        ? 'anonymous' : remoteContentSensitivity()
+    ),
+    persistBinding: async (value) => {
+      if (!remoteSecureState || value.channelId !== 'feishu' || !appId) {
+        throw remoteMainError('ERR_REMOTE_BINDING_STORE', '飞书绑定存储不可用');
+      }
+      return remoteSecureState.commitBinding({
+        appId,
+        actorId: value.actorId,
+        commitId: value.commitId
+      });
+    },
+    readBinding: async (value) => {
+      if (!remoteSecureState || value.channelId !== 'feishu' || !appId) return null;
+      return remoteSecureState.readBinding(appId);
+    },
+    initialBindings: initialBinding ? { feishu: initialBinding } : {},
     auditEvent: remoteAuditEvent,
+    onBindingRequested: queueFeishuBindingDialog,
     onStateChanged: () => {
       if (settingsWindow && !settingsWindow.isDestroyed()) {
         settingsWindow.webContents.send('settings:runtime', { remote: remoteRuntimeSnapshot() });
       }
+      scheduleRemoteReconnect(service, service.snapshot());
     }
   });
-  remoteShutdownPromise = null;
-  remoteShutdownComplete = false;
+  remoteService = service;
+  if (appId && remoteSecureState) {
+    const readCredentials = async () => {
+      const credentials = remoteSecureState.readCredentials();
+      if (!credentials || credentials.appId !== appId) {
+        throw remoteMainError('ERR_REMOTE_CREDENTIALS', '飞书凭据不可用');
+      }
+      return credentials;
+    };
+    const restClient = remoteFeishuRest.createFeishuRestClient({
+      getCredentials: readCredentials
+    });
+    service.registerAdapter('feishu', remoteFeishu.createFeishuAdapter({
+      readCredentials,
+      hasMessage: async (value) => remoteSecureState.hasMessage(value),
+      rememberMessage: async (value) => remoteSecureState.rememberMessage(value),
+      readBoundOpenId: async () => remoteSecureState.readBinding(appId),
+      sendText: restClient.sendText,
+      sdkLoader: () => require('@larksuiteoapi/node-sdk')
+    }));
+  }
+}
+
+async function replaceRemoteService(change) {
+  clearRemoteReconnect();
+  const previous = remoteService;
+  if (previous) await previous.close();
+  if (remoteService === previous) remoteService = null;
+  let changeError = null;
+  try { if (typeof change === 'function') await change(); }
+  catch (error) { changeError = error; }
+  initRemoteService();
+  let syncError = null;
+  try { await syncRemoteConfig(config.get()); }
+  catch (error) { syncError = error; }
+  if (changeError) throw changeError;
+  if (syncError) throw syncError;
+  return remoteRuntimeSnapshot();
+}
+
+function reconfigureRemoteService(change) {
+  if (remoteShutdownRequested) {
+    return Promise.reject(remoteMainError('ERR_REMOTE_CLOSED', '远程服务正在退出'));
+  }
+  const run = remoteReconfigurePromise.then(() => replaceRemoteService(change));
+  remoteReconfigurePromise = run.catch(() => {});
+  return run;
 }
 
 function remoteRuntimeSnapshot() {
@@ -1084,7 +1365,11 @@ async function disconnectAllRemote() {
 function beginRemoteShutdown() {
   if (remoteShutdownComplete) return Promise.resolve();
   if (remoteShutdownPromise) return remoteShutdownPromise;
-  remoteShutdownPromise = (remoteService ? remoteService.close() : Promise.resolve())
+  remoteShutdownRequested = true;
+  clearRemoteReconnect();
+  remoteShutdownPromise = remoteReconfigurePromise.catch(() => {}).then(() => (
+    remoteService ? remoteService.close() : Promise.resolve()
+  ))
     .then(() => { remoteShutdownComplete = true; })
     .catch((error) => {
       remoteShutdownComplete = true;
@@ -4601,8 +4886,7 @@ async function onReady() {
   });
   await initializeWorkspaceConfig();
   log.init(path.join(app.getPath('userData'), 'logs'));
-  initRemoteService();
-  await syncRemoteConfig(config.get());
+  initRemoteSecureState();
   initEventService();
   initializeWorkspaceCoordinator();
   log.line('app', `鲸坞 WhaleDock v${app.getVersion()} 启动 (${process.platform}/${process.arch})`);
@@ -4620,6 +4904,9 @@ async function onReady() {
   try { await imageInput.cleanupOwnedStaging({ stagingRoot: captureStagingRoot() }); }
   catch (error) { log.line('capture', `启动清理 staging 失败：${error && error.code || 'unknown'}`); }
   await recoverWorkspaceAtStartup();
+  // 只有 journal 恢复与受保护根规范化完成后才允许真实长连接收件。
+  initRemoteService();
+  await syncRemoteConfig(config.get());
   reconcileLoginItem();
   if (!initialStartMinimized) createSplash();
   else log.line('app', '启动最小化已启用：后台启动期间不创建启动页或主窗口');
@@ -6250,6 +6537,7 @@ function settingsRuntime() {
     workspace: currentWorkspaceSurface(),
     pets: petsRuntimeSurface(),
     themes: themesRuntimeSurface(),
+    remoteCredentials: remoteCredentialsSnapshot(),
     remote: remoteRuntimeSnapshot()
   };
 }
@@ -6509,6 +6797,9 @@ function registerSettingsIpc() {
     'settings:rescan-pets', 'settings:reload-themes', 'settings:open-resource-dir',
     'settings:list-workbenches', 'settings:switch-workbench',
     'settings:remove-workbench', 'settings:rescan-workbenches',
+    'settings:remote-feishu-credentials-save',
+    'settings:remote-feishu-credentials-clear',
+    'settings:remote-feishu-test-notification',
     'settings:remote-disconnect-all'
   ];
   for (const channel of channels) ipcMain.removeHandler(channel);
@@ -6584,7 +6875,13 @@ function registerSettingsIpc() {
     if (hotkeyTransaction) hotkeyTransaction.commit();
 
     if (remoteConfigChanged) {
-      try { await syncRemoteConfig(config.get()); }
+      try {
+        const feishuStarting = Object.prototype.hasOwnProperty.call(
+          normalized, 'remoteFeishuEnabled'
+        ) && normalized.remoteFeishuEnabled === true && before.remoteFeishuEnabled !== true;
+        if (feishuStarting) await reconfigureRemoteService();
+        else await syncRemoteConfig(config.get());
+      }
       catch (error) {
         remoteWarning = '远程偏好已保存，但通道状态更新失败；请查看状态灯';
         log.line('remote', 'config-sync-failed:' + (error && error.code || 'unknown'));
@@ -6634,6 +6931,141 @@ function registerSettingsIpc() {
 
   ipcMain.handle('settings:check-update', trustedSettingsHandler(async () => {
     return runUpdateCheck(true);
+  }));
+
+  ipcMain.handle('settings:remote-feishu-credentials-save', trustedSettingsHandler(async (value) => {
+    const valid = isPlainObject(value)
+      && Object.keys(value).length === 2
+      && Object.prototype.hasOwnProperty.call(value, 'appId')
+      && Object.prototype.hasOwnProperty.call(value, 'appSecret')
+      && typeof value.appId === 'string'
+      && /^cli_[0-9a-fA-F]{16}$/.test(value.appId)
+      && typeof value.appSecret === 'string'
+      && value.appSecret.length > 0 && value.appSecret.length <= 1024
+      && !/[\u0000-\u001f\u007f]/.test(value.appSecret);
+    if (!valid) {
+      return {
+        ok: false,
+        settings: settingsSnapshot(),
+        remoteCredentials: remoteCredentialsSnapshot(),
+        remote: remoteRuntimeSnapshot(),
+        message: '飞书 App ID 或 App Secret 格式无效'
+      };
+    }
+    if (!remoteSecureState || !remoteSafeStorageAvailable()) {
+      return {
+        ok: false,
+        settings: settingsSnapshot(),
+        remoteCredentials: remoteCredentialsSnapshot(),
+        remote: remoteRuntimeSnapshot(),
+        message: '当前系统安全存储不可用，未保存明文凭据'
+      };
+    }
+    try {
+      const snapshot = await reconfigureRemoteService(async () => {
+        remoteSecureState.rotateCredentials({
+          appId: value.appId,
+          appSecret: value.appSecret
+        });
+        config.set(config.validateSettingsPatch({ remoteFeishuEnabled: true }));
+      });
+      const connected = snapshot.channels.feishu.state === 'connected';
+      return {
+        ok: true,
+        settings: settingsSnapshot(),
+        remoteCredentials: remoteCredentialsSnapshot(),
+        remote: snapshot,
+        message: connected
+          ? '凭据已安全保存，飞书长连接已建立'
+          : '凭据已安全保存；连接尚未建立，请检查应用权限与长连接配置'
+      };
+    } catch (error) {
+      log.line('remote', 'credentials-save-failed:' + (error && error.code || 'unknown'));
+      return {
+        ok: false,
+        settings: settingsSnapshot(),
+        remoteCredentials: remoteCredentialsSnapshot(),
+        remote: remoteRuntimeSnapshot(),
+        message: '飞书凭据或连接未能安全完成，请检查后重试'
+      };
+    }
+  }));
+
+  ipcMain.handle('settings:remote-feishu-credentials-clear', trustedSettingsHandler(async () => {
+    if (!remoteSecureState || !remoteSafeStorageAvailable()) {
+      return {
+        ok: false,
+        settings: settingsSnapshot(),
+        remoteCredentials: remoteCredentialsSnapshot(),
+        remote: remoteRuntimeSnapshot(),
+        message: '当前系统安全存储不可用，无法确认清除'
+      };
+    }
+    try {
+      // 关闭意图与凭据清除必须和 save 共用同一串行临界区；旧 WS
+      // 确认回收后才执行这两个落盘动作，避免 clear/save 交错反转结果。
+      const snapshot = await reconfigureRemoteService(async () => {
+        config.set(config.validateSettingsPatch({ remoteFeishuEnabled: false }));
+        remoteSecureState.clearCredentials();
+      });
+      return {
+        ok: true,
+        settings: settingsSnapshot(),
+        remoteCredentials: remoteCredentialsSnapshot(),
+        remote: snapshot,
+        message: '飞书已断开，本机凭据与绑定已清除'
+      };
+    } catch (error) {
+      log.line('remote', 'credentials-clear-failed:' + (error && error.code || 'unknown'));
+      const settings = settingsSnapshot();
+      return {
+        ok: false,
+        settings,
+        remoteCredentials: remoteCredentialsSnapshot(),
+        remote: remoteRuntimeSnapshot(),
+        message: settings.remoteFeishuEnabled === false
+          ? '飞书开关已关闭，但连接或本机凭据未确认完整清除'
+          : '飞书开关未能安全关闭，未清除本机凭据，请重试'
+      };
+    }
+  }));
+
+  ipcMain.handle('settings:remote-feishu-test-notification', trustedSettingsHandler(async () => {
+    try {
+      if (!remoteService) throw remoteMainError('ERR_REMOTE_CLOSED', '远程服务不可用');
+      const result = await remoteService.pushTo('feishu', {
+        kind: 'report-ready',
+        body: '鲸坞飞书连接测试成功：电脑与手机通道已打通。',
+        dedupeKey: `feishu-test-${crypto.randomUUID()}`
+      }, { classificationContext: REMOTE_LOCAL_SELF_TEST_CONTEXT });
+      const delivered = result.delivered.includes('feishu');
+      const reasonCode = result.skipped[0] && result.skipped[0].reasonCode;
+      const failedMessage = {
+        'channel-unavailable': '测试通知未送达：请先完成飞书连接与手机绑定',
+        'notifications-disabled': '测试通知未送达：请先开启任务通知',
+        'quiet-mode': '测试通知未送达：请先关闭安静模式',
+        'kind-disabled': '测试通知未送达：请先开启报告通知',
+        'customer-web-only': '测试通知未送达：客服内容只能走随身网页',
+        'classification-failed': '测试通知未送达：本地内容分级暂不可用',
+        'policy-changed': '测试通知未送达：通知设置刚刚发生变化，请重试',
+        backpressure: '测试通知未送达：通道正忙，请稍后重试',
+        'push-failed': '测试通知未送达：飞书发送失败，请检查连接'
+      }[reasonCode] || '测试通知未送达，请检查连接、绑定与通知设置';
+      return {
+        ok: delivered,
+        remote: remoteRuntimeSnapshot(),
+        message: delivered
+          ? '测试通知已交给飞书，请看手机'
+          : failedMessage
+      };
+    } catch (error) {
+      log.line('remote', 'test-notification-failed:' + (error && error.code || 'unknown'));
+      return {
+        ok: false,
+        remote: remoteRuntimeSnapshot(),
+        message: '测试通知未送达，请检查连接与绑定状态'
+      };
+    }
   }));
 
   ipcMain.handle('settings:remote-disconnect-all', trustedSettingsHandler(async () => {
@@ -6730,7 +7162,7 @@ function openSettingsWindow() {
       preload: path.join(__dirname, 'preload-settings.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: true
     }
   });
   settingsWindow = win;

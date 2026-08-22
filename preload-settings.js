@@ -23,6 +23,10 @@ contextBridge.exposeInMainWorld('whaleSettings', Object.freeze({
   switchWorkbench: (workbenchId) => ipcRenderer.invoke('settings:switch-workbench', workbenchId),
   removeWorkbench: (workbenchId) => ipcRenderer.invoke('settings:remove-workbench', workbenchId),
   rescanWorkbenches: () => ipcRenderer.invoke('settings:rescan-workbenches'),
+  // 飞书凭据是三条固定动作：保存、清除、自检。渲染层不能传通道名、路径或命令。
+  saveFeishuCredentials: (value) => ipcRenderer.invoke('settings:remote-feishu-credentials-save', value),
+  clearFeishuCredentials: () => ipcRenderer.invoke('settings:remote-feishu-credentials-clear'),
+  testFeishuNotification: () => ipcRenderer.invoke('settings:remote-feishu-test-notification'),
   // v0.7 远程板块：一键断开是独立的受控动作，不接受通道名或任意命令。
   disconnectRemote: () => ipcRenderer.invoke('settings:remote-disconnect-all'),
   // 状态变化只订阅主进程固定的脱敏 runtime 快照；返回清理函数，窗口卸载即去重解绑。
