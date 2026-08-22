@@ -434,11 +434,16 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download all release assets
+      - name: Download finalized macOS release assets
         uses: actions/download-artifact@v4
         with:
-          pattern: whaledock-*-${{ github.ref_name }}
-          merge-multiple: true
+          name: whaledock-mac-${{ github.ref_name }}
+          path: release-assets
+
+      - name: Download Windows release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: whaledock-win-${{ github.ref_name }}
           path: release-assets
 
       - name: Verify release set and enforce public release approval

@@ -305,6 +305,14 @@ async function main() {
     path.join(__dirname, '..', '.github', 'workflows', 'resume-notarization.yml'),
     'utf8'
   );
+  const publishStepOffset = releaseWorkflow.indexOf('  publish-release:');
+  const publishStep = releaseWorkflow.slice(publishStepOffset);
+  check('packaging: 发布仅下载 final macOS 与 Windows 成品，排除 pending 覆盖',
+    publishStepOffset > 0
+      && publishStep.includes('name: whaledock-mac-${{ github.ref_name }}')
+      && publishStep.includes('name: whaledock-win-${{ github.ref_name }}')
+      && !publishStep.includes('pattern: whaledock-*-${{ github.ref_name }}')
+      && !publishStep.includes('merge-multiple: true'));
   check('packaging: macOS 公证提交后先保存成品与 submission id',
     submitStepOffset > 0
       && preserveStepOffset > submitStepOffset
