@@ -16,14 +16,19 @@
 - `package-lock.json`、`compliance/`、`vendor/`、`licenses/` 与 `THIRD_PARTY_NOTICES.md` 相对 v0.6.0 零变化；root runtime dependencies=0，dsh 仍锁定 `0.1.0-rc.6`，无 S1。
 - `v0.7.0` tag 已落地，dsh 跟版升级线与远程批次 2 的开工条件已满足；两线的后续状态与证据由各自线程维护，不由本发版结论代替。
 
-## dsh 跟版升级｜批次 0–1（独立分支进行中）
+## dsh 跟版升级｜批次 0–2（独立分支进行中）
 
 - 本线在独立 worktree `harness-desktop-v08-dsh-upgrade`、分支 `codex/v08-dsh-upgrade` 上从最新 `main@29070d5` 开工；没有改动并行飞书线的独占文件。
 - 2026-08-22T12:28Z 实时回读 npm `latest=next=0.1.1-rc.2`，发布时间 `2026-08-21T12:42:19.422Z`，tarball SHA-1 `1a5112369f1c46b13a6e6f21de8af5e6afd45074`；后续探针与候选材料只认该精确版本，若发布前 latest 再漂移则全套重跑。
 - 批次 1 已让 system dsh 与 npx 生产计划按已知版本决定 `--no-open`；bundled 仍被生产锁限制为 rc.6，本批只对 rc.2 验证纯 argv planner，不能启动 rc.2 bundled。rc.8 及以后追加旗标，rc.6 的完整命令对象保持原样。PATH 中 system dsh 不起版本子进程，只有界读取官方 npm shim/symlink 布局与 `package.json`；未知即沿用旧参数，结果不作为事件/prompt 根包证明；custom 命令零探测、零改写。
-- 本地统一 `npm run smoke` 实跑 **458 PASS / ALL PASS**，`node --check`、`git diff --check` 通过。这是本地纯 Node 证据；尚未推送、未跑本批三平台 CI、未打包、未安装或发布。
+- 批次 2 新增统一的根包 exact-proof helper：生产调用省略候选版本时仍只接受 rc.6；隔离探针可显式要求 `0.1.1-rc.2`，但 proof 必须逐字节相等。prompt 与托管事件门共用该 helper；错版、缺 proof、`latest`、system/custom 描述值均 fail-closed。workdir 的 host/cwd 证明与外部 read-only events attach 没有被误绑根包版本。
+- rc.2 live probe 已在全新临时 HOME/DSH_HOME/XDG/npm cache/workspace 与随机高位回环端口完成：fresh list=0；probe-only create 后有 3 条稳定安全元数据；WS opened/subscribed/send=0；raw queue 与鲸坞候选 prompt adapter 均 accepted 且 completed；raw/adapter history 均 6 页、36 事件、两个终态 seq 对齐；本地 SSE stub 3 请求，未继承真实凭据或访问真实模型。
+- `host.describe` 的 rc.2 加法字段 `home:string` 已用 synthetic fixture 与 live 值验证，只记录 present/length，不向中性层或报告暴露原文。`--dump-config` 现场回读 15,796 B/503 行/text，SHA-256 `cee7cd4d8c757ddf74a0bca9038ca817e2282f6c79f5c01d57baa89f871d4316`。
+- 自有 rc.2 进程以精确 PID/PGID/bin/父子链核验后 TERM，未用 KILL；web/provider 端口和引用临时根的残留进程均清零。既有 3080/50213 只做 lsof 前后回读，PID `53336` / `48805` 不变，未连接、未停止。
+- 全仓 42 个文件/3,221 次 rc.6 命中已逐类判定：3,031 次正式合规闭包留批次 4 全量重生；历史/兼容 fixture 保留；生产锁、工作台 range、当前用户文档只在批次 5 原子切换，不做盲替换。
+- 本地统一 `npm run smoke` 实跑 **462 PASS / ALL PASS**，prompt 13/13、events 23/23、main-events 24/24，`node --check`、`git diff --check` 通过。这是本地纯 Node + 隔离 live 候选证据；尚未推送、未跑本批三平台 CI、未打包、未安装或发布。
 - `lib/config.js`、`scripts/bundle-dsh.js`、`package-lock.json` 与 audited lock 的 SHA-256 均和 `HEAD` 一致，生产 dsh 仍锁定 `0.1.0-rc.6`；vendor/compliance/许可材料零变化，无 S1 结论变化。
-- 下一步是批次 2：在独立 DSH_HOME/XDG/npm cache/workspace/高位端口下对 `0.1.1-rc.2` 重跑 host.describe、list/history、WebSocket、prompt queue、cwd proof、dump-config 与退出清理；现有 3080/50213 服务不操作。
+- 下一步是批次 3：只克隆临时 rc.6 DSH_HOME 副本，用 rc.2 启动副本并重证会话/历史迁移；绝不碰真实 `~/.dsh`。若迁移有损，只设计如实升级提示，不代用户迁移。
 
 **v0.6.0 历史发布基线：工作台包通过三平台 CI，macOS arm64/x64 成品使用 Developer ID Application 正式签名、开启 Hardened Runtime 并获 Apple 公证。**
 

@@ -4329,7 +4329,9 @@ async function activateEventLayerForBackend(identity, options = {}) {
 
   if (monitor.identity.spawnedByUs
       && (!monitor.identity.state
-        || monitor.identity.state.version !== config.DSH_CONTRACT.packageVersion)) {
+        || !backend.hasExactDshPackageProof({
+          packageVersionProof: monitor.identity.state.version
+        }))) {
     await setEventAvailability(monitor, 'unavailable', 'contract-mismatch');
     log.line('events', '托管后端根包版本无法证明为锁定版，事件层 fail-closed');
     monitor.closed = true;

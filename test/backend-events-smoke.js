@@ -101,6 +101,7 @@ async function main() {
       return serverResponse(request, {
         version: '0.0.1',
         cwd: '/Users/private/workspace',
+        home: '/Users/private/dsh-home',
         attachedSessions: 2,
         canOpenPath: true
       });
@@ -168,7 +169,7 @@ async function main() {
     assert.equal(fetchCalls, 0);
   });
 
-  await test('managed workdir proof 使用严格 rc.6 host.describe loopback wire 并只返回 cwd', async () => {
+  await test('managed workdir proof 使用锁定 host.describe loopback wire 并只返回 cwd', async () => {
     const state = { child: { pid: 321 }, exited: false };
     const seen = [];
     const result = await backend.proveManagedWorkdir({
@@ -181,6 +182,7 @@ async function main() {
         return serverResponse(request, {
           version: config.DSH_CONTRACT.hostVersion,
           cwd: '/private/managed-workspace',
+          home: '/private/must-not-leak-home',
           attachedSessions: 2,
           canOpenPath: true,
           provider: 'must-not-leak',
@@ -312,7 +314,9 @@ async function main() {
     assert.notEqual(sessions[0].sessionRef, rawSession);
     assert.notEqual(sessions[0].parentRef, rawParent);
     const serialized = JSON.stringify(sessions);
-    for (const secret of [rawSession, rawParent, '/Users/private', 'private-preset', 'discard-me']) {
+    for (const secret of [
+      rawSession, rawParent, '/Users/private', 'private-preset', 'discard-me', 'dsh-home'
+    ]) {
       assert.equal(serialized.includes(secret), false, secret);
     }
   });

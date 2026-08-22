@@ -502,6 +502,12 @@ async function run() {
     assert.match(windowsSource, effectGuardPattern);
     assert.match(windowsSource, loopGuardPattern);
     assert.match(source, /const page = await monitor\.adapter\.readHistory[\s\S]+if \(!currentCheck\(\)\) return false;/);
+    const activation = source.slice(
+      source.indexOf('async function activateEventLayerForBackend'),
+      source.indexOf('function scheduleEventReconnect')
+    );
+    assert.match(activation, /backend\.hasExactDshPackageProof\(\{[\s\S]*packageVersionProof: monitor\.identity\.state\.version/);
+    assert(!activation.includes('state.version !== config.DSH_CONTRACT.packageVersion'));
   });
 
   console.log(`\nMAIN EVENTS ALL PASS (${passed})`);
