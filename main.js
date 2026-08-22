@@ -517,10 +517,9 @@ let mainWindow = null;
 // dsh 的 Web UI 搬进这个**没有 preload** 的子视图——远程页面拿不到任何 IPC。
 let dshView = null;
 const SHELL_RAIL_WIDTH = 132;
-const COCKPIT_PANEL_MIN_WIDTH = 340;
-const COCKPIT_PANEL_MAX_WIDTH = 420;
-const COCKPIT_PANEL_RATIO = 0.31;
-const COCKPIT_DSH_TOP = 228;
+// 驾驶舱对话不再塞进右侧窄栏。它是航道下方的全宽现场；顶部只保留
+// 第一方航道与匿名任务摘要，完整 dsh Web UI 不注入、不裁切、不重载。
+const COCKPIT_HEADER_HEIGHT = 136;
 const VIDEO_WATCH_DEBOUNCE_MS = 220;
 const VIDEO_WATCH_FALLBACK_MS = 4000;
 const VIDEO_STAGE_LABELS = Object.freeze({
@@ -549,7 +548,7 @@ const VIDEO_PUBLISH_LIGHTS = Object.freeze({
   'pinned-comment': '置顶评论', 'ai-label': 'AI 内容标识', published: '已由本人发布'
 });
 let cockpitNativeMode = false;
-let cockpitChatCollapsed = false;
+let cockpitChatOpen = false;
 let videoWorkspaceRuntime = null;
 let videoWorkspaceEpoch = 0;
 let videoSelectedToken = null;
@@ -1519,7 +1518,8 @@ let workbenchCache = null;
 const WORKBENCH_REMEMBERED_LIMIT = 64;
 
 // 主 dsh 视图的唯一布局函数。经典台和「退出驾驶舱」精确沿用 v0.6 的 132px 左栏；
-// 视频驾驶舱只把原视图缩进右侧面板，折叠时隐藏而不是销毁/重载。
+// 视频驾驶舱把完整 dsh 作为航道下方的全宽「对话现场」。现场模式只隐藏视图，
+// 不 destroy/reload，因此切回对话时会话、滚动位置和未发送草稿都还在。
 function mainViewLayout(options = {}) {
   const width = Number.isSafeInteger(options.width) && options.width >= 0 ? options.width : 0;
   const height = Number.isSafeInteger(options.height) && options.height >= 0 ? options.height : 0;
@@ -1532,23 +1532,14 @@ function mainViewLayout(options = {}) {
       bounds: { x: rail, y: 0, width: Math.max(0, width - rail), height }
     };
   }
-  const proportional = Math.round(width * COCKPIT_PANEL_RATIO);
-  const panelWidth = Math.max(
-    0,
-    Math.min(
-      COCKPIT_PANEL_MAX_WIDTH,
-      Math.max(COCKPIT_PANEL_MIN_WIDTH, proportional),
-      Math.max(0, width - 520)
-    )
-  );
-  const top = Math.min(height, COCKPIT_DSH_TOP);
+  const top = Math.min(height, COCKPIT_HEADER_HEIGHT);
   return {
-    mode: 'cockpit',
-    visible: options.chatCollapsed !== true && panelWidth > 0 && height > top,
+    mode: options.chatOpen === true ? 'cockpit-chat' : 'cockpit',
+    visible: options.chatOpen === true && width > 0 && height > top,
     bounds: {
-      x: Math.max(0, width - panelWidth),
+      x: 0,
       y: top,
-      width: panelWidth,
+      width,
       height: Math.max(0, height - top)
     }
   };
@@ -1664,27 +1655,29 @@ function focusCockpitChat() {
     return false;
   }
   cockpitNativeMode = false;
-  cockpitChatCollapsed = false;
+  cockpitChatOpen = true;
   layoutMainWindow();
-  // 安全边界：这里只让远程 WebContentsView 获焦；不注入 DOM，也不伪称光标已进输入框。
+  // 安全边界：这里只把完整远程视图切成全宽并让 WebContentsView 获焦；
+  // 不注入 DOM，也不伪称光标已进输入框。
   dshView.webContents.focus();
   pushShellState();
+  createAppMenu();
   return true;
 }
 
 function cockpitViewRequest(value) {
   if (!isPlainObject(value)) throw new Error('驾驶舱视图请求必须是 plain object');
-  const allowed = new Set(['mode', 'chatCollapsed', 'focusChat']);
+  const allowed = new Set(['mode', 'chatOpen', 'focusChat']);
   const keys = Object.keys(value);
-  if (!keys.length || keys.some((key) => !allowed.has(key))) throw new Error('驾驶舱视图请求含未批准字段');
+  if (keys.length !== 1 || keys.some((key) => !allowed.has(key))) throw new Error('驾驶舱视图请求必须是单一批准动作');
   const mode = value.mode === undefined ? null : value.mode;
   if (mode !== null && mode !== 'cockpit' && mode !== 'native') throw new Error('驾驶舱模式无效');
-  const chatCollapsed = value.chatCollapsed === undefined ? null : value.chatCollapsed;
-  if (chatCollapsed !== null && typeof chatCollapsed !== 'boolean') throw new Error('对话折叠状态无效');
+  const chatOpen = value.chatOpen === undefined ? null : value.chatOpen;
+  if (chatOpen !== null && typeof chatOpen !== 'boolean') throw new Error('对话现场状态无效');
   const focusChat = value.focusChat === undefined ? false : value.focusChat;
   if (value.focusChat !== undefined && value.focusChat !== true) throw new Error('聚焦动作只能显式为 true');
-  if (mode === null && chatCollapsed === null && !focusChat) throw new Error('驾驶舱请求为空');
-  return { mode, chatCollapsed, focusChat };
+  if (mode === null && chatOpen === null && !focusChat) throw new Error('驾驶舱请求为空');
+  return { mode, chatOpen, focusChat };
 }
 
 function exactPlainRequest(value, requiredKeys, optionalKeys, label) {
@@ -2127,7 +2120,7 @@ function shellStateSnapshot(extra = {}) {
     cockpit: active && active.cockpit === 'video' ? {
       kind: 'video',
       mode: cockpitNativeMode ? 'native' : 'cockpit',
-      chatCollapsed: cockpitChatCollapsed,
+      chatOpen: cockpitChatOpen,
       taskFlow: cockpitTaskFlow(canonicalEventSnapshot())
     } : null,
     ...extra
@@ -2273,7 +2266,7 @@ async function applyWorkbench(workbenchId, options = {}) {
   }
 
   cockpitNativeMode = false;
-  cockpitChatCollapsed = false;
+  cockpitChatOpen = false;
   const firstTime = shouldShowWorkbenchOnboarding(
     target,
     config.get('workbenchOnboardingSeenIds')
@@ -5187,8 +5180,8 @@ function openMainWindow() {
   tryLoad();
 }
 
-// 经典台维持 v0.6 左栏；视频驾驶舱把同一个 dsh 视图停靠进右侧面板。
-// 折叠只 setVisible(false)，不 destroy/reload，原会话与草稿留在原 WebContents 中。
+// 经典台维持 v0.6 左栏；视频驾驶舱把同一个 dsh 视图切成全宽对话现场。
+// 返回创作现场只 setVisible(false)，不 destroy/reload，原会话与草稿留在原 WebContents 中。
 function layoutMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed() || !dshView) return;
   const [width, height] = mainWindow.getContentSize();
@@ -5198,7 +5191,7 @@ function layoutMainWindow() {
     height,
     cockpit: active && active.cockpit,
     cockpitMode: cockpitNativeMode ? 'native' : 'cockpit',
-    chatCollapsed: cockpitChatCollapsed
+    chatOpen: cockpitChatOpen
   });
   try {
     dshView.setBounds(layout.bounds);
@@ -6329,10 +6322,17 @@ function registerShellIpc() {
         ? { kind: 'ok', focus: 'dsh-view' }
         : { kind: 'error', text: '对话视图还没准备好。' };
     }
-    if (request.mode) cockpitNativeMode = request.mode === 'native';
-    if (request.chatCollapsed !== null) cockpitChatCollapsed = request.chatCollapsed;
+    if (request.mode) {
+      cockpitNativeMode = request.mode === 'native';
+      cockpitChatOpen = false;
+    }
+    if (request.chatOpen !== null) cockpitChatOpen = request.chatOpen;
     layoutMainWindow();
+    if (request.chatOpen === false && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.focus();
+    }
     pushShellState();
+    createAppMenu();
     return { kind: 'ok' };
   }));
 
@@ -7347,14 +7347,23 @@ function workbenchMenuTemplate() {
     ...(active && active.cockpit === 'video' ? [
       { type: 'separator' },
       {
-        label: '聚焦驾驶舱对话',
+        label: cockpitChatOpen ? '返回视频创作现场' : '打开驾驶舱对话',
         accelerator: 'CommandOrControl+K',
-        click: () => { focusCockpitChat(); }
+        click: () => {
+          if (cockpitChatOpen) {
+            cockpitChatOpen = false;
+            layoutMainWindow();
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.focus();
+            pushShellState();
+            createAppMenu();
+          } else focusCockpitChat();
+        }
       },
       {
         label: cockpitNativeMode ? '返回视频驾驶舱' : '退出驾驶舱看原生 dsh',
         click: () => {
           cockpitNativeMode = !cockpitNativeMode;
+          cockpitChatOpen = false;
           layoutMainWindow();
           pushShellState();
           createAppMenu();

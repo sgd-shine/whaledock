@@ -122,7 +122,8 @@
     #video-cockpit { display:none; position:fixed; inset:0; overflow:hidden; background:var(--bg); }
     body.cockpit-active #rail { display:none; }
     body.cockpit-active #video-cockpit { display:block; }
-    body.cockpit-active #toast { left:18px; max-width:min(560px,calc(100vw - 420px)); }
+    body.cockpit-active #toast { left:18px; max-width:min(640px,calc(100vw - 36px)); }
+    body.chat-open #cockpit-scene { visibility:hidden; pointer-events:none; }
     #enter-cockpit { display:none; }
     body.cockpit-available:not(.cockpit-active) #enter-cockpit { display:block; color:var(--accent); }
 
@@ -134,12 +135,12 @@
       opacity:.9;
     }
     #cockpit-route {
-      position:absolute; left:0; right:clamp(340px,31vw,420px); top:0; height:104px;
-      display:grid; grid-template-columns:190px minmax(0,1fr) auto; align-items:center; gap:16px;
-      padding:14px 18px; border-bottom:1px solid var(--line);
+      position:absolute; left:0; right:0; top:0; height:136px;
+      display:grid; grid-template-columns:190px minmax(0,1fr) auto; grid-template-rows:82px 42px;
+      align-items:center; column-gap:16px; padding:6px 18px 6px; border-bottom:1px solid var(--line);
       background:color-mix(in srgb,var(--panel) 88%,transparent); backdrop-filter:blur(20px);
     }
-    .cockpit-brand { display:flex; align-items:center; gap:10px; min-width:0; }
+    .cockpit-brand { grid-column:1; grid-row:1; display:flex; align-items:center; gap:10px; min-width:0; }
     .cockpit-brand .mark {
       width:38px; height:38px; border:1px solid color-mix(in srgb,var(--accent) 65%,var(--line));
       border-radius:13px; display:grid; place-items:center; color:var(--accent);
@@ -148,7 +149,7 @@
     }
     .cockpit-brand .eyebrow { display:block; color:var(--muted); font-size:10px; letter-spacing:.18em; }
     .cockpit-brand strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }
-    #route-stages { display:flex; align-items:center; min-width:0; overflow-x:auto; scrollbar-width:none; }
+    #route-stages { grid-column:2; grid-row:1; display:flex; align-items:center; min-width:0; overflow-x:auto; scrollbar-width:none; }
     #route-stages::-webkit-scrollbar { display:none; }
     .route-step {
       position:relative; flex:0 0 auto; min-width:68px; border:0; background:transparent; color:var(--muted);
@@ -172,16 +173,22 @@
       color:var(--muted); padding:8px 11px; font:inherit; font-size:11px; cursor:pointer;
     }
     .ghost-button:hover { color:var(--text); border-color:var(--accent); }
+    .cockpit-route-actions { grid-column:3; grid-row:1; display:flex; align-items:center; gap:8px; }
+    #toggle-chat { white-space:nowrap; color:var(--text); }
+    #toggle-chat[aria-pressed="true"] {
+      color:#02161a; border-color:var(--accent); background:var(--accent); font-weight:700;
+      box-shadow:0 0 22px #22d3ee33;
+    }
 
     #cockpit-scene {
-      position:absolute; left:0; right:clamp(340px,31vw,420px); top:104px; bottom:0;
+      position:absolute; left:0; right:0; top:136px; bottom:0;
       padding:24px; overflow:auto;
     }
-    .scene-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:18px; margin:0 auto 20px; max-width:940px; }
+    .scene-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:18px; margin:0 auto 20px; max-width:1120px; }
     .scene-kicker { color:var(--accent); font-size:10px; letter-spacing:.18em; text-transform:uppercase; }
     .scene-heading h1 { margin:3px 0 0; font-size:clamp(24px,3vw,38px); line-height:1.1; letter-spacing:-.04em; }
     .scene-heading p { margin:0; max-width:330px; color:var(--muted); font-size:12px; text-align:right; }
-    #scene-stage { max-width:940px; margin:0 auto; }
+    #scene-stage { max-width:1120px; margin:0 auto; }
     .scene-hero {
       min-height:310px; border:1px solid color-mix(in srgb,var(--line) 80%,var(--accent)); border-radius:22px;
       background:linear-gradient(150deg,color-mix(in srgb,var(--panel) 88%,transparent),color-mix(in srgb,var(--bg) 94%,transparent));
@@ -302,48 +309,36 @@
     .data-door h2 { margin:0; font-size:26px; }
     .data-door p { margin:8px auto 0; max-width:480px; color:var(--muted); }
 
-    #cockpit-panel {
-      position:absolute; right:0; top:0; bottom:0; width:clamp(340px,31vw,420px);
-      border-left:1px solid var(--line); background:color-mix(in srgb,var(--panel) 92%,var(--bg));
-      box-shadow:-24px 0 70px #0005;
+    #cockpit-task-flow {
+      grid-column:1 / -1; grid-row:2; min-width:0; height:38px; display:grid;
+      grid-template-columns:auto auto minmax(0,1fr); align-items:center; gap:12px;
+      padding:0 10px; border:1px solid var(--line); border-radius:12px;
+      background:color-mix(in srgb,var(--bg) 76%,transparent); overflow:hidden;
     }
-    #cockpit-task-flow { height:186px; padding:15px 15px 10px; border-bottom:1px solid var(--line); overflow:hidden; }
-    .panel-title { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-    .panel-title strong { font-size:12px; letter-spacing:.04em; }
-    #task-state { display:flex; align-items:center; gap:7px; color:var(--muted); font-size:11px; }
+    .panel-title { display:flex; align-items:center; gap:9px; white-space:nowrap; }
+    .panel-title strong { font-size:11px; letter-spacing:.04em; }
+    #task-state { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:10px; }
     #task-state .lamp { width:8px; height:8px; border-radius:50%; background:var(--muted); }
     #task-state[data-state="busy"] .lamp { background:var(--accent); box-shadow:0 0 14px #22d3eeaa; animation:pulse 1.3s ease-in-out infinite; }
     #task-state[data-state="waiting"] .lamp { background:#f59e0b; box-shadow:0 0 12px #f59e0b88; }
     #task-state[data-state="celebrate"] .lamp { background:#34d399; }
     #task-state[data-state="error"] .lamp, #task-state[data-state="offline"] .lamp { background:#fb7185; }
     @keyframes pulse { 50% { opacity:.42; transform:scale(.82); } }
-    .task-counts { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; margin-top:12px; }
-    .task-count { border:1px solid var(--line); border-radius:11px; padding:9px; background:var(--bg); }
-    .task-count span { display:block; color:var(--muted); font-size:10px; }
-    .task-count strong { display:block; margin-top:2px; font-size:17px; font-variant-numeric:tabular-nums; }
-    #task-recent { display:flex; gap:6px; margin-top:9px; overflow:hidden; }
+    .task-counts { display:flex; align-items:center; gap:5px; }
+    .task-count { display:flex; align-items:center; gap:5px; border:1px solid var(--line); border-radius:999px; padding:4px 8px; background:var(--panel); }
+    .task-count span { color:var(--muted); font-size:9px; }
+    .task-count strong { font-size:11px; font-variant-numeric:tabular-nums; }
+    #task-recent { min-width:0; display:flex; justify-content:flex-end; gap:6px; overflow:hidden; }
     .task-chip { flex:0 1 auto; min-width:0; border:1px solid var(--line); border-radius:999px; color:var(--muted); padding:5px 8px; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    #cockpit-chat-head {
-      height:42px; display:flex; align-items:center; justify-content:space-between; padding:0 12px;
-      border-bottom:1px solid var(--line); color:var(--muted); font-size:11px;
-    }
-    #cockpit-chat-head strong { color:var(--text); font-size:12px; }
-    #cockpit-chat-head .chat-tools { display:flex; align-items:center; gap:6px; }
-    #cockpit-chat-head button { padding:5px 8px; }
-    #cockpit-chat-placeholder {
-      position:absolute; left:0; right:0; top:228px; bottom:0; display:none; place-items:center;
-      padding:28px; text-align:center; color:var(--muted); background:var(--bg);
-    }
-    body.chat-collapsed #cockpit-chat-placeholder { display:grid; }
-    #cockpit-chat-placeholder strong { display:block; color:var(--text); font-size:16px; margin-bottom:7px; }
     @media (max-width:1080px) {
-      #cockpit-route { grid-template-columns:150px minmax(0,1fr) auto; gap:8px; padding-inline:12px; }
+      #cockpit-route { grid-template-columns:150px minmax(0,1fr) auto; column-gap:8px; padding-inline:12px; }
       .route-step { min-width:58px; }
       #cockpit-scene { padding:18px; }
       .scene-hero { grid-template-columns:1fr; }
       .scene-side { grid-template-columns:repeat(2,minmax(0,1fr)); }
       .compare-grid { grid-template-columns:1fr; }
       .cockpit-brand .eyebrow { display:none; }
+      #task-recent .task-chip:nth-child(n+2) { display:none; }
     }
     @media (prefers-reduced-motion:reduce) { #task-state .lamp { animation:none !important; } }
   </style>
@@ -369,7 +364,19 @@
         <div><span class="eyebrow">WHALEDOCK COCKPIT</span><strong id="cockpit-name">短视频创作台</strong></div>
       </div>
       <nav id="route-stages" aria-label="一条视频的航道"></nav>
-      <button class="ghost-button" id="exit-cockpit" type="button">退出驾驶舱</button>
+      <div class="cockpit-route-actions">
+        <button class="ghost-button" id="toggle-chat" type="button" aria-pressed="false">对话 ⌘K</button>
+        <button class="ghost-button" id="exit-cockpit" type="button">退出驾驶舱</button>
+      </div>
+      <section id="cockpit-task-flow" aria-label="鲸坞任务流">
+        <div class="panel-title"><strong>鲸坞任务流</strong><div id="task-state" data-state="offline"><span class="lamp"></span><span id="task-state-label">正在接线</span></div></div>
+        <div class="task-counts">
+          <div class="task-count"><span>进行中</span><strong id="task-active">—</strong></div>
+          <div class="task-count"><span>等确认</span><strong id="task-waiting">—</strong></div>
+          <div class="task-count"><span>已完成</span><strong id="task-completed">—</strong></div>
+        </div>
+        <div id="task-recent" aria-label="最近任务"></div>
+      </section>
     </header>
 
     <main id="cockpit-scene">
@@ -382,24 +389,6 @@
       </div>
     </main>
 
-    <aside id="cockpit-panel" aria-label="鲸坞面板">
-      <section id="cockpit-task-flow">
-        <div class="panel-title"><strong>鲸坞任务流</strong><div id="task-state" data-state="offline"><span class="lamp"></span><span id="task-state-label">正在接线</span></div></div>
-        <div class="task-counts">
-          <div class="task-count"><span>进行中</span><strong id="task-active">—</strong></div>
-          <div class="task-count"><span>等确认</span><strong id="task-waiting">—</strong></div>
-          <div class="task-count"><span>已完成</span><strong id="task-completed">—</strong></div>
-        </div>
-        <div id="task-recent" aria-label="最近任务"></div>
-      </section>
-      <div id="cockpit-chat-head">
-        <div><strong>鲸坞同事</strong> · dsh 会话</div>
-        <div class="chat-tools"><span>⌘K 聚焦</span><button class="ghost-button" id="toggle-chat" type="button">折叠</button></div>
-      </div>
-      <div id="cockpit-chat-placeholder">
-        <div><strong>对话已折叠</strong><span>现场更宽了；随时展开继续原会话。</span></div>
-      </div>
-    </aside>
   </section>
 
   <div class="layer" id="switcher-layer">
