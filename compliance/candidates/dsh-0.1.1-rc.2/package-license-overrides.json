@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "packages": {
+    "@aws-sdk/credential-provider-http@3.972.72": {
+      "licenseFiles": [
+        {
+          "path": "licenses/package-texts/edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d.txt",
+          "sha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d",
+          "sourceUrl": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/d760a00859a08b5d04590ee047510b49add12361/LICENSE",
+          "sourceCommit": "d760a00859a08b5d04590ee047510b49add12361"
+        }
+      ]
+    },
+    "@aws-sdk/credential-provider-login@3.972.77": {
+      "licenseFiles": [
+        {
+          "path": "licenses/package-texts/edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d.txt",
+          "sha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d",
+          "sourceUrl": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/d760a00859a08b5d04590ee047510b49add12361/LICENSE",
+          "sourceCommit": "d760a00859a08b5d04590ee047510b49add12361"
+        }
+      ]
+    },
+    "@aws-sdk/nested-clients@3.997.44": {
+      "licenseFiles": [
+        {
+          "path": "licenses/package-texts/edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d.txt",
+          "sha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d",
+          "sourceUrl": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/d760a00859a08b5d04590ee047510b49add12361/LICENSE",
+          "sourceCommit": "d760a00859a08b5d04590ee047510b49add12361"
+        }
+      ]
+    },
+    "@earendil-works/pi-ai@0.82.1": {
+      "licenseFiles": [
+        {
+          "path": "licenses/package-texts/4f6a1985796db5225e3b1e59972bd47e07a27a0748427cb3d3c8fbf39f9311f0.txt",
+          "sha256": "4f6a1985796db5225e3b1e59972bd47e07a27a0748427cb3d3c8fbf39f9311f0",
+          "sourceUrl": "https://raw.githubusercontent.com/earendil-works/pi/b4f293684bba718d59cc1157679bcf6157b3a7f5/LICENSE",
+          "sourceCommit": "b4f293684bba718d59cc1157679bcf6157b3a7f5",
+          "upstreamSha256": "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48",
+          "normalization": "appended-final-LF"
+        }
+      ]
+    },
+    "@koromix/koffi-darwin-arm64@3.1.6": {
+      "licenseFiles": [
+        {
+          "path": "licenses/package-texts/22bcbbbacd739b026a8dc484f62a31484ce4c4e31f3408b60b29b4e41d62b290.txt",
+          "sha256": "22bcbbbacd739b026a8dc484f62a31484ce4c4e31f3408b60b29b4e41d62b290",
+          "sourceUrl": "https://codeberg.org/Koromix/rygel/raw/commit/08a5cd359094275f19a51893c6693c403b62e307/src/koffi/LICENSE.txt",
+          "sourceCommit": "08a5cd359094275f19a51893c6693c403b62e307"
+        }
+      ]
+    },
+    "@koromix/koffi-darwin-x64@3.1.6": {
+      "licenseFiles": [
+        {
+          "path": "licenses/package-texts/22bcbbbacd739b026a8dc484f62a31484ce4c4e31f3408b60b29b4e41d62b290.txt",
+          "sha256": "22bcbbbacd739b026a8dc484f62a31484ce4c4e31f3408b60b29b4e41d62b290",
+          "sourceUrl": "https://codeberg.org/Koromix/rygel/raw/commit/08a5cd359094275f19a51893c6693c403b62e307/src/koffi/LICENSE.txt",
+          "sourceCommit": "08a5cd359094275f19a51893c6693c403b62e307"
+        }
+      ]
+    },
+    "@koromix/koffi-win32-x64@3.1.6": {
+      "licenseFiles": [
+        {
+          "path": "licenses/package-texts/22bcbbbacd739b026a8dc484f62a31484ce4c4e31f3408b60b29b4e41d62b290.txt",
+          "sha256": "22bcbbbacd739b026a8dc484f62a31484ce4c4e31f3408b60b29b4e41d62b290",
+          "sourceUrl": "https://codeberg.org/Koromix/rygel/raw/commit/08a5cd359094275f19a51893c6693c403b62e307/src/koffi/LICENSE.txt",
+          "sourceCommit": "08a5cd359094275f19a51893c6693c403b62e307"
+        }
+      ]
+    },
+    "data-uri-to-buffer@4.0.1": {
+      "licenseFiles": [
+        {
+          "path": "licenses/package-texts/a7cc4332acfa1f9b6530e01aac77fefe74f2efa32579215fddaa473013f9a25c.txt",
+          "sha256": "a7cc4332acfa1f9b6530e01aac77fefe74f2efa32579215fddaa473013f9a25c",
+          "sourceUrl": "https://raw.githubusercontent.com/TooTallNate/node-data-uri-to-buffer/85cd8c854aefbf1bb636789d80364cfac8ea1583/README.md",
+          "sourceCommit": "85cd8c854aefbf1bb636789d80364cfac8ea1583"
+        }
+      ]
+    }
+  }
+}

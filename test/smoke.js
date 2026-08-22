@@ -952,6 +952,22 @@ async function main() {
       result.status === 0 ? file : `${file} exit=${result.status}`);
   }
 
+  // dsh 跟版候选门：manifest/lock/原生目标/临时路径只做纯 Node fail-closed 校验。
+  for (const [file, label] of [
+    ['dsh-candidate-smoke.js', 'dsh 候选 runtime 严格入口'],
+    ['dsh-candidate-evidence-smoke.js', 'dsh 候选原生证据收集器']
+  ]) {
+    const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
+      cwd: path.join(__dirname, '..'),
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024
+    });
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    check(`dsh 跟版: ${label}直测纳入统一 smoke`, result.status === 0,
+      result.status === 0 ? file : `${file} exit=${result.status}`);
+  }
+
   // v0.7 远程板块：纯 Node 通道核心与 Electron 薄层必须一起拿到证据。
   for (const [file, label] of [
     ['remote-smoke.js', '远程收推批、绑定与生命周期'],

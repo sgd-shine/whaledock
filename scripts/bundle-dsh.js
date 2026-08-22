@@ -6,12 +6,13 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { DEFAULTS } = require('../lib/config');
+const candidateRuntime = require('./dsh-runtime-candidate');
 
 const root = path.resolve(__dirname, '..');
-const auditedLockPath = path.join(root, 'compliance', 'dsh-runtime-package-lock.json');
-const version = String(DEFAULTS.dshVersion || '').trim();
+const productionAuditedLockPath = path.join(root, 'compliance', 'dsh-runtime-package-lock.json');
+const productionVersion = String(DEFAULTS.dshVersion || '').trim();
 const MANIFEST_SCHEMA_VERSION = 3;
-const INSTALL_SCRIPT_ALLOWLIST = new Set([
+const PRODUCTION_INSTALL_SCRIPT_ALLOWLIST = new Set([
   '@deepseek-ai/dsh-subprocess-local',
   '@google/genai',
   'koffi',
@@ -29,8 +30,9 @@ const targetPlatform = option('platform', process.platform);
 const targetArch = option('arch', process.arch);
 const defaultOutputDir = path.join(root, 'vendor', 'dsh-runtime');
 const requestedOutputDir = option('output-dir', '');
-const outputDir = requestedOutputDir ? path.resolve(requestedOutputDir) : defaultOutputDir;
+let outputDir = requestedOutputDir ? path.resolve(requestedOutputDir) : defaultOutputDir;
 const customOutput = outputDir !== defaultOutputDir;
+const candidateManifestPath = option('candidate-manifest', '');
 
 if (customOutput) {
   const temporaryRoot = fs.realpathSync(os.tmpdir());
@@ -60,12 +62,32 @@ if (!['arm64', 'x64'].includes(targetArch)) {
   throw new Error(`不支持的内置引擎目标架构：${targetArch}`);
 }
 
-if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+let candidate = null;
+if (candidateManifestPath) {
+  candidate = candidateRuntime.loadCandidateRuntime({
+    repositoryRoot: root,
+    manifestPath: candidateManifestPath,
+    targetPlatform,
+    targetArch,
+    hostPlatform: process.platform,
+    hostArch: process.arch,
+    outputDir
+  });
+  outputDir = candidate.outputDir;
+}
+const auditedLockPath = candidate ? candidate.auditedLockPath : productionAuditedLockPath;
+const version = candidate ? candidate.packageVersion : productionVersion;
+const installScriptAllowlist = candidate
+  ? new Set(candidate.installScriptAllowlist) : PRODUCTION_INSTALL_SCRIPT_ALLOWLIST;
+
+if (!candidate && !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
   throw new Error('DEFAULTS.dshVersion 必须是可复现的固定版本');
 }
 
-const auditedLockContent = fs.readFileSync(auditedLockPath);
-const auditedLock = JSON.parse(auditedLockContent.toString('utf8'));
+const auditedLockContent = candidate
+  ? candidate.auditedLockContent : fs.readFileSync(auditedLockPath);
+const auditedLock = candidate
+  ? candidate.auditedLock : JSON.parse(auditedLockContent.toString('utf8'));
 const auditedRoot = auditedLock.packages && auditedLock.packages[''];
 if (!auditedRoot || !auditedRoot.dependencies
     || auditedRoot.dependencies['@deepseek-ai/dsh'] !== version) {
@@ -88,8 +110,8 @@ function validateInstallScriptClosure(lock) {
     observed.add(name);
   }
 
-  const unknown = [...observed].filter((name) => !INSTALL_SCRIPT_ALLOWLIST.has(name));
-  const missing = [...INSTALL_SCRIPT_ALLOWLIST].filter((name) => !observed.has(name));
+  const unknown = [...observed].filter((name) => !installScriptAllowlist.has(name));
+  const missing = [...installScriptAllowlist].filter((name) => !observed.has(name));
   if (unknown.length || missing.length) {
     throw new Error([
       '内置 dsh 安装脚本闭包与已审核白名单不一致',
@@ -129,13 +151,27 @@ function validateTargetRuntime(lock) {
   const nodePtyDir = path.join(
     outputDir, 'node_modules', 'node-pty', 'prebuilds', `${targetPlatform}-${targetArch}`
   );
-  requireRegularFile(path.join(nodePtyDir, 'pty.node'), '目标 node-pty prebuild');
 
   if (targetPlatform === 'win32') {
-    for (const fileName of ['conpty.node', 'conpty_console_list.node', 'winpty-agent.exe', 'winpty.dll']) {
-      requireRegularFile(path.join(nodePtyDir, fileName), `目标 node-pty ${fileName}`);
+    // node-pty 1.1.0 同时分发 winpty/conpty；1.2.0-beta.15 删除 winpty，并把
+    // OpenConsole/conpty.dll 放入 conpty/ 子目录。两种布局都要按各自完整文件集校验。
+    if (fs.existsSync(path.join(nodePtyDir, 'pty.node'))) {
+      requireRegularFile(path.join(nodePtyDir, 'pty.node'), '目标 node-pty legacy pty.node');
+      for (const fileName of ['conpty.node', 'conpty_console_list.node', 'winpty-agent.exe', 'winpty.dll']) {
+        requireRegularFile(path.join(nodePtyDir, fileName), `目标 node-pty legacy ${fileName}`);
+      }
+    } else {
+      for (const fileName of [
+        'conpty.node',
+        'conpty_console_list.node',
+        path.join('conpty', 'OpenConsole.exe'),
+        path.join('conpty', 'conpty.dll')
+      ]) {
+        requireRegularFile(path.join(nodePtyDir, fileName), `目标 node-pty modern ${fileName}`);
+      }
     }
   } else {
+    requireRegularFile(path.join(nodePtyDir, 'pty.node'), '目标 node-pty prebuild');
     const spawnHelper = path.join(nodePtyDir, 'spawn-helper');
     requireRegularFile(spawnHelper, '目标 node-pty spawn-helper');
     fs.chmodSync(spawnHelper, 0o755);

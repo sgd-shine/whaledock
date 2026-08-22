@@ -1,0 +1,310 @@
+name: dsh candidate native audit
+
+on:
+  push:
+    branches:
+      - codex/v08-dsh-upgrade
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-candidate-audit:
+    if: github.ref == 'refs/heads/codex/v08-dsh-upgrade'
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: darwin
+            arch: arm64
+            target: darwin-arm64
+          - runner: macos-15-intel
+            platform: darwin
+            arch: x64
+            target: darwin-x64
+          - runner: windows-2022
+            platform: win32
+            arch: x64
+            target: win32-x64
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CANDIDATE_DIR: compliance/candidates/dsh-0.1.1-rc.2
+      CANDIDATE_MANIFEST: compliance/candidates/dsh-0.1.1-rc.2/candidate-manifest.json
+      CANDIDATE_TARGET: ${{ matrix.target }}
+      TARGET_PLATFORM: ${{ matrix.platform }}
+      TARGET_ARCH: ${{ matrix.arch }}
+
+    steps:
+      - name: Check out exact candidate commit
+        uses: actions/checkout@v4
+
+      - name: Set up pinned Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+
+      - name: Verify pinned Node and npm toolchain
+        run: |
+          node <<'NODE'
+          'use strict';
+          const { spawnSync } = require('child_process');
+          const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+          const result = spawnSync(npm, ['--version'], {
+            encoding: 'utf8',
+            shell: process.platform === 'win32'
+          });
+          if (result.error) throw result.error;
+          const npmVersion = String(result.stdout || '').trim();
+          if (process.version !== 'v22.23.2' || result.status !== 0 || npmVersion !== '10.9.8') {
+            throw new Error(`Expected Node v22.23.2 / npm 10.9.8, got ${process.version} / ${npmVersion}`);
+          }
+          console.log(`TOOLCHAIN_VERIFIED ${process.version} npm/${npmVersion} ${process.platform}/${process.arch}`);
+          NODE
+
+      - name: Prepare isolated candidate paths
+        run: |
+          node <<'NODE'
+          'use strict';
+          const fs = require('fs');
+          const os = require('os');
+          const path = require('path');
+          const temporaryRoot = fs.realpathSync(os.tmpdir());
+          const runtimeRoot = fs.mkdtempSync(path.join(temporaryRoot, 'whaledock-dsh-runtime-'));
+          const evidenceRoot = fs.mkdtempSync(path.join(temporaryRoot, 'whaledock-dsh-candidate-'));
+          const values = {
+            RUNTIME_ROOT: runtimeRoot,
+            RUNTIME_DIR: path.join(runtimeRoot, 'runtime'),
+            EVIDENCE_ROOT: evidenceRoot,
+            EVIDENCE_PATH: path.join(evidenceRoot, `evidence-${process.env.CANDIDATE_TARGET}.json`),
+            MIRROR_DIR: path.join(evidenceRoot, 'clean-mirror'),
+            INVENTORY_PATH: path.join(evidenceRoot, `inventory-${process.env.CANDIDATE_TARGET}.json`),
+            ARTIFACT_DIR: path.join(evidenceRoot, `artifact-${process.env.CANDIDATE_TARGET}`)
+          };
+          fs.appendFileSync(process.env.GITHUB_ENV,
+            Object.entries(values).map(([name, value]) => `${name}=${value}\n`).join(''));
+          console.log(`CANDIDATE_PATHS_READY ${runtimeRoot} ${evidenceRoot}`);
+          NODE
+
+      - name: Build native candidate runtime
+        run: |
+          node <<'NODE'
+          'use strict';
+          const { spawnSync } = require('child_process');
+          const args = [
+            'scripts/bundle-dsh.js',
+            `--candidate-manifest=${process.env.CANDIDATE_MANIFEST}`,
+            `--platform=${process.env.TARGET_PLATFORM}`,
+            `--arch=${process.env.TARGET_ARCH}`,
+            `--output-dir=${process.env.RUNTIME_DIR}`
+          ];
+          const result = spawnSync(process.execPath, args, { stdio: 'inherit', shell: false });
+          if (result.error) throw result.error;
+          if (result.status !== 0) process.exit(result.status || 1);
+          NODE
+
+      - name: Capture native candidate evidence
+        run: |
+          node <<'NODE'
+          'use strict';
+          const { spawnSync } = require('child_process');
+          const args = [
+            'scripts/dsh-candidate-evidence.js',
+            `--runtime=${process.env.RUNTIME_DIR}`,
+            `--output=${process.env.EVIDENCE_PATH}`
+          ];
+          const result = spawnSync(process.execPath, args, { stdio: 'inherit', shell: false });
+          if (result.error) throw result.error;
+          if (result.status !== 0) process.exit(result.status || 1);
+          NODE
+
+      - name: Generate inventory in a clean compliance mirror
+        run: |
+          node <<'NODE'
+          'use strict';
+          const fs = require('fs');
+          const path = require('path');
+          const { spawnSync } = require('child_process');
+          const mirror = process.env.MIRROR_DIR;
+          fs.mkdirSync(path.join(mirror, 'scripts'), { recursive: true });
+          fs.mkdirSync(path.join(mirror, 'compliance'), { recursive: true });
+          fs.copyFileSync('scripts/third-party-inventory.js', path.join(mirror, 'scripts', 'third-party-inventory.js'));
+          fs.cpSync('licenses', path.join(mirror, 'licenses'), { recursive: true, errorOnExist: true });
+          for (const name of ['embedded-license-materials.json', 'SOURCES.json']) {
+            fs.copyFileSync(path.join('compliance', name), path.join(mirror, 'compliance', name));
+          }
+          fs.copyFileSync(
+            path.join(process.env.CANDIDATE_DIR, 'package-license-overrides.json'),
+            path.join(mirror, 'compliance', 'package-license-overrides.json')
+          );
+          const script = path.join(mirror, 'scripts', 'third-party-inventory.js');
+          const result = spawnSync(process.execPath, [
+            script,
+            'generate',
+            `--runtime=${process.env.RUNTIME_DIR}`,
+            `--inventory=${process.env.INVENTORY_PATH}`
+          ], { stdio: 'inherit', shell: false });
+          if (result.error) throw result.error;
+          if (result.status !== 0) process.exit(result.status || 1);
+          NODE
+
+      - name: Stage only bound candidate evidence
+        run: |
+          node <<'NODE'
+          'use strict';
+          const crypto = require('crypto');
+          const fs = require('fs');
+          const path = require('path');
+          const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
+          const mirror = fs.realpathSync(process.env.MIRROR_DIR);
+          const artifact = process.env.ARTIFACT_DIR;
+          fs.mkdirSync(path.join(artifact, 'licenses', 'package-texts'), { recursive: true });
+
+          const inventoryBytes = fs.readFileSync(process.env.INVENTORY_PATH);
+          const inventory = JSON.parse(inventoryBytes);
+          if (inventory.target.platform !== process.env.TARGET_PLATFORM
+              || inventory.target.arch !== process.env.TARGET_ARCH) {
+            throw new Error('inventory target does not match the native matrix target');
+          }
+
+          const referenced = [...new Set((inventory.packages || [])
+            .flatMap((pkg) => pkg.licenseFiles || []))].sort();
+          const materials = [];
+          for (const relative of referenced) {
+            if (!/^licenses\/[A-Za-z0-9@._/+()-]+$/.test(relative) || relative.includes('..')) {
+              throw new Error(`unsafe inventory material path: ${relative}`);
+            }
+            const source = path.resolve(mirror, ...relative.split('/'));
+            const containment = path.relative(mirror, source);
+            if (containment === '..' || containment.startsWith(`..${path.sep}`) || path.isAbsolute(containment)) {
+              throw new Error(`inventory material escaped mirror: ${relative}`);
+            }
+            const stat = fs.lstatSync(source);
+            if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`inventory material is not a regular file: ${relative}`);
+            const bytes = fs.readFileSync(source);
+            const digest = sha256(bytes);
+            const packageText = /^licenses\/package-texts\/[a-f0-9]{64}\.txt$/.test(relative);
+            if (packageText) {
+              if (path.basename(relative, '.txt') !== digest) throw new Error(`package text filename/hash mismatch: ${relative}`);
+              fs.copyFileSync(source, path.join(artifact, ...relative.split('/')));
+            }
+            materials.push({ path: relative, bytes: bytes.length, sha256: digest, uploaded: packageText });
+          }
+
+          const evidenceBytes = fs.readFileSync(process.env.EVIDENCE_PATH);
+          const candidateManifestBytes = fs.readFileSync(process.env.CANDIDATE_MANIFEST);
+          const runtimeManifestPath = path.join(process.env.RUNTIME_DIR, 'manifest.json');
+          const runtimeManifestBytes = fs.readFileSync(runtimeManifestPath);
+          const inventoryName = `inventory-${process.env.CANDIDATE_TARGET}.json`;
+          const evidenceName = `evidence-${process.env.CANDIDATE_TARGET}.json`;
+          const runtimeManifestName = `runtime-manifest-${process.env.CANDIDATE_TARGET}.json`;
+          fs.copyFileSync(process.env.INVENTORY_PATH, path.join(artifact, inventoryName));
+          fs.copyFileSync(process.env.EVIDENCE_PATH, path.join(artifact, evidenceName));
+          fs.copyFileSync(runtimeManifestPath, path.join(artifact, runtimeManifestName));
+
+          const materialManifest = {
+            schemaVersion: 1,
+            candidateVersion: inventory.runtimeVersion,
+            target: inventory.target,
+            gitCommit: process.env.GITHUB_SHA,
+            candidateManifest: {
+              path: process.env.CANDIDATE_MANIFEST.split(path.sep).join('/'),
+              bytes: candidateManifestBytes.length,
+              sha256: sha256(candidateManifestBytes)
+            },
+            inventory: { path: inventoryName, bytes: inventoryBytes.length, sha256: sha256(inventoryBytes) },
+            evidence: { path: evidenceName, bytes: evidenceBytes.length, sha256: sha256(evidenceBytes) },
+            runtimeManifest: {
+              path: runtimeManifestName,
+              bytes: runtimeManifestBytes.length,
+              sha256: sha256(runtimeManifestBytes)
+            },
+            referencedLicenseMaterials: materials
+          };
+          fs.writeFileSync(
+            path.join(artifact, `material-manifest-${process.env.CANDIDATE_TARGET}.json`),
+            `${JSON.stringify(materialManifest, null, 2)}\n`,
+            { flag: 'wx' }
+          );
+          console.log(`CANDIDATE_ARTIFACT_READY ${process.env.CANDIDATE_TARGET} materials=${materials.length}`);
+          NODE
+
+      - name: Upload native candidate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-candidate-${{ matrix.target }}
+          if-no-files-found: error
+          retention-days: 7
+          path: ${{ env.ARTIFACT_DIR }}
+
+      - name: Confirm checkout remained read-only
+        run: |
+          node <<'NODE'
+          'use strict';
+          const { spawnSync } = require('child_process');
+          const result = spawnSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
+            encoding: 'utf8',
+            shell: false
+          });
+          if (result.error) throw result.error;
+          if (result.status !== 0 || String(result.stdout || '').trim()) {
+            throw new Error(`candidate audit mutated checkout:\n${String(result.stdout || '').trim()}`);
+          }
+          console.log('CANDIDATE_CHECKOUT_READ_ONLY');
+          NODE
+
+      - name: Compare committed candidate inventory when present
+        run: |
+          node <<'NODE'
+          'use strict';
+          const crypto = require('crypto');
+          const fs = require('fs');
+          const path = require('path');
+          const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
+          const expectedPath = path.join(process.env.CANDIDATE_DIR, `inventory-${process.env.CANDIDATE_TARGET}.json`);
+          if (!fs.existsSync(expectedPath)) {
+            console.log(`CANDIDATE_CAPTURE_ONLY no committed inventory for ${process.env.CANDIDATE_TARGET}`);
+            process.exit(0);
+          }
+          const expected = fs.readFileSync(expectedPath);
+          const actual = fs.readFileSync(process.env.INVENTORY_PATH);
+          if (!expected.equals(actual)) {
+            throw new Error(`candidate inventory byte mismatch expected=${sha256(expected)} actual=${sha256(actual)}`);
+          }
+          console.log(`CANDIDATE_INVENTORY_VERIFIED ${process.env.CANDIDATE_TARGET} ${sha256(actual)}`);
+          NODE
+
+      - name: Remove exact isolated candidate roots
+        if: always()
+        run: |
+          node <<'NODE'
+          'use strict';
+          const fs = require('fs');
+          const os = require('os');
+          const path = require('path');
+          const temporaryRoot = fs.realpathSync(os.tmpdir());
+          for (const [name, prefix] of [
+            ['RUNTIME_ROOT', 'whaledock-dsh-runtime-'],
+            ['EVIDENCE_ROOT', 'whaledock-dsh-candidate-']
+          ]) {
+            const requested = process.env[name];
+            if (!requested || !fs.existsSync(requested)) continue;
+            const stat = fs.lstatSync(requested);
+            const resolved = fs.realpathSync(requested);
+            const relative = path.relative(temporaryRoot, resolved);
+            if (!stat.isDirectory() || stat.isSymbolicLink()
+                || !relative || relative.startsWith(`..${path.sep}`) || relative === '..'
+                || path.isAbsolute(relative) || relative.includes(path.sep)
+                || !path.basename(resolved).startsWith(prefix)) {
+              throw new Error(`refuse unsafe candidate cleanup: ${name}`);
+            }
+            fs.rmSync(resolved, { recursive: true, force: false });
+            if (fs.existsSync(resolved)) throw new Error(`candidate cleanup incomplete: ${name}`);
+            console.log(`CANDIDATE_TEMP_REMOVED ${name}`);
+          }
+          NODE

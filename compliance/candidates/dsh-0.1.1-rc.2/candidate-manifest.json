@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.1-rc.2",
+  "auditedLock": {
+    "path": "dsh-runtime-package-lock.json",
+    "sha256": "c084af82305715116ac5bd30d586be94e0fce9e00c31db0a309c3eecdd099527"
+  },
+  "targets": [
+    {
+      "platform": "darwin",
+      "arch": "arm64"
+    },
+    {
+      "platform": "darwin",
+      "arch": "x64"
+    },
+    {
+      "platform": "win32",
+      "arch": "x64"
+    }
+  ],
+  "installScriptAllowlist": [
+    "@deepseek-ai/dsh-subprocess-local",
+    "@google/genai",
+    "koffi",
+    "node-pty",
+    "protobufjs"
+  ]
+}
