@@ -1,6 +1,6 @@
 # HANDOFF.md — WhaleDock v0.6.0 正式签名、公证与发布交接
 
-更新：2026-08-21 · v0.7 远程板块批次 1 已在独立分支完成；公开稳定版仍为 v0.6.0
+更新：2026-08-22 · v0.7 远程板块批次 1 已在独立分支完成；公开稳定版仍为 v0.6.0
 
 ## 当前结论
 
@@ -23,7 +23,7 @@ v0.6.0 工作台包、内置短视频创作台、托盘五态与叫醒阶梯已�
 
 ### 分支与改动
 
-- 独立 worktree `/Users/shine/AI工作台/02_AI项目/02_产品实验室/30_桌面App/harness-desktop-v07-remote`，分支 `codex/v07-remote`；已等 PR #2 合并，随后变基到含驾驶舱 PR #3 的 `origin/main@3747812`。本线没有操作 PR #2。
+- 独立 worktree `/Users/shine/AI工作台/02_AI项目/02_产品实验室/30_桌面App/harness-desktop-v07-remote`，分支 `codex/v07-remote`；已等 PR #2 合并，随后变基到含驾驶舱 PR #3–#5 与验收文档的 `origin/main@145ac1c`。本线没有操作 PR #2。
 - 代码面：`lib/remote.js`、`lib/config.js`、`main.js`、`preload-settings.js`、`settings.html`；回归面：`test/remote-smoke.js`、`test/main-remote-smoke.js`、`test/smoke.js`。工作台包 manifest 未加远程字段，远程仍是鲸坞本体底座。
 - 核心是纯 Node/零新运行时依赖，只暴露受控收/推/批与生命周期，无通用命令入口。三通道默认全关；本批不注册真实 adapter，因此零平台网络、零凭据读写。
 - 设置「远程」页已有三通道开关/状态/绑定、三类 IM 内容开关和全部断开；已放入面向所有用户的图文三步自助向导框架。随身网页以同一 Wi-Fi 为默认，Tailscale 仅作可选向导，账号注册/登录/授权留给用户本人。
@@ -37,9 +37,9 @@ v0.6.0 工作台包、内置短视频创作台、托盘五态与叫醒阶梯已�
 
 ### 证据与待做
 
-- focused 实测：`REMOTE ALL PASS (42)`、`MAIN REMOTE ALL PASS (10)`；统一 `npm run smoke` 必须以本节当次最终回读为准。Electron 43.4.0 已在隔离 userData 的 macOS 源码态回读 `SMOKE_OK`。
+- focused 实测：`REMOTE ALL PASS (42)`、`MAIN REMOTE ALL PASS (10)`；统一 `npm run smoke` 为 **450 PASS / ALL PASS**，同时执行驾驶舱五个套件与远程两个套件。Electron 43.4.0 已在隔离 userData 的 macOS 源码态回读 `SMOKE_OK`。
 - 内部验收记录：`docs/验收记录-远程板块-批次1-2026-08-21.md`（`.git/info/exclude`）；SGD 人工卡待做，预计 3–5 分钟。
-- 本批没有平台凭据框、真实飞书/钉钉连接、真手机收发、HTTP 随身页、二维码、Tailscale 安装、打包/CI/Release。Windows、Intel Mac、签名与公证都是 `N/A`；没有新包与 runtime 体积可报。
+- 本批没有平台凭据框、真实飞书/钉钉连接、真手机收发、HTTP 随身页、二维码、Tailscale 安装、打包或 Release；PR CI 需以 GitHub 回读为准。Windows、Intel Mac、签名与公证都是 `N/A`；没有新包与 runtime 体积可报。
 - 批次 2 开始前先将本批整合 main 并再拉最新 main。飞书若需官方 Node SDK，先按 S1 上报许可证、压缩/安装体积与依赖闭包，等 SGD 批准。真实事项上线前还要补权威来源 ID、持久 `dedupeKey`、真实 binding 恢复路径，并确保 adapter 尊重 `AbortSignal`、disconnect 幂等有界。
 
 ## v0.5 批次 13 交接（已发布）

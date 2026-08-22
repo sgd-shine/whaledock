@@ -1,6 +1,6 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-21（v0.7 远程板块批次 1 已在独立分支完成；公开稳定版仍为 v0.6.0）
+更新：2026-08-22（v0.7 远程板块批次 1 已在独立分支完成；公开稳定版仍为 v0.6.0）
 
 ## 阶段结论
 
@@ -42,7 +42,7 @@ Windows/Intel 真机、Windows 签名与线上更新仍是独立证据边界。�
 
 ### 已实现
 
-- 分支 `codex/v07-remote` 已变基到 `origin/main@3747812`（已含驾驶舱Ⅰ期 PR #3），本线没有操作 PR #2，也没有删改驾驶舱文件。
+- 分支 `codex/v07-remote` 已变基到 `origin/main@145ac1c`（已含驾驶舱 PR #3–#5 与验收文档），本线没有操作 PR #2，也没有删改驾驶舱功能。
 - `lib/remote.js` 为纯 Node、零运行时依赖的三通道核心：只有收/推/批固定原语与生命周期，没有通用命令/RPC 入口。三通道默认全关；未配 adapter 只显示「未配置」，不伪造在线。
 - 单人绑定使用双端六位码、五分钟 TTL 与权威 store 回读合同；确认项要求权威层原子/持久/幂等 apply。公开快照与审计不含 actor、正文、token、绑定码、路径或平台原始异常。
 - 连接代、`AbortSignal`、连接与断开硬超时、按通道串行/跨通道隔离、操作数+字节双背压已固定。旧 session 未确认断开前不得开新代假绿；adapter lifecycle 的原始原因只映射为自有固定枚举。
@@ -50,8 +50,8 @@ Windows/Intel 真机、Windows 签名与线上更新仍是独立证据边界。�
 
 ### 当前证据与边界
 
-- 变基后本地 `npm run smoke` 实际为 **383 PASS / ALL PASS**；其中 `remote-smoke.js` 42 项、`main-remote-smoke.js` 10 项，并包含最新 main 的驾驶舱套件。Electron 43.4.0 在隔离 userData 的 macOS 源码态回读 `SMOKE_OK`。
-- 根 `dependencies` 仍为空，本批没有 SDK、新许可闭包、dsh runtime 变化、打包或产物体积。未跑 CI，未创建 PR/Release；Windows、Intel Mac、安装包、签名/公证均为 `N/A`。
+- 变基后本地 `npm run smoke` 实际为 **450 PASS / ALL PASS**；其中 `remote-smoke.js` 42 项、`main-remote-smoke.js` 10 项，并包含最新 main 的驾驶舱五个套件。Electron 43.4.0 在隔离 userData 的 macOS 源码态回读 `SMOKE_OK`。
+- 根 `dependencies` 仍为空，本批没有 SDK、新许可闭包、dsh runtime 变化、打包或产物体积。本地未跑 CI，未创建 Release；Windows、Intel Mac、安装包、签名/公证均为 `N/A`。
 - 本批不含真实飞书/钉钉 adapter、凭据输入/本地安全存储、真手机收发、随身网页 HTTP 监听、二维码或 Tailscale 安装。设置页向导是批次 1 信息架构，不得写成平台已可绑定。
 - SGD 人工目视卡待执行：预计 3–5 分钟，检查三通道默认关闭、向导文案、未配置不假绿与全部断开回读。内部记录为 `docs/验收记录-远程板块-批次1-2026-08-21.md`（已 exclude）。
 
