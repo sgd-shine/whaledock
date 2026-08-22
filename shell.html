@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>鲸坞 WhaleDock</title>
   <style>
-    /* 这一页是鲸坞自己的窗口外壳：左侧常驻工作台栏，右侧空出来给 dsh 的 WebContentsView。
-       主题 token 由主进程注入下面这些变量；页面源码不写死配色。 */
+    /* 这一页是鲸坞自己的窗口外壳：经典台保留左栏＋dsh，视频台则在本地现场与
+       航道下方的全宽 dsh 对话间切换。主题 token 由主进程注入；源码不写死配色。 */
     :root {
       color-scheme: dark;
       --bg:#090e17; --panel:#101a2c; --line:#1e2a5e;
@@ -21,7 +21,7 @@
       font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;
       user-select:none; -webkit-user-select:none;
     }
-    /* 左栏。右边整块留给 dsh 视图，这里绝不画任何东西。 */
+    /* 经典台左栏；视频驾驶舱启用时整栏隐藏。 */
     #rail {
       position:fixed; left:0; top:0; bottom:0; width:var(--rail);
       display:flex; flex-direction:column; gap:6px; padding:10px 8px;

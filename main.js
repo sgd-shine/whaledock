@@ -1162,7 +1162,8 @@ const THEME_VARIABLE_MAP = Object.freeze({
     '--muted': c.textMuted, '--subtle': c.textMuted,
     '--cyan': c.accent, '--indigo': c.primary
   }),
-  // v0.6 主窗外壳：只有左侧工作台栏是鲸坞自己的像素，右侧 dsh 视图一个字节都不碰。
+  // 主窗外壳：经典台是左栏＋未注入的 dsh；视频台只给自有驾驶舱换主题，
+  // 全宽对话仍是同一个不受主题注入的 dsh WebContentsView。
   'shell.html': (c) => ({
     '--bg': c.background, '--panel': c.surface, '--line': c.border,
     '--text': c.text, '--muted': c.textMuted,
@@ -7365,6 +7366,11 @@ function workbenchMenuTemplate() {
           cockpitNativeMode = !cockpitNativeMode;
           cockpitChatOpen = false;
           layoutMainWindow();
+          if (cockpitNativeMode && dshView && !dshView.webContents.isDestroyed()) {
+            dshView.webContents.focus();
+          } else if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.focus();
+          }
           pushShellState();
           createAppMenu();
         }

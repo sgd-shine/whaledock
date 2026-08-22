@@ -128,6 +128,12 @@ async function run() {
     assert.match(block, /cockpitChatOpen = true[\s\S]*layoutMainWindow\(\)[\s\S]*dshView\.webContents\.focus\(\)/);
     assert.equal(/executeJavaScript|sendInputEvent|click\(/.test(block), false);
     assert.match(value, /accelerator: 'CommandOrControl\+K'/);
+    const nativeToggle = value.slice(
+      value.indexOf("label: cockpitNativeMode ? '返回视频驾驶舱'"),
+      value.indexOf("{ type: 'separator' },", value.indexOf("label: cockpitNativeMode ? '返回视频驾驶舱'"))
+    );
+    assert.match(nativeToggle, /dshView\.webContents\.focus\(\)/);
+    assert.match(nativeToggle, /mainWindow\.webContents\.focus\(\)/);
   });
 
   console.log(`\nMAIN V07 ALL PASS (${passed})`);

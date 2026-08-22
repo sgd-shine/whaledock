@@ -633,7 +633,7 @@ async function main() {
 
   // v0.7 视频驾驶舱：文件合约、拍摄状态机与纯本地窗口全部进统一 smoke。
   for (const [file, label] of [
-    ['main-v07-smoke.js', '视频驾驶舱壳、匿名任务条与停靠布局'],
+    ['main-v07-smoke.js', '视频驾驶舱壳、匿名任务条与全宽对话布局'],
     ['main-video-runtime-smoke.js', '视频驾驶舱 token、发布灯、拍摄与写回薄层'],
     ['video-cockpit-smoke.js', '驾驶舱文件契约与 proposal CAS'],
     ['video-shooting-smoke.js', '拍摄 session 状态机与收工计划'],
