@@ -2,14 +2,16 @@
 
 // 主窗外壳渲染层。三条硬规矩：
 // 1) 包里来的文字（工作台名、按钮标题、onboarding 正文）一律 textContent 写入，不做 HTML 字符串赋值；
-// 2) onboarding.md 只按行做「# 加大加粗 / - 成条目」两种样式，不解析 Markdown、不生成任何链接；
-// 3) 按钮点下去只发一个 actionId 给主进程，提示词全文在主进程侧，渲染层从头到尾看不到它。
+// 2) onboarding.md 只按行做标题、条目、纯文本示意图三种样式，不解析 Markdown、不生成任何链接；
+// 3) 固定动作只发动作 id、匿名卡片 token 与用户当次输入；提示词全文只留在主进程。
 const api = window.whaleShell;
 
 const el = (id) => document.getElementById(id);
 const railName = el('switcher-name');
 const actionsBox = el('actions');
 const actionNote = el('action-note');
+const railWorkspace = el('rail-workspace');
+const cockpitWorkspace = el('cockpit-workspace');
 const switcherLayer = el('switcher-layer');
 const switcherList = el('switcher-list');
 const switcherBroken = el('switcher-broken');
@@ -19,6 +21,7 @@ const confirmLayer = el('confirm-layer');
 const confirmTitle = el('confirm-title');
 const confirmBody = el('confirm-body');
 const confirmOk = el('confirm-ok');
+const confirmCancel = el('confirm-cancel');
 const dropBox = el('drop');
 const toast = el('toast');
 const cockpitName = el('cockpit-name');
@@ -41,7 +44,7 @@ const sceneStage = el('scene-stage');
 
 let state = {
   current: null, packages: [], skipped: [], defaultLabel: '默认工作台', busy: false,
-  cockpit: null
+  cockpit: null, workspace: { label: '当前工作区', available: false }, deliveries: []
 };
 let confirmHandler = null;
 let toastTimer = null;
@@ -55,6 +58,14 @@ let selectedProjectToken = null;
 let selectedBlockToken = null;
 let sceneBusy = false;
 let inspirationDraft = '';
+let deliveryClockNodes = [];
+const deliveryBaselines = new Map();
+const pulseFirstSeen = new Map();
+const pulseNodes = new Map();
+const pulseTimers = new Map();
+const hiddenPulses = new Set();
+
+const ACTIVE_DELIVERY_STATES = new Set(['submitting', 'queued', 'running', 'waiting']);
 
 const ROUTE = Object.freeze([
   { id: 'inspiration', label: '灵感' },
@@ -110,6 +121,13 @@ function renderRail() {
   // 这段时间左栏必须明确显示在忙，而不是看起来点了没反应。
   railName.textContent = state.busy ? '正在切换…' : (current ? current.name : state.defaultLabel);
   el('switcher-button').disabled = state.busy === true;
+  const workspaceLabel = state.workspace && state.workspace.label
+    ? state.workspace.label : '当前工作区';
+  for (const button of [railWorkspace, cockpitWorkspace]) {
+    button.textContent = `工作区：${workspaceLabel}`;
+    button.title = `打开工作区“${workspaceLabel}”`;
+    button.disabled = !state.workspace || state.workspace.available !== true;
+  }
 
   clear(actionsBox);
   const actions = current && Array.isArray(current.actions) ? current.actions : [];
@@ -226,13 +244,13 @@ function operationText(result, fallback) {
   return fallback;
 }
 
-async function runSceneOperation(label, operation) {
+async function runSceneOperation(label, operation, fallback = `${label}已完成。`) {
   if (sceneBusy) return null;
   sceneBusy = true;
   renderScene();
   try {
     const result = await operation();
-    const message = operationText(result, `${label}已完成。`);
+    const message = operationText(result, fallback);
     showToast(message);
     return result;
   } catch (error) {
@@ -243,6 +261,227 @@ async function runSceneOperation(label, operation) {
     sceneBusy = false;
     renderScene();
   }
+}
+
+function syncDeliveryBaselines(deliveries) {
+  const now = Date.now();
+  const currentIds = new Set();
+  for (const receipt of deliveries) {
+    if (!receipt || typeof receipt.receiptId !== 'string') continue;
+    currentIds.add(receipt.receiptId);
+    const elapsedMs = Number.isFinite(receipt.elapsedMs) && receipt.elapsedMs >= 0
+      ? receipt.elapsedMs : 0;
+    const signature = `${receipt.status || ''}\u0000${receipt.updatedAt || ''}\u0000${elapsedMs}`;
+    const previous = deliveryBaselines.get(receipt.receiptId);
+    if (!previous || previous.signature !== signature) {
+      deliveryBaselines.set(receipt.receiptId, { elapsedMs, observedAt: now, signature });
+    }
+  }
+  for (const receiptId of deliveryBaselines.keys()) {
+    if (!currentIds.has(receiptId)) deliveryBaselines.delete(receiptId);
+  }
+  for (const [pulseId, observedAt] of pulseFirstSeen.entries()) {
+    if (now - observedAt < 60_000) continue;
+    pulseFirstSeen.delete(pulseId);
+    pulseNodes.delete(pulseId);
+    hiddenPulses.delete(pulseId);
+  }
+}
+
+function deliveryElapsedMs(receipt) {
+  const baseline = deliveryBaselines.get(receipt.receiptId);
+  const value = baseline ? baseline.elapsedMs : (
+    Number.isFinite(receipt.elapsedMs) && receipt.elapsedMs >= 0 ? receipt.elapsedMs : 0
+  );
+  if (receipt.status !== 'running' || !baseline) return value;
+  return value + Math.max(0, Date.now() - baseline.observedAt);
+}
+
+function formatElapsed(milliseconds) {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes} 分 ${String(seconds % 60).padStart(2, '0')} 秒`;
+}
+
+function deliveryStatusPrefix(receipt) {
+  const proposalActive = receipt.expectedStage === '建议副本'
+    && ACTIVE_DELIVERY_STATES.has(receipt.status);
+  if (proposalActive) return '建议副本生成中';
+  switch (receipt.status) {
+    case 'submitting': return '正在提交';
+    case 'queued': return '已排队';
+    case 'running': return '进行中';
+    case 'waiting': return '等待中';
+    case 'completed': return '已完成';
+    case 'error': return '执行出错';
+    case 'rejected': return '投递被拒';
+    case 'unknown': return '状态未知';
+    default: return '状态未知';
+  }
+}
+
+function deliveryStatusNode(receipt) {
+  const node = text('span', deliveryStatusPrefix(receipt), 'delivery-status');
+  if (receipt.status === 'running') {
+    const prefix = deliveryStatusPrefix(receipt);
+    node.textContent = `${prefix} · 已用 ${formatElapsed(deliveryElapsedMs(receipt))}`;
+    deliveryClockNodes.push({ node, prefix, receiptId: receipt.receiptId });
+  }
+  return node;
+}
+
+function updateDeliveryClocks() {
+  const receipts = new Map((Array.isArray(state.deliveries) ? state.deliveries : [])
+    .filter((receipt) => receipt && typeof receipt.receiptId === 'string')
+    .map((receipt) => [receipt.receiptId, receipt]));
+  deliveryClockNodes = deliveryClockNodes.filter((clock) => {
+    const receipt = receipts.get(clock.receiptId);
+    if (!clock.node.isConnected || !receipt || receipt.status !== 'running') return false;
+    clock.node.textContent = `${clock.prefix} · 已用 ${formatElapsed(deliveryElapsedMs(receipt))}`;
+    return true;
+  });
+}
+
+function hidePulse(pulseId) {
+  hiddenPulses.add(pulseId);
+  const timer = pulseTimers.get(pulseId);
+  if (timer) clearTimeout(timer);
+  pulseTimers.delete(pulseId);
+  const nodes = pulseNodes.get(pulseId);
+  if (nodes) {
+    for (const node of nodes) node.remove();
+  }
+  pulseNodes.delete(pulseId);
+}
+
+function registerPulseNode(receipt, node) {
+  const pulseId = receipt.pulseId;
+  if (typeof pulseId !== 'string' || hiddenPulses.has(pulseId)) return false;
+  const now = Date.now();
+  if (!pulseFirstSeen.has(pulseId)) pulseFirstSeen.set(pulseId, now);
+  const remaining = 30_000 - (now - pulseFirstSeen.get(pulseId));
+  if (remaining <= 0) {
+    hidePulse(pulseId);
+    return false;
+  }
+  if (!pulseNodes.has(pulseId)) pulseNodes.set(pulseId, new Set());
+  pulseNodes.get(pulseId).add(node);
+  if (!pulseTimers.has(pulseId)) {
+    pulseTimers.set(pulseId, setTimeout(() => hidePulse(pulseId), remaining));
+  }
+  return true;
+}
+
+function openDeliveryResult(resultToken) {
+  void api.openDeliveryResult({ resultToken }).then((result) => {
+    if (result && result.kind === 'error' && result.text) showToast(result.text);
+  }).catch((error) => {
+    showToast(error && error.message
+      ? String(error.message).slice(0, 240) : '没能打开结果文件。');
+  });
+}
+
+function appendDeliveryReceipts(container, anchorRef) {
+  const receipts = (Array.isArray(state.deliveries) ? state.deliveries : [])
+    .filter((receipt) => receipt && receipt.anchorRef === anchorRef);
+  if (!receipts.length) return;
+  const list = document.createElement('div');
+  list.className = 'delivery-list';
+  for (const receipt of receipts) {
+    const card = document.createElement('div');
+    card.className = 'delivery-receipt';
+    card.dataset.status = typeof receipt.status === 'string' ? receipt.status : 'unknown';
+    const head = document.createElement('div');
+    head.className = 'delivery-head';
+    head.appendChild(deliveryStatusNode(receipt));
+    head.appendChild(text('span', receipt.targetLabel || '目标会话', 'delivery-target'));
+    card.appendChild(head);
+    if (receipt.tracking === 'unavailable') {
+      card.appendChild(text(
+        'p', '已发出；事件未接通，完成后文件会自动出现', 'delivery-detail'
+      ));
+    } else if (receipt.expectedStage) {
+      card.appendChild(text('p', `目标产物：${receipt.expectedStage}`, 'delivery-detail'));
+    }
+    const foot = document.createElement('div');
+    foot.className = 'delivery-foot';
+    if (Number.isSafeInteger(receipt.resultCount) && receipt.resultCount > 0) {
+      if (receipt.resultCount === 1 && typeof receipt.resultToken === 'string') {
+        const result = text('button', '打开 1 个结果', 'delivery-result');
+        result.type = 'button';
+        result.addEventListener('click', (event) => {
+          event.stopPropagation();
+          openDeliveryResult(receipt.resultToken);
+        });
+        foot.appendChild(result);
+      } else {
+        foot.appendChild(text('span', `${receipt.resultCount} 个结果`, 'delivery-count'));
+      }
+    }
+    if (typeof receipt.pulseId === 'string') {
+      const pulse = text('span', '刚更新', 'delivery-pulse');
+      if (registerPulseNode(receipt, pulse)) foot.appendChild(pulse);
+    }
+    if (foot.childNodes.length) card.appendChild(foot);
+    list.appendChild(card);
+  }
+  container.appendChild(list);
+}
+
+function workspaceMatchLabel(value) {
+  if (value === 'match') return '工作区匹配✓';
+  if (value === 'mismatch') return '工作区不匹配⚠（任务可能写到别的文件夹）';
+  return '工作区无法确认⚠（任务可能写到别的文件夹）';
+}
+
+function showDeliveryPreflight(label, request, invoke, preflight, onDelivered) {
+  const needsOverride = preflight.workspaceMatch !== 'match';
+  const targetLabel = preflight.targetLabel || '目标会话';
+  const lines = [
+    `将发往 ${targetLabel} · ${workspaceMatchLabel(preflight.workspaceMatch)}`,
+    `工作区：${preflight.workspaceLabel || '未提供名称'}`,
+    preflight.targetRunning === true ? '会话状态：正在运行' : '会话状态：当前未运行',
+    preflight.eventTracking === 'ready'
+      ? '事件回执：已接通'
+      : '事件回执：未接通；发送后将等待文件结果出现。',
+    ...(needsOverride ? ['默认不发送；只有点“仍然发”才会覆盖本次预警。'] : [])
+  ];
+  askConfirm('发送前确认', lines, () => {
+    const confirmed = {
+      ...request,
+      preflightToken: preflight.preflightToken,
+      override: needsOverride
+    };
+    void runSceneOperation(label, () => invoke(confirmed), `${label}已提交。`)
+      .then((result) => {
+        if (result && typeof onDelivered === 'function') onDelivered(result);
+      });
+  }, needsOverride ? '仍然发' : '发送', needsOverride);
+}
+
+async function requestDelivery(label, request, invoke, onDelivered) {
+  if (sceneBusy) return null;
+  sceneBusy = true;
+  renderScene();
+  let result = null;
+  try {
+    result = await invoke(request);
+  } catch (error) {
+    showToast(error && error.message
+      ? String(error.message).slice(0, 300) : `${label}预检失败。`);
+  } finally {
+    sceneBusy = false;
+    renderScene();
+  }
+  if (!result) return null;
+  if (result.kind === 'preflight' && typeof result.preflightToken === 'string') {
+    showDeliveryPreflight(label, request, invoke, result, onDelivered);
+    return result;
+  }
+  showToast(operationText(result, `${label}已提交。`));
+  if (typeof onDelivered === 'function') onDelivered(result);
+  return result;
 }
 
 function appendEmpty(title, detail, actionLabel, onAction) {
@@ -264,31 +503,35 @@ function appendEmpty(title, detail, actionLabel, onAction) {
 }
 
 function projectCard(project, options = {}) {
-  const node = document.createElement('button');
-  node.type = 'button';
+  const node = document.createElement('article');
   node.className = 'project-card';
   if (project.projectToken === selectedProjectToken) node.classList.add('selected');
-  node.disabled = sceneBusy;
+  const select = document.createElement('button');
+  select.type = 'button';
+  select.className = 'project-card-select';
+  select.disabled = sceneBusy;
   const top = document.createElement('div');
   top.className = 'topline';
   top.appendChild(text('span', project.stageLabel || '未分类'));
   top.appendChild(text('span', project.status || project.fileLabel || '本地文件'));
-  node.appendChild(top);
-  node.appendChild(text('h3', project.title || '未命名项目'));
+  select.appendChild(top);
+  select.appendChild(text('h3', project.title || '未命名项目'));
   const detail = project.decision || project.hook || project.angle || project.audience || project.fileLabel;
-  if (detail) node.appendChild(text('p', detail));
+  if (detail) select.appendChild(text('p', detail));
   const chips = [].concat(project.platforms || []).slice(0, 3);
   if (chips.length) {
     const row = document.createElement('div');
     row.className = 'chip-row';
     for (const value of chips) row.appendChild(text('span', value, 'chip'));
-    node.appendChild(row);
+    select.appendChild(row);
   }
-  node.addEventListener('click', () => {
+  select.addEventListener('click', () => {
     selectedProjectToken = project.projectToken;
     if (typeof options.onSelect === 'function') options.onSelect(project);
     else renderScene();
   });
+  node.appendChild(select);
+  appendDeliveryReceipts(node, project.projectToken);
   return node;
 }
 
@@ -316,8 +559,9 @@ function appendProjectActions(container, project) {
     const control = button(action.label || '继续', 'primary-action');
     if (action.hint) control.title = action.hint;
     control.addEventListener('click', () => {
-      void runSceneOperation(action.label || '项目动作', () => (
-        api.runVideoProjectAction(project.projectToken, action.id)
+      const request = { projectToken: project.projectToken, actionId: action.id };
+      void requestDelivery(action.label || '项目动作', request, (next) => (
+        api.runVideoProjectAction(next)
       ));
     });
     container.appendChild(control);
@@ -350,6 +594,7 @@ function renderTodayScene() {
   actions.appendChild(view);
   appendProjectActions(actions, project);
   main.appendChild(actions);
+  appendDeliveryReceipts(main, project.projectToken);
   hero.appendChild(main);
   const side = document.createElement('div');
   side.className = 'scene-side';
@@ -393,18 +638,25 @@ function renderInspirationScene() {
     control.disabled = sceneBusy || !inspirationDraft.trim();
     control.addEventListener('click', async () => {
       const payload = inspirationDraft;
-      const result = await runSceneOperation(spec.label, () => api.runVideoSceneAction({
-        action: 'deposit-inspiration', text: payload, askAgent: spec.askAgent
-      }));
-      if (result && (result.kind === 'ok' || result.stored === true)) {
-        inspirationDraft = '';
-        renderScene();
+      const request = { action: 'deposit-inspiration', text: payload, askAgent: spec.askAgent };
+      const onStored = (result) => {
+        if (result && (result.kind === 'ok' || result.stored === true)) {
+          inspirationDraft = '';
+          renderScene();
+        }
+      };
+      if (spec.askAgent) {
+        await requestDelivery(spec.label, request, (next) => api.runVideoSceneAction(next), onStored);
+      } else {
+        const result = await runSceneOperation(spec.label, () => api.runVideoSceneAction(request));
+        onStored(result);
       }
     });
     actions.appendChild(control);
   }
   foot.appendChild(actions);
   drop.appendChild(foot);
+  appendDeliveryReceipts(drop, 'scene-inspiration');
   stack.appendChild(drop);
   const cards = projectsAt('inspiration');
   if (cards.length) {
@@ -496,6 +748,7 @@ function renderTopicScene() {
   inspect.addEventListener('click', () => { void openDocument(project, 'script'); });
   actions.appendChild(inspect);
   main.appendChild(actions);
+  appendDeliveryReceipts(main, project.projectToken);
   hero.appendChild(main);
   stack.appendChild(hero);
   sceneStage.appendChild(stack);
@@ -516,7 +769,7 @@ function renderProposal() {
   head.appendChild(text('span', '', 'lamp'));
   card.appendChild(head);
   if (proposal.status === 'queued') {
-    card.appendChild(text('p', '建议副本已建立，正在等会话把目标内容块写好。原稿没有变化。', 'scene-copy'));
+    card.appendChild(text('p', '建议副本生成中；原稿没有变化。', 'scene-copy'));
   } else {
     const compare = document.createElement('div');
     compare.className = 'compare-grid';
@@ -597,13 +850,17 @@ function renderDocumentBlocks() {
       const control = button(spec[1], '');
       control.addEventListener('click', (event) => {
         event.stopPropagation();
-        void runSceneOperation(spec[1], () => api.runVideoBlockAction(
-          currentDocument.projectToken, item.blockToken, spec[0]
-        ));
+        const request = {
+          projectToken: currentDocument.projectToken,
+          blockToken: item.blockToken,
+          action: spec[0]
+        };
+        void requestDelivery(spec[1], request, (next) => api.runVideoBlockAction(next));
       });
       toolbar.appendChild(control);
     }
     block.appendChild(toolbar);
+    appendDeliveryReceipts(block, item.blockToken);
     block.addEventListener('click', () => {
       selectedBlockToken = item.blockToken;
       renderScene();
@@ -785,6 +1042,7 @@ function renderUnavailableScene(kind) {
 function renderScene() {
   renderSceneHeading();
   clear(sceneStage);
+  deliveryClockNodes = [];
   if (videoState.status === 'loading') {
     appendEmpty('正在读取工作区', '只投影本地 Markdown 事实。');
     return;
@@ -977,7 +1235,7 @@ function switchTo(workbenchId) {
   });
 }
 
-// ---------- onboarding：纯文本，按行两种样式 ----------
+// ---------- onboarding：纯文本，按行三种样式 ----------
 
 function renderOnboarding(current) {
   clear(onboardingBody);
@@ -987,6 +1245,8 @@ function renderOnboarding(current) {
     if (!value.trim()) { onboardingBody.appendChild(text('div', '', 'ob-blank')); continue; }
     if (value.startsWith('#')) {
       onboardingBody.appendChild(text('div', value.replace(/^#+\s*/, ''), 'ob-h'));
+    } else if (value.startsWith('[示意图]')) {
+      onboardingBody.appendChild(text('div', value.replace(/^\[示意图\]\s*/, ''), 'ob-diagram'));
     } else if (/^\s*-\s+/.test(value)) {
       onboardingBody.appendChild(text('div', value.replace(/^\s*-\s+/, ''), 'ob-li'));
     } else {
@@ -998,12 +1258,23 @@ function renderOnboarding(current) {
 
 // ---------- 确认卡 ----------
 
-function askConfirm(title, lines, onOk) {
+function askConfirm(title, lines, onOk, okLabel = '确定', preferCancel = false) {
   confirmTitle.textContent = title;
   clear(confirmBody);
   for (const line of lines) confirmBody.appendChild(text('div', line, 'ob-p'));
+  confirmOk.textContent = okLabel;
   confirmHandler = onOk;
   openLayer(confirmLayer);
+  setTimeout(() => {
+    if (!confirmLayer.classList.contains('open')) return;
+    (preferCancel ? confirmCancel : confirmOk).focus();
+  }, 0);
+}
+
+function dismissConfirm() {
+  confirmHandler = null;
+  confirmOk.textContent = '确定';
+  closeLayer(confirmLayer);
 }
 
 // ---------- 状态 ----------
@@ -1016,8 +1287,12 @@ function applyState(next) {
     skipped: Array.isArray(next.skipped) ? next.skipped : [],
     defaultLabel: next.defaultLabel || '默认工作台',
     busy: next.busy === true,
-    cockpit: next.cockpit && typeof next.cockpit === 'object' ? next.cockpit : null
+    cockpit: next.cockpit && typeof next.cockpit === 'object' ? next.cockpit : null,
+    workspace: next.workspace && typeof next.workspace === 'object'
+      ? next.workspace : { label: '当前工作区', available: false },
+    deliveries: Array.isArray(next.deliveries) ? next.deliveries : []
   };
+  syncDeliveryBaselines(state.deliveries);
   renderRail();
   renderCockpit();
   if (switcherLayer.classList.contains('open')) renderSwitcher();
@@ -1038,6 +1313,8 @@ el('manage-workbenches').addEventListener('click', () => {
   void api.openSettings();
 });
 el('open-workspace').addEventListener('click', () => { void api.openWorkspace(); });
+railWorkspace.addEventListener('click', () => { void api.openWorkspace(); });
+cockpitWorkspace.addEventListener('click', () => { void api.openWorkspace(); });
 el('open-settings').addEventListener('click', () => { void api.openSettings(); });
 el('exit-cockpit').addEventListener('click', () => {
   void api.setCockpitView({ mode: 'native' });
@@ -1065,8 +1342,7 @@ openThemeSettings.addEventListener('click', () => { void api.openSettings(); });
 
 confirmOk.addEventListener('click', () => {
   const handler = confirmHandler;
-  confirmHandler = null;
-  closeLayer(confirmLayer);
+  dismissConfirm();
   if (typeof handler === 'function') handler();
 });
 
@@ -1074,7 +1350,7 @@ for (const node of document.querySelectorAll('[data-close]')) {
   node.addEventListener('click', () => {
     const which = node.dataset.close;
     if (which === 'switcher') closeLayer(switcherLayer);
-    if (which === 'confirm') { confirmHandler = null; closeLayer(confirmLayer); }
+    if (which === 'confirm') dismissConfirm();
     if (which === 'onboarding') {
       closeLayer(onboardingLayer);
       if (state.current) void api.markOnboardingSeen(state.current.id);
@@ -1097,12 +1373,31 @@ document.addEventListener('keydown', (event) => {
   }
   if (event.key !== 'Escape') return;
   closeLayer(switcherLayer);
-  if (confirmLayer.classList.contains('open')) { confirmHandler = null; closeLayer(confirmLayer); }
+  if (confirmLayer.classList.contains('open')) dismissConfirm();
   if (onboardingLayer.classList.contains('open')) {
     closeLayer(onboardingLayer);
     if (state.current) void api.markOnboardingSeen(state.current.id);
   }
 });
+
+document.addEventListener('pointerdown', () => {
+  const visiblePulseIds = new Set();
+  for (const [pulseId, nodes] of pulseNodes.entries()) {
+    if (!hiddenPulses.has(pulseId) && Array.from(nodes).some((node) => node.isConnected)) {
+      visiblePulseIds.add(pulseId);
+    }
+  }
+  for (const receipt of Array.isArray(state.deliveries) ? state.deliveries : []) {
+    if (!receipt || !visiblePulseIds.has(receipt.pulseId)) continue;
+    hidePulse(receipt.pulseId);
+    void api.ackDeliveryPulse({
+      receiptId: receipt.receiptId,
+      pulseId: receipt.pulseId
+    }).catch(() => { /* 本地已经消退；服务端还会按 30 秒上限自然消退。 */ });
+  }
+}, true);
+
+setInterval(updateDeliveryClocks, 1000);
 
 api.onState(applyState);
 api.onVideoState(applyVideoState);

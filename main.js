@@ -29,6 +29,7 @@ const remoteFeishu = require('./lib/remote-feishu');
 const remoteFeishuRest = require('./lib/remote-feishu-rest');
 const remoteInbox = require('./lib/remote-inbox');
 const remoteSecureStore = require('./lib/remote-secure-store');
+const deliveryReceipts = require('./lib/delivery-receipts');
 const log = require('./lib/log');
 const update = require('./lib/update');
 
@@ -54,6 +55,15 @@ const MAX_RENDER_BUDGET_VALUE = 1_000_000_000;
 const MAX_RENDER_PRICE_VALUE = 1_000_000;
 const MAX_RENDER_COST_VALUE = 1_000_000_000_000;
 const MAX_RENDER_DURATION_MS = 366 * 24 * 60 * 60 * 1000;
+const VIDEO_DELIVERY_OWNER = 'video-workbench';
+const VIDEO_DELIVERY_SECRET = crypto.randomBytes(32);
+const FALLBACK_DELIVERY_SESSION_SALT = crypto.randomBytes(32);
+const VIDEO_DELIVERY_FILE_STAGES = Object.freeze({
+  today: 'topic', script: 'script', voice: 'shoot', title: 'script', shotlist: 'shoot'
+});
+const deliveryReceiptService = deliveryReceipts.createFlowReceiptService();
+const deliveryBindings = new Map();
+let videoDeliverySubmissions = 0;
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -90,6 +100,58 @@ function boundedPath(value) {
     && !value.includes('\0') ? value : null;
 }
 
+function canonicalDeliveryDirectory(value, options = {}) {
+  const platform = options.platform || process.platform;
+  const tools = options.pathImpl || (platform === 'win32' ? path.win32 : path.posix);
+  const fsImpl = options.fsImpl || fs;
+  if (!boundedPath(value) || !tools.isAbsolute(value)) return null;
+  try {
+    const resolved = tools.resolve(value);
+    const stat = fsImpl.statSync(resolved);
+    if (!stat || typeof stat.isDirectory !== 'function' || !stat.isDirectory()) return null;
+    const realpath = fsImpl.realpathSync && fsImpl.realpathSync.native
+      ? fsImpl.realpathSync.native(resolved) : fsImpl.realpathSync(resolved);
+    const canonical = config.normalizeRealPath(realpath, { platform, pathImpl: tools });
+    const canonicalStat = typeof fsImpl.lstatSync === 'function'
+      ? fsImpl.lstatSync(canonical) : fsImpl.statSync(canonical);
+    if (!canonicalStat || typeof canonicalStat.isDirectory !== 'function'
+        || !canonicalStat.isDirectory()
+        || (typeof canonicalStat.isSymbolicLink === 'function'
+          && canonicalStat.isSymbolicLink())) return null;
+    const entityKey = canonicalStat.dev === undefined || canonicalStat.ino === undefined
+      ? null : `${String(canonicalStat.dev)}:${String(canonicalStat.ino)}`;
+    return {
+      canonical,
+      key: platform === 'win32' ? canonical.toLocaleLowerCase('en-US') : canonical,
+      entityKey
+    };
+  } catch (_error) {
+    return null;
+  }
+}
+
+// 这是主进程私有事实；公开预检只拿 match/mismatch/unknown，永不拿路径。
+function deliveryWorkspaceFacts(targetCwd, workspaceCwd, options = {}) {
+  const target = canonicalDeliveryDirectory(targetCwd, options);
+  const workspace = canonicalDeliveryDirectory(workspaceCwd, options);
+  let workspaceMatch = 'unknown';
+  if (target && workspace && target.key !== workspace.key) workspaceMatch = 'mismatch';
+  else if (target && workspace && target.entityKey && workspace.entityKey
+      && target.entityKey === workspace.entityKey) workspaceMatch = 'match';
+  return {
+    workspaceMatch,
+    targetKey: target ? target.key : null,
+    workspaceKey: workspace ? workspace.key : null,
+    targetIdentity: target ? target.entityKey : null,
+    workspaceIdentity: workspace ? workspace.entityKey : null
+  };
+}
+
+function deliveryToken(value) {
+  return typeof value === 'string' && value.length >= 8 && value.length <= 256
+    && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value) ? value : null;
+}
+
 // 所有标题/菜单/设置都从 coordinator 的 committed view 重建，
 // 事务中 config 曾经写入 target 也不会提前改变用户可见状态。
 function workspaceSurfaceSnapshot(view, runtime = {}) {
@@ -116,6 +178,17 @@ function workspaceSurfaceSnapshot(view, runtime = {}) {
     },
     recent,
     title: `鲸坞 WhaleDock — ${label}`
+  };
+}
+
+// 外壳只需要告诉用户“现在是哪一个工作区”以及能否打开它；绝不把绝对路径
+// 下发给渲染层。发送前的 cwd 对账始终留在主进程。
+function workspaceIdentitySurface(surface) {
+  const source = isPlainObject(surface) ? surface : {};
+  const current = isPlainObject(source.current) ? source.current : {};
+  return {
+    label: safeText(current.label, '当前工作区', 96),
+    available: Boolean(boundedPath(current.effectivePath)) && source.busy !== true
   };
 }
 
@@ -953,6 +1026,11 @@ async function recoverWorkspaceAtStartup() {
 async function switchWorkspace(target) {
   if (!workspaceCoordinator) throw new Error('工作区协调器不可用');
   if (quitting) throw new Error('App 正在退出，未开始新的工作区切换');
+  if (videoDeliverySubmissions > 0) {
+    const error = new Error('投递正在完成最终对账，请稍后再切换工作区');
+    error.code = 'ERR_WORKSPACE_DELIVERY_ACTIVE';
+    throw error;
+  }
   try {
     const result = await trackWorkspaceOperation(workspaceCoordinator.switchTo(target));
     if (mainWindow && !mainWindow.isDestroyed() && backendReady) {
@@ -1414,6 +1492,7 @@ function currentDashboardSnapshot() {
 
 function pushDashboardState() {
   // 宠物与看板共用同一个事件层快照，这里统一刷新，避免两套状态来源。
+  syncVideoDeliveryReceipts();
   pushPetState();
   // 视频驾驶舱任务条只消费 shellStateSnapshot 里的匿名最小投影。
   pushShellState();
@@ -2062,6 +2141,28 @@ function videoProjectActionRequest(value) {
   return { projectToken: value.projectToken, actionId: value.actionId };
 }
 
+function videoProjectDispatchRequest(value) {
+  if (!isPlainObject(value)) throw new Error('视频项目投递必须是 plain object');
+  const confirmed = Object.prototype.hasOwnProperty.call(value, 'preflightToken')
+    || Object.prototype.hasOwnProperty.call(value, 'override');
+  exactPlainRequest(value,
+    confirmed
+      ? ['projectToken', 'actionId', 'preflightToken', 'override']
+      : ['projectToken', 'actionId'], [], '视频项目投递');
+  const request = videoProjectActionRequest({
+    projectToken: value.projectToken,
+    actionId: value.actionId
+  });
+  if (!confirmed) return { request, confirmation: null };
+  if (!deliveryToken(value.preflightToken) || typeof value.override !== 'boolean') {
+    throw new Error('视频项目投递确认无效');
+  }
+  return {
+    request,
+    confirmation: { preflightToken: value.preflightToken, override: value.override }
+  };
+}
+
 function videoDocumentRequest(value) {
   exactPlainRequest(value, ['projectToken'], [], '视频文档请求');
   if (typeof value.projectToken !== 'string' || !/^project-[a-f0-9]{24}$/.test(value.projectToken)) {
@@ -2081,6 +2182,29 @@ function videoBlockActionRequest(value) {
     projectToken: value.projectToken,
     blockToken: value.blockToken,
     action: value.action
+  };
+}
+
+function videoBlockDispatchRequest(value) {
+  if (!isPlainObject(value)) throw new Error('视频块投递必须是 plain object');
+  const confirmed = Object.prototype.hasOwnProperty.call(value, 'preflightToken')
+    || Object.prototype.hasOwnProperty.call(value, 'override');
+  exactPlainRequest(value,
+    confirmed
+      ? ['projectToken', 'blockToken', 'action', 'preflightToken', 'override']
+      : ['projectToken', 'blockToken', 'action'], [], '视频块投递');
+  const request = videoBlockActionRequest({
+    projectToken: value.projectToken,
+    blockToken: value.blockToken,
+    action: value.action
+  });
+  if (!confirmed) return { request, confirmation: null };
+  if (!deliveryToken(value.preflightToken) || typeof value.override !== 'boolean') {
+    throw new Error('视频块投递确认无效');
+  }
+  return {
+    request,
+    confirmation: { preflightToken: value.preflightToken, override: value.override }
   };
 }
 
@@ -2289,6 +2413,7 @@ function refreshVideoWorkspaceSnapshot() {
       record && projectTokens.has(record.projectToken)
     )));
     if (videoSelectedToken && !projectTokens.has(videoSelectedToken)) videoSelectedToken = null;
+    const proposalSurface = videoProposalSurface(runtime);
     runtime.snapshot = {
       kind: 'video-workspace',
       status: 'ready',
@@ -2305,9 +2430,13 @@ function refreshVideoWorkspaceSnapshot() {
       truncated: scanned.truncated === true,
       issues: videoIssueSummary(scanned.issues),
       selectedToken: videoSelectedToken,
-      proposal: videoProposalSurface(runtime)
+      proposal: proposalSurface
     };
+    const receiptFilesChanged = noteVideoReceiptFileUpdates(
+      runtime, scanned.items, proposalSurface
+    );
     pushVideoWorkspaceState();
+    if (receiptFilesChanged) pushShellState();
     return runtime.snapshot;
   } catch (error) {
     if (!videoWorkspaceRuntime || videoWorkspaceRuntime !== runtime || runtime.closed) return null;
@@ -2460,12 +2589,23 @@ function workbenchRow(pkg) {
   };
 }
 
+function deliveryReceiptSurface() {
+  try {
+    return deliveryReceiptService.snapshot({ owner: VIDEO_DELIVERY_OWNER }).receipts;
+  } catch (_error) {
+    return [];
+  }
+}
+
 // 下发给渲染层的状态。**提示词全文永远留在主进程**，渲染层只拿得到 id / 标题 / 悬浮说明。
 function shellStateSnapshot(extra = {}) {
   const listed = listAvailableWorkbenches();
   const active = currentWorkbench();
+  const workspace = workspaceIdentitySurface(currentWorkspaceSurface());
   return {
     defaultLabel: WORKBENCH_DEFAULT_LABEL,
+    workspace,
+    deliveries: deliveryReceiptSurface(),
     packages: listed.packages.map(workbenchRow),
     skipped: listed.skipped.map((item) => ({ id: String(item.id).slice(0, 120), reason: item.reason })),
     busy: false,
@@ -2908,29 +3048,425 @@ async function submitWorkbenchAction(actionId) {
   }
 }
 
-async function submitVideoPrompt(text) {
-  if (typeof text !== 'string' || !text.trim() || Buffer.byteLength(text, 'utf8') > 32 * 1024) {
-    return { state: 'error', text: '鲸坞内置提示词无效，没有发送。' };
+function videoDeliveryFingerprint(kind, ...parts) {
+  if (typeof kind !== 'string' || !kind || kind.length > 80) {
+    throw new Error('投递动作类型无效');
   }
+  const digest = crypto.createHmac('sha256', VIDEO_DELIVERY_SECRET);
+  digest.update(kind);
+  for (const part of parts) {
+    digest.update('\0');
+    digest.update(String(part));
+  }
+  return digest.digest('hex');
+}
+
+function eventTrackingForDelivery() {
+  const snapshot = canonicalEventSnapshot();
+  return snapshot && snapshot.availability && snapshot.availability.state === 'live'
+    && snapshot.coverage && snapshot.coverage.status === 'complete'
+    ? 'ready' : 'unavailable';
+}
+
+function deliverySessionSalt() {
+  if (eventService) {
+    try { return eventService.getSalt(); } catch (_error) { /* 使用本进程 fallback */ }
+  }
+  return FALLBACK_DELIVERY_SESSION_SALT;
+}
+
+function createVideoPromptAdapter(sessionSalt, onDeliveryPrepared) {
+  return backend.createDshPromptAdapter({
+    port: config.get('port'),
+    expectedHostVersion: config.DSH_CONTRACT.hostVersion,
+    packageVersionProof: spawnedByUs && backendState ? backendState.version : null,
+    sessionSalt,
+    ...(typeof onDeliveryPrepared === 'function'
+      ? { onDeliveryPrepared, requireDeliveryPrepared: true } : {})
+  });
+}
+
+function latestPromptTarget(listed) {
+  if (!listed || listed.available !== true
+      || !Array.isArray(listed.targets) || !listed.targets.length) return null;
+  return [...listed.targets].sort((left, right) => (
+    Number(right.updatedAt || 0) - Number(left.updatedAt || 0)
+  ))[0] || null;
+}
+
+function currentDeliveryWorkspace() {
+  const surface = currentWorkspaceSurface();
+  return {
+    label: surface.current && surface.current.label
+      ? safeText(surface.current.label, '当前工作区', 96) : '当前工作区',
+    cwd: surface.busy || !surface.current ? null : surface.current.effectivePath,
+    generation: Number.isSafeInteger(surface.generation) ? surface.generation : null,
+    busy: surface.busy === true
+  };
+}
+
+function validateVideoDeliverySpec(spec) {
+  if (!isPlainObject(spec)
+      || typeof spec.text !== 'string' || !spec.text.trim()
+      || Buffer.byteLength(spec.text, 'utf8') > 32 * 1024
+      || typeof spec.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(spec.fingerprint)
+      || typeof spec.anchorRef !== 'string' || !spec.anchorRef || spec.anchorRef.length > 256
+      || typeof spec.expectedStage !== 'string' || !spec.expectedStage
+      || spec.expectedStage.length > 256
+      || !isPlainObject(spec.context || {})) {
+    throw new Error('鲸坞视频投递规格无效');
+  }
+  return spec;
+}
+
+async function prepareVideoPromptDelivery(rawSpec) {
+  const spec = validateVideoDeliverySpec(rawSpec);
   if (!backendReady) return { state: 'error', text: '后端还没就绪，等它起来再点。' };
   let adapter = null;
   try {
-    adapter = backend.createDshPromptAdapter({
-      port: config.get('port'),
-      expectedHostVersion: config.DSH_CONTRACT.hostVersion,
-      packageVersionProof: spawnedByUs && backendState ? backendState.version : null
+    const sessionSalt = deliverySessionSalt();
+    adapter = createVideoPromptAdapter(sessionSalt);
+    const listed = await adapter.listTargets();
+    const target = latestPromptTarget(listed);
+    if (!target) {
+      return {
+        state: 'error',
+        text: listed && listed.reason === 'package-unproven'
+          ? '后端版本不可证明，没有发送。'
+          : '没有找到可用会话，先在右边开一个会话再点。'
+      };
+    }
+    const inspected = adapter.inspectTarget(target.targetToken);
+    const workspace = currentDeliveryWorkspace();
+    if (workspace.busy || workspace.generation === null) {
+      return { state: 'error', text: '工作区正在切换，完成后再发送。' };
+    }
+    const cwdFacts = deliveryWorkspaceFacts(inspected.cwd, workspace.cwd);
+    const preflight = deliveryReceiptService.createPreflight({
+      owner: VIDEO_DELIVERY_OWNER,
+      actionFingerprint: spec.fingerprint,
+      targetToken: target.targetToken,
+      sessionRef: inspected.sessionRef,
+      cwdFacts,
+      context: {
+        ...spec.context,
+        workspaceGeneration: workspace.generation,
+        text: spec.text,
+        anchorRef: spec.anchorRef,
+        expectedStage: spec.expectedStage
+      },
+      targetLabel: inspected.label,
+      workspaceLabel: workspace.label,
+      workspaceMatch: cwdFacts.workspaceMatch,
+      targetRunning: inspected.running,
+      eventTracking: eventTrackingForDelivery()
     });
-    return await submitPromptOnce(adapter, text);
+    return { kind: 'preflight', ...preflight };
+  } catch (error) {
+    log.line('video', `驾驶舱预检失败：${error && error.code || 'unknown'}`);
+    return {
+      state: 'error',
+      text: error && error.message ? String(error.message).slice(0, 200) : '无法确认投递去向。'
+    };
+  } finally {
+    if (adapter) {
+      try { await adapter.close(); } catch (_error) { /* 关闭失败不改变预检事实 */ }
+    }
+  }
+}
+
+async function findFrozenPromptTarget(adapter, sessionRef) {
+  const listed = await adapter.listTargets();
+  if (!listed || listed.available !== true || !Array.isArray(listed.targets)) {
+    throw new Error('目标会话当前不可读取，请重新预检');
+  }
+  const matches = [];
+  for (const target of listed.targets) {
+    const inspected = adapter.inspectTarget(target.targetToken);
+    if (inspected.sessionRef === sessionRef) matches.push(inspected);
+  }
+  if (matches.length !== 1) throw new Error('目标会话已变化，请重新预检');
+  return adapter.revalidateTarget(matches[0].targetToken);
+}
+
+function videoReceiptWatcher(context, receiptId) {
+  const runtime = videoWorkspaceRuntime;
+  if (!runtime || runtime.closed || !isPlainObject(context)) return null;
+  if (context.watchKind === 'proposal'
+      && typeof context.proposalToken === 'string'
+      && typeof context.proposalRelativePath === 'string') {
+    return {
+      kind: 'proposal', receiptId, root: runtime.root,
+      rootIdentityKey: runtime.rootIdentityKey,
+      proposalToken: context.proposalToken,
+      proposalRelativePath: context.proposalRelativePath,
+      done: false
+    };
+  }
+  if (context.watchKind !== 'files' || typeof context.fileStage !== 'string') return null;
+  const baseline = {};
+  for (const record of runtime.projectTokens.values()) {
+    if (record && record.stage === context.fileStage) baseline[record.relativePath] = record.hash;
+  }
+  return {
+    kind: 'files', receiptId, root: runtime.root,
+    rootIdentityKey: runtime.rootIdentityKey,
+    fileStage: context.fileStage, baseline, done: false
+  };
+}
+
+function rememberDeliveryBinding(deliveryRef, value) {
+  while (deliveryBindings.size >= 256) {
+    const oldest = deliveryBindings.keys().next().value;
+    if (oldest === undefined) break;
+    deliveryBindings.delete(oldest);
+  }
+  deliveryBindings.set(deliveryRef, value);
+}
+
+async function createVideoDeliveryReceipt(prepared, context) {
+  let tracking = 'unavailable';
+  if (eventService) {
+    try {
+      // delivery tracker 是运行时同步层；先排空既有事件事务，避免持久事务回滚
+      // 覆盖这次 prompt fetch 前的注册。
+      await eventService.flush();
+      eventService.registerDelivery({
+        deliveryRef: prepared.deliveryRef,
+        sessionRef: prepared.sessionRef
+      });
+      tracking = eventTrackingForDelivery();
+    } catch (_error) { tracking = 'unavailable'; }
+  }
+  const receipt = deliveryReceiptService.createReceipt({
+    owner: VIDEO_DELIVERY_OWNER,
+    anchorRef: context.anchorRef,
+    deliveryRef: prepared.deliveryRef,
+    targetLabel: prepared.label,
+    tracking,
+    expectedStage: context.expectedStage
+  });
+  rememberDeliveryBinding(prepared.deliveryRef, {
+    deliveryRef: prepared.deliveryRef,
+    receiptId: receipt.receiptId,
+    admission: null,
+    watcher: videoReceiptWatcher(context, receipt.receiptId)
+  });
+  pushShellState();
+  return { receipt, tracking };
+}
+
+async function updateVideoDeliveryAdmission(result) {
+  if (!result || !result.tracking || !result.tracking.deliveryRef) return null;
+  const binding = deliveryBindings.get(result.tracking.deliveryRef);
+  let projection = null;
+  if (eventService) {
+    try {
+      await eventService.flush();
+      projection = eventService.settleDeliveryAdmission({
+        deliveryRef: result.tracking.deliveryRef,
+        state: result.state,
+        reason: result.reason
+      });
+    } catch (_error) { /* UI 回执仍按一次提交结果如实降级 */ }
+  }
+  const fallbackStatus = result.state === 'accepted' ? 'queued'
+    : (result.state === 'rejected' ? 'rejected' : 'unknown');
+  const projectionPatch = projection && projection.state !== 'unknown'
+    ? deliveryReceiptUpdateFromProjection(binding || { admission: result.state }, projection)
+    : null;
+  const patch = projectionPatch || {
+    status: fallbackStatus,
+    tracking: result.tracking.available === true
+      && eventTrackingForDelivery() === 'ready' ? 'ready' : 'unavailable'
+  };
+  if (binding) {
+    binding.admission = ['queued', 'running', 'waiting', 'completed'].includes(patch.status)
+      ? 'accepted' : (patch.status === 'rejected' ? 'rejected' : result.state);
+  }
+  try {
+    deliveryReceiptService.updateByDeliveryRef({
+      owner: VIDEO_DELIVERY_OWNER,
+      deliveryRef: result.tracking.deliveryRef,
+      ...patch
+    });
+  } catch (_error) { /* 回执不可用不能制造第二次提交 */ }
+  return binding;
+}
+
+function deliveryReceiptUpdateFromProjection(binding, projection) {
+  if (!binding || !projection || typeof projection.state !== 'string') return null;
+  const tracking = projection.state === 'unknown'
+    ? 'unavailable' : eventTrackingForDelivery();
+  if (projection.state === 'unknown') {
+    return {
+      tracking,
+      ...(binding.admission === 'unknown' ? { status: 'unknown' } : {})
+    };
+  }
+  const status = projection.state === 'error' && projection.result === 'rejected'
+    ? 'rejected' : projection.state;
+  if (!deliveryReceipts.DELIVERY_STATES.includes(status)) return { tracking };
+  return {
+    status,
+    tracking,
+    evidence: 'target-activity'
+  };
+}
+
+function syncVideoDeliveryReceipts() {
+  if (!eventService) return 0;
+  let updated = 0;
+  for (const binding of deliveryBindings.values()) {
+    try {
+      const projection = eventService.deliverySnapshot(binding.deliveryRef);
+      const patch = deliveryReceiptUpdateFromProjection(binding, projection);
+      if (!patch) continue;
+      deliveryReceiptService.updateByDeliveryRef({
+        owner: VIDEO_DELIVERY_OWNER,
+        deliveryRef: binding.deliveryRef,
+        ...patch
+      });
+      updated += 1;
+    } catch (_error) { /* 单条回执异常不污染聚合事件视图 */ }
+  }
+  return updated;
+}
+
+function noteVideoReceiptFileUpdates(runtime, items, proposalSurface) {
+  if (!runtime || runtime.closed) return false;
+  let changed = false;
+  for (const binding of deliveryBindings.values()) {
+    const watcher = binding.watcher;
+    if (!watcher || watcher.done) continue;
+    // 切到别的工作区时保留原 watcher；只有回到同一目录实体才允许认领迟到文件。
+    if (watcher.root !== runtime.root
+        || watcher.rootIdentityKey !== runtime.rootIdentityKey) continue;
+    const results = [];
+    if (watcher.kind === 'files') {
+      for (const item of Array.isArray(items) ? items : []) {
+        if (!item || item.stage !== watcher.fileStage
+            || typeof item.relativePath !== 'string' || typeof item.hash !== 'string') continue;
+        if (watcher.baseline[item.relativePath] !== item.hash) {
+          results.push({
+            relativePath: item.relativePath,
+            kind: 'video-document',
+            stage: item.stage,
+            workspaceRoot: watcher.root,
+            workspaceIdentityKey: watcher.rootIdentityKey
+          });
+        }
+      }
+    } else if (watcher.kind === 'proposal'
+        && proposalSurface && proposalSurface.proposalToken === watcher.proposalToken
+        && proposalSurface.canAdopt === true) {
+      results.push({
+        relativePath: watcher.proposalRelativePath,
+        kind: 'video-proposal',
+        stage: 'proposal',
+        workspaceRoot: watcher.root,
+        workspaceIdentityKey: watcher.rootIdentityKey
+      });
+    }
+    if (!results.length) continue;
+    try {
+      deliveryReceiptService.updateReceipt({
+        owner: VIDEO_DELIVERY_OWNER,
+        receiptId: watcher.receiptId,
+        status: 'completed',
+        fileResults: results
+      });
+      watcher.done = true;
+      changed = true;
+    } catch (_error) { /* watcher 只补充已存在回执 */ }
+  }
+  return changed;
+}
+
+async function submitPreparedVideoPrompt(rawSpec, confirmation, beforeSend) {
+  const spec = validateVideoDeliverySpec(rawSpec);
+  const preflightToken = confirmation && deliveryToken(confirmation.preflightToken);
+  if (!preflightToken || typeof confirmation.override !== 'boolean') {
+    return { state: 'error', text: '投递预检已失效，请重新点一次。' };
+  }
+  const consumed = deliveryReceiptService.consumePreflight({
+    preflightToken,
+    owner: VIDEO_DELIVERY_OWNER,
+    actionFingerprint: spec.fingerprint,
+    override: confirmation.override
+  });
+  if (!consumed.accepted) {
+    return { state: 'error', text: '投递预检已过期或未获确认，没有发送。' };
+  }
+  if (!backendReady) return { state: 'error', text: '后端还没就绪，没有发送。' };
+  if (!workspaceCoordinator || workspaceCoordinator.busy) {
+    return { state: 'error', text: '工作区正在切换，没有发送。' };
+  }
+
+  let adapter = null;
+  let responseExtra = {};
+  let created = null;
+  videoDeliverySubmissions += 1;
+  try {
+    const sessionSalt = deliverySessionSalt();
+    adapter = createVideoPromptAdapter(sessionSalt, async (prepared) => {
+      try {
+        created = await createVideoDeliveryReceipt(prepared, consumed.delivery.context);
+        return { registered: true, available: created.tracking === 'ready' };
+      } catch (error) {
+        log.line('video', `创建投递回执失败：${error && error.code || 'unknown'}`);
+        return { registered: false, available: false };
+      }
+    });
+    const target = await findFrozenPromptTarget(adapter, consumed.delivery.sessionRef);
+    const workspace = currentDeliveryWorkspace();
+    const currentFacts = deliveryWorkspaceFacts(target.cwd, workspace.cwd);
+    const previousFacts = consumed.delivery.cwdFacts;
+    if (workspace.busy || workspace.generation === null
+        || workspace.generation !== consumed.delivery.context.workspaceGeneration
+        || !previousFacts
+        || currentFacts.targetKey !== previousFacts.targetKey
+        || currentFacts.workspaceKey !== previousFacts.workspaceKey
+        || currentFacts.targetIdentity !== previousFacts.targetIdentity
+        || currentFacts.workspaceIdentity !== previousFacts.workspaceIdentity
+        || currentFacts.workspaceMatch !== previousFacts.workspaceMatch) {
+      return { state: 'error', text: '会话或工作区在确认前发生变化，请重新预检；没有发送。' };
+    }
+    if (currentFacts.workspaceMatch !== 'match' && consumed.overrideUsed !== true) {
+      return { state: 'error', text: '工作区不匹配且未明确选择“仍然发”，没有发送。' };
+    }
+    if (typeof beforeSend === 'function') {
+      const value = await beforeSend(consumed.delivery.context);
+      if (isPlainObject(value)) responseExtra = value;
+    }
+    const result = await adapter.submitText({
+      targetToken: target.targetToken,
+      text: consumed.delivery.context.text
+    });
+    if (result.reason === 'delivery-registration') {
+      return { state: 'error', text: '无法建立投递回执，没有发送。', ...responseExtra };
+    }
+    await updateVideoDeliveryAdmission(result);
+    pushShellState();
+    return {
+      state: result.state,
+      reason: result.reason,
+      target: target.label,
+      ...(created ? { receiptId: created.receipt.receiptId } : {}),
+      ...responseExtra
+    };
   } catch (error) {
     log.line('video', `驾驶舱提交失败：${error && error.code || 'unknown'}`);
     return {
       state: 'error',
-      text: error && error.message ? String(error.message).slice(0, 200) : '发送失败。'
+      text: error && error.message ? String(error.message).slice(0, 200) : '发送失败。',
+      ...responseExtra
     };
   } finally {
     if (adapter) {
-      try { await adapter.close(); } catch (_error) { /* 关闭失败不改变提交事实 */ }
+      try { await adapter.close(); } catch (_error) { /* 关闭失败不改变唯一一次提交 */ }
     }
+    videoDeliverySubmissions = Math.max(0, videoDeliverySubmissions - 1);
   }
 }
 
@@ -3050,7 +3586,7 @@ function writeVideoExclusive(root, relativePath, content, options = {}) {
   return target;
 }
 
-function removeOwnedVideoProposal(root, proposal, rootIdentity) {
+function removeOwnedVideoProposal(root, proposal, rootIdentity, expectedHash = null) {
   if (!proposal || !proposal.plan || !proposal.plan.record) return false;
   assertVideoCasRootIdentity(root, rootIdentity);
   const relativePath = proposal.plan.record.proposalRelativePath;
@@ -3062,6 +3598,10 @@ function removeOwnedVideoProposal(root, proposal, rootIdentity) {
   try {
     const stat = fs.lstatSync(target);
     if (stat.isSymbolicLink() || !stat.isFile()) return false;
+    if (expectedHash !== null
+        && (typeof expectedHash !== 'string' || videoCasHash(target) !== expectedHash)) {
+      return false;
+    }
     assertVideoCasRootIdentity(root, rootIdentity);
     fs.unlinkSync(target);
     return true;
@@ -3717,7 +4257,8 @@ function videoTargetedActionPrompt(relativePath, actionPrompt) {
 }
 
 async function submitVideoProjectAction(value) {
-  const request = videoProjectActionRequest(value);
+  const dispatch = videoProjectDispatchRequest(value);
+  const request = dispatch.request;
   const { record } = readVideoDocumentByToken(request.projectToken);
   const active = currentWorkbench();
   const allowed = active && active.actions.find((action) => action.id === request.actionId);
@@ -3729,8 +4270,22 @@ async function submitVideoProjectAction(value) {
     return { state: 'error', text: '这张卡当前没有这个动作，没有发送。' };
   }
   const prompt = videoTargetedActionPrompt(record.relativePath, allowed.prompt);
-  log.line('video', `项目动作 ${record.stage || 'unknown'}/${allowed.id} 使用 token 绑定目标`);
-  return submitVideoPrompt(prompt);
+  const fileStage = VIDEO_DELIVERY_FILE_STAGES[allowed.id] || record.stage || 'script';
+  const spec = {
+    text: prompt,
+    fingerprint: videoDeliveryFingerprint(
+      'project-action', request.projectToken, request.actionId, videoCockpit.hashText(prompt)
+    ),
+    anchorRef: request.projectToken,
+    expectedStage: `${VIDEO_STAGE_LABELS[fileStage] || '文件'}产出`,
+    context: { watchKind: 'files', fileStage }
+  };
+  if (!dispatch.confirmation) {
+    log.line('video', `项目动作 ${record.stage || 'unknown'}/${allowed.id} 等待投递预检`);
+    return prepareVideoPromptDelivery(spec);
+  }
+  log.line('video', `项目动作 ${record.stage || 'unknown'}/${allowed.id} 使用 token 与预检绑定目标`);
+  return submitPreparedVideoPrompt(spec, dispatch.confirmation);
 }
 
 function videoSceneActionRequest(value) {
@@ -3780,6 +4335,30 @@ function videoSceneActionRequest(value) {
   throw new Error('视频现场动作不在白名单');
 }
 
+function videoSceneDispatchRequest(value) {
+  if (!isPlainObject(value)) throw new Error('视频现场投递必须是 plain object');
+  const isAgentInspiration = value.action === 'deposit-inspiration' && value.askAgent === true;
+  const confirmed = isAgentInspiration && (
+    Object.prototype.hasOwnProperty.call(value, 'preflightToken')
+    || Object.prototype.hasOwnProperty.call(value, 'override')
+  );
+  if (!confirmed) return { request: videoSceneActionRequest(value), confirmation: null };
+  exactPlainRequest(value,
+    ['action', 'text', 'askAgent', 'preflightToken', 'override'], [], '灵感投递确认');
+  const request = videoSceneActionRequest({
+    action: value.action,
+    text: value.text,
+    askAgent: value.askAgent
+  });
+  if (!deliveryToken(value.preflightToken) || typeof value.override !== 'boolean') {
+    throw new Error('灵感投递确认无效');
+  }
+  return {
+    request,
+    confirmation: { preflightToken: value.preflightToken, override: value.override }
+  };
+}
+
 function videoFileStem(value) {
   const clean = String(value || '').normalize('NFC')
     .replace(/[\u0000-\u001f\u007f/\\:*?"<>|]/g, '-')
@@ -3792,34 +4371,52 @@ function frontMatterText(value, maximum = 240) {
 }
 
 async function runVideoSceneAction(raw) {
-  const request = videoSceneActionRequest(raw);
+  const dispatch = videoSceneDispatchRequest(raw);
+  const request = dispatch.request;
   const runtime = currentVideoRuntime();
   if (request.action === 'deposit-inspiration') {
-    const firstLine = request.text.split(/\r?\n/).find((line) => line.trim()) || '一条新灵感';
-    const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
-    const id = crypto.randomBytes(5).toString('hex');
-    const relativePath = `06_灵感收件箱/待分拣/${stamp}-${id}.md`;
-    const content = [
-      '---',
-      `title: ${frontMatterText(firstLine, 100)}`,
-      'stage: inspiration',
-      'status: needs-decision',
-      'source: manual',
-      `updated: ${new Date().toISOString()}`,
-      '---', '', request.text, ''
-    ].join('\n');
-    writeVideoExclusive(runtime.root, relativePath, content, {
-      rootIdentity: runtime.rootIdentity
-    });
-    refreshVideoWorkspaceSnapshot();
-    if (!request.askAgent) return { kind: 'ok', text: '已存入待分拣，没有访问链接或外部平台。' };
-    const result = await submitVideoPrompt([
+    const prompt = [
       '请处理鲸坞视频工作区的灵感收件箱。',
       '只读 `06_灵感收件箱/待分拣/` 内真实存在的本地文件；链接只当文本，不要访问网络。',
       '将可独立立项的想法拆成候选，不编造来源、数据或评论次数。',
       '先在对话里给出拆条结果并等我选择；不要自动移动、覆盖或删除文件。'
-    ].join('\n'));
-    return { ...result, stored: true };
+    ].join('\n');
+    const store = () => {
+      const activeRuntime = currentVideoRuntime();
+      const firstLine = request.text.split(/\r?\n/).find((line) => line.trim()) || '一条新灵感';
+      const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+      const id = crypto.randomBytes(5).toString('hex');
+      const relativePath = `06_灵感收件箱/待分拣/${stamp}-${id}.md`;
+      const content = [
+        '---',
+        `title: ${frontMatterText(firstLine, 100)}`,
+        'stage: inspiration',
+        'status: needs-decision',
+        'source: manual',
+        `updated: ${new Date().toISOString()}`,
+        '---', '', request.text, ''
+      ].join('\n');
+      writeVideoExclusive(activeRuntime.root, relativePath, content, {
+        rootIdentity: activeRuntime.rootIdentity
+      });
+      refreshVideoWorkspaceSnapshot();
+      return { stored: true };
+    };
+    if (!request.askAgent) {
+      store();
+      return { kind: 'ok', text: '已存入待分拣，没有访问链接或外部平台。' };
+    }
+    const spec = {
+      text: prompt,
+      fingerprint: videoDeliveryFingerprint(
+        'inspiration-triage', videoCockpit.hashText(request.text), videoCockpit.hashText(prompt)
+      ),
+      anchorRef: 'scene-inspiration',
+      expectedStage: '灵感拆条',
+      context: { watchKind: 'none' }
+    };
+    if (!dispatch.confirmation) return prepareVideoPromptDelivery(spec);
+    return submitPreparedVideoPrompt(spec, dispatch.confirmation, store);
   }
 
   const { document } = readVideoDocumentByToken(request.projectToken);
@@ -3948,7 +4545,8 @@ async function runVideoSceneAction(raw) {
 }
 
 async function submitVideoBlockAction(value) {
-  const request = videoBlockActionRequest(value);
+  const dispatch = videoBlockDispatchRequest(value);
+  const request = dispatch.request;
   const { runtime, document } = readVideoDocumentByToken(request.projectToken);
   const blockRecord = runtime.blockTokens.get(request.blockToken);
   if (!blockRecord || blockRecord.projectToken !== request.projectToken
@@ -3967,42 +4565,104 @@ async function submitVideoBlockAction(value) {
       `问题：${intent}`,
       '不得修改任何文件；回答后停止。'
     ].join('\n');
-    return submitVideoPrompt(prompt);
+    const spec = {
+      text: prompt,
+      fingerprint: videoDeliveryFingerprint(
+        'block-ask', request.projectToken, request.blockToken, videoCockpit.hashText(prompt)
+      ),
+      anchorRef: request.blockToken,
+      expectedStage: '对话回答',
+      context: { watchKind: 'none' }
+    };
+    return dispatch.confirmation
+      ? submitPreparedVideoPrompt(spec, dispatch.confirmation)
+      : prepareVideoPromptDelivery(spec);
   }
   if (videoProposal) {
     return { state: 'error', text: '还有一张建议卡等你采用或退回。' };
   }
   const proposalId = `video-${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
   const plan = videoCockpit.createProposalPlan(document, block.id, intent, proposalId);
-  try {
-    writeVideoExclusive(runtime.root, plan.relativePath, plan.text, {
-      rootIdentity: runtime.rootIdentity
-    });
-  } catch (error) {
-    log.line('video', `建议副本创建失败：${error && error.code || 'unknown'}`);
-    return { state: 'error', text: '建议副本没建成，原稿没有变。' };
-  }
-  videoProposal = {
-    proposalToken: `proposal-${proposalId}`,
-    runtimeEpoch: runtime.epoch,
-    runtimeRoot: runtime.root,
-    runtimeIdentity: runtime.rootIdentityKey,
-    plan,
-    title: safeText(document.title, '未命名文档', 120),
-    intentLabel: request.action === 'spoken' ? '更口语'
-      : (request.action === 'shorten' ? '压时长' : '改这段'),
-    submitState: 'sending',
-    target: null
+  const proposalToken = `proposal-${proposalId}`;
+  const intentLabel = request.action === 'spoken' ? '更口语'
+    : (request.action === 'shorten' ? '压时长' : '改这段');
+  const prompt = videoCockpit.buildBlockPrompt(plan, intent);
+  const spec = {
+    text: prompt,
+    fingerprint: videoDeliveryFingerprint(
+      'block-proposal', request.projectToken, request.blockToken, request.action, document.hash
+    ),
+    anchorRef: request.blockToken,
+    expectedStage: '建议副本',
+    context: {
+      watchKind: 'proposal',
+      proposalToken,
+      proposalRelativePath: plan.relativePath,
+      plan,
+      title: safeText(document.title, '未命名文档', 120),
+      intentLabel
+    }
   };
-  if (runtime.snapshot) runtime.snapshot.proposal = videoProposalSurface(runtime);
-  pushVideoWorkspaceState();
-  const result = await submitVideoPrompt(videoCockpit.buildBlockPrompt(plan, intent));
-  if (!videoProposal || videoProposal.plan !== plan) return result;
+  if (!dispatch.confirmation) return prepareVideoPromptDelivery(spec);
+
+  let createdProposal = null;
+  let createdProposalRuntime = null;
+  const result = await submitPreparedVideoPrompt(spec, dispatch.confirmation, (context) => {
+    const activeRuntime = currentVideoRuntime();
+    if (videoProposal) throw new Error('还有一张建议卡等你采用或退回');
+    const storedPlan = context.plan;
+    if (!isPlainObject(storedPlan) || !isPlainObject(storedPlan.record)
+        || storedPlan.record.originalHash !== document.hash
+        || storedPlan.record.sourceRelativePath !== document.relativePath
+        || storedPlan.relativePath !== context.proposalRelativePath) {
+      throw new Error('建议副本预检已过期');
+    }
+    try {
+      writeVideoExclusive(activeRuntime.root, storedPlan.relativePath, storedPlan.text, {
+        rootIdentity: activeRuntime.rootIdentity
+      });
+    } catch (error) {
+      log.line('video', `建议副本创建失败：${error && error.code || 'unknown'}`);
+      throw new Error('建议副本没建成，原稿没有变');
+    }
+    videoProposal = {
+      proposalToken: context.proposalToken,
+      runtimeEpoch: activeRuntime.epoch,
+      runtimeRoot: activeRuntime.root,
+      runtimeIdentity: activeRuntime.rootIdentityKey,
+      plan: storedPlan,
+      title: context.title,
+      intentLabel: context.intentLabel,
+      submitState: 'sending',
+      target: null
+    };
+    createdProposal = videoProposal;
+    createdProposalRuntime = activeRuntime;
+    if (activeRuntime.snapshot) activeRuntime.snapshot.proposal = videoProposalSurface(activeRuntime);
+    pushVideoWorkspaceState();
+    return {};
+  });
+  if (!createdProposal || !videoProposal || videoProposal !== createdProposal) return result;
   videoProposal.submitState = result.state;
   videoProposal.target = result.target || null;
   if (result.state === 'error' || result.state === 'rejected') {
-    removeOwnedVideoProposal(runtime.root, videoProposal, runtime.rootIdentity);
-    videoProposal = null;
+    let removed = false;
+    try {
+      removed = removeOwnedVideoProposal(
+        createdProposalRuntime.root,
+        createdProposal,
+        createdProposalRuntime.rootIdentity,
+        videoCockpit.hashText(createdProposal.plan.text)
+      );
+    } catch (error) {
+      log.line('video', `建议副本拒绝后清理失败：${error && error.code || 'unknown'}`);
+    }
+    if (removed) videoProposal = null;
+    else {
+      // 文件已变化时宁可保留并交给对照卡回读，也绝不删除可能已经落地的结果。
+      videoProposal.submitState = 'unknown';
+      log.line('video', '建议副本在拒绝回执后已变化，保留文件等待人工核对');
+    }
   }
   refreshVideoWorkspaceSnapshot();
   return result;
@@ -4876,6 +5536,10 @@ async function handleEventEffects(value, monitor) {
       await applyBudgetCrossed(effect, monitor);
     }
   }
+  // queue-snapshot 只改变运行时 delivery tracker，不落 schema、也不产生 effect；
+  // 每个持久批完成后仍要主动刷新贴卡回执，缺席绝不推断完成。
+  syncVideoDeliveryReceipts();
+  pushShellState();
 }
 
 // ---------- 启动 ----------
@@ -6645,6 +7309,42 @@ function trustedVideoShellHandler(handler) {
   });
 }
 
+function deliveryPulseRequest(value) {
+  exactPlainRequest(value, ['receiptId', 'pulseId'], [], '投递脉冲确认');
+  if (!deliveryToken(value.receiptId) || !deliveryToken(value.pulseId)) {
+    throw new Error('投递脉冲 token 无效');
+  }
+  return { receiptId: value.receiptId, pulseId: value.pulseId };
+}
+
+function deliveryResultRequest(value) {
+  exactPlainRequest(value, ['resultToken'], [], '投递结果打开请求');
+  if (!deliveryToken(value.resultToken)) throw new Error('投递结果 token 无效');
+  return { resultToken: value.resultToken };
+}
+
+async function openDeliveryResult(value) {
+  const request = deliveryResultRequest(value);
+  const result = deliveryReceiptService.resolveResult({
+    owner: VIDEO_DELIVERY_OWNER,
+    resultToken: request.resultToken
+  });
+  if (!result || typeof result.relativePath !== 'string') {
+    return { kind: 'error', text: '这份结果已经过期，请从工作区重新打开。' };
+  }
+  const runtime = currentVideoRuntime();
+  if (result.workspaceRoot !== runtime.root
+      || result.workspaceIdentityKey !== runtime.rootIdentityKey) {
+    return { kind: 'error', text: '结果属于另一个工作区；请切回原工作区后再打开。' };
+  }
+  assertVideoRuntimeIdentity(runtime);
+  const target = videoCockpit.resolveWorkspaceFile(runtime.root, result.relativePath);
+  const openError = await shell.openPath(target);
+  return openError
+    ? { kind: 'error', text: '系统没能打开这份结果，请从工作区查看。' }
+    : { kind: 'ok' };
+}
+
 function registerShellIpc() {
   const channels = [
     'shell:get', 'shell:switch', 'shell:remove', 'shell:action',
@@ -6652,7 +7352,8 @@ function registerShellIpc() {
     'shell:open-settings', 'shell:onboarding-seen',
     'shell:video:get', 'shell:video:document', 'shell:video:project-action',
     'shell:video:block-action', 'shell:video:proposal-decision',
-    'shell:video:undo', 'shell:video:shoot', 'shell:video:scene-action'
+    'shell:video:undo', 'shell:video:shoot', 'shell:video:scene-action',
+    'shell:delivery-ack', 'shell:delivery-open'
   ];
   for (const channel of channels) ipcMain.removeHandler(channel);
 
@@ -6756,6 +7457,21 @@ function registerShellIpc() {
 
   ipcMain.handle('shell:video:scene-action', trustedVideoShellHandler(async (value) => (
     runVideoSceneAction(value)
+  )));
+
+  ipcMain.handle('shell:delivery-ack', trustedVideoShellHandler(async (value) => {
+    const request = deliveryPulseRequest(value);
+    const acknowledged = deliveryReceiptService.ackPulse({
+      owner: VIDEO_DELIVERY_OWNER,
+      receiptId: request.receiptId,
+      pulseId: request.pulseId
+    });
+    if (acknowledged) pushShellState();
+    return { kind: acknowledged ? 'ok' : 'stale' };
+  }));
+
+  ipcMain.handle('shell:delivery-open', trustedVideoShellHandler(async (value) => (
+    openDeliveryResult(value)
   )));
 
   // 拖入安装：只复制文件夹，不解压、不执行、不联网、不改用户原来的文件夹。
@@ -7433,7 +8149,8 @@ function reportWorkspaceSwitchError(error, parentWindow) {
   const messages = {
     ERR_WORKSPACE_BUDGET_PAUSED: '今日预算暂停中，请先在任务看板确认“今日继续”。',
     ERR_WORKSPACE_EXTERNAL_ATTACH: '当前接入的是外部 dsh。鲸坞不会停止外部服务，因此未切换工作区。',
-    ERR_WORKSPACE_RUNTIME_UNKNOWN: '当前后端归属无法证明，已按 fail-closed 拒绝切换。'
+    ERR_WORKSPACE_RUNTIME_UNKNOWN: '当前后端归属无法证明，已按 fail-closed 拒绝切换。',
+    ERR_WORKSPACE_DELIVERY_ACTIVE: '一条投递正在完成目标与回执绑定；请稍后再切换工作区。'
   };
   const detail = messages[error && error.code]
     || '切换未完整提交，鲸坞已尽力恢复原工作区。请查看日志。';
@@ -8153,6 +8870,8 @@ if (MAIN_HELPER_TEST) {
     backendStartAllowed,
     workspaceJournalBlocksStartup,
     workspaceSurfaceSnapshot,
+    workspaceIdentitySurface,
+    deliveryWorkspaceFacts,
     applyHotkeyBindings,
     ocrScriptsRoot,
     captureDeliveryRequest,
@@ -8172,12 +8891,19 @@ if (MAIN_HELPER_TEST) {
     cockpitViewRequest,
     cockpitThemeRequest,
     videoProjectActionRequest,
+    videoProjectDispatchRequest,
     videoDocumentRequest,
     videoBlockActionRequest,
+    videoBlockDispatchRequest,
     videoProposalDecisionRequest,
     videoProposalRevisionToken,
     videoUndoRequest,
     videoSceneActionRequest,
+    videoSceneDispatchRequest,
+    videoDeliveryFingerprint,
+    deliveryReceiptUpdateFromProjection,
+    deliveryPulseRequest,
+    deliveryResultRequest,
     videoTargetedActionPrompt,
     publishChecklistSurface,
     patchPublishLight,

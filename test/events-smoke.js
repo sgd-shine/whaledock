@@ -961,6 +961,350 @@ async function run() {
     await service.close();
   });
 
+  await check('delivery 精确回执走 submitting→queued→running↔waiting→completed', async () => {
+    const localClock = makeClock('2026-08-23T10:00:00.000Z');
+    const service = makeService(tmp, 'delivery-happy', localClock);
+    await service.registerSession('receipt-session-secret', {
+      origin: 'user', notificationFloorSeq: -1
+    });
+    const generation = await service.beginConnection();
+    await service.setAvailability('live', 'ready', generation);
+    const aggregateKeys = Object.keys(service.snapshot()).sort();
+
+    assert.equal(service.registerDelivery({
+      deliveryRef: 'delivery-happy-secret',
+      sessionRef: 'receipt-session-secret',
+      at: '2026-08-23T10:00:01.000Z'
+    }).state, 'submitting');
+    assert.equal(service.settleDeliveryAdmission({
+      deliveryRef: 'delivery-happy-secret', state: 'accepted',
+      at: '2026-08-23T10:00:02.000Z'
+    }).state, 'queued');
+    await service.ingest({
+      kind: 'turn-start', sessionRef: 'receipt-session-secret', seq: 0, turn: 7,
+      origin: 'user', at: '2026-08-23T10:00:03.000Z'
+    }, { generation });
+    await service.ingest({
+      kind: 'message', sessionRef: 'receipt-session-secret', seq: 1, turn: 7,
+      role: 'user', deliveryRef: 'delivery-happy-secret',
+      at: '2026-08-23T10:00:04.000Z'
+    }, { generation });
+    let receipt = service.deliverySnapshot('delivery-happy-secret');
+    assert.equal(receipt.state, 'running');
+    assert.equal(receipt.startedAt, '2026-08-23T10:00:03.000Z');
+    assert.equal(receipt.turn, 7);
+    assert.deepEqual(Object.keys(receipt).sort(), [
+      'finishedAt', 'placement', 'queuedAt', 'reason', 'result',
+      'startedAt', 'state', 'submittedAt', 'turn', 'updatedAt'
+    ].sort());
+    assert.equal(JSON.stringify(receipt).includes('delivery-happy-secret'), false);
+    assert.equal(Object.hasOwn(receipt, 'deliveryRef'), false);
+    assert.equal(Object.hasOwn(receipt, 'sessionRef'), false);
+    assert.equal(Object.hasOwn(receipt, 'taskKey'), false);
+
+    await service.ingest({
+      kind: 'approval-open', sessionRef: 'receipt-session-secret',
+      requestRef: 'delivery-approval-secret'
+    }, { generation });
+    assert.equal(service.deliverySnapshot('delivery-happy-secret').state, 'waiting');
+    await service.ingest({
+      kind: 'question-open', sessionRef: 'receipt-session-secret',
+      requestRef: 'delivery-question-secret'
+    }, { generation });
+    await service.ingest({
+      kind: 'approval-close', sessionRef: 'receipt-session-secret',
+      requestRef: 'delivery-approval-secret'
+    }, { generation });
+    assert.equal(service.deliverySnapshot('delivery-happy-secret').state, 'waiting');
+    await service.ingest({
+      kind: 'question-close', sessionRef: 'receipt-session-secret',
+      requestRef: 'delivery-question-secret'
+    }, { generation });
+    assert.equal(service.deliverySnapshot('delivery-happy-secret').state, 'running');
+
+    await service.ingest({
+      kind: 'message', sessionRef: 'receipt-session-secret', seq: 2, turn: 7,
+      role: 'assistant', at: '2026-08-23T10:00:05.000Z'
+    }, { generation });
+    await service.ingest({
+      kind: 'turn-terminal', sessionRef: 'receipt-session-secret', seq: 3, turn: 7,
+      reason: 'completed', at: '2026-08-23T10:00:06.000Z'
+    }, { generation });
+    receipt = service.deliverySnapshot('delivery-happy-secret');
+    assert.equal(receipt.state, 'completed');
+    assert.equal(receipt.result, 'completed');
+    assert.equal(receipt.finishedAt, '2026-08-23T10:00:06.000Z');
+    assert.equal(service.snapshot().recentTasks[0].durationMs, 3000);
+
+    // 终态单调：迟到 admission 和 queue 不得倒退。
+    service.settleDeliveryAdmission({
+      deliveryRef: 'delivery-happy-secret', state: 'accepted',
+      at: '2026-08-23T10:00:07.000Z'
+    });
+    service.observeDeliveryQueue({
+      kind: 'queue-snapshot', sessionRef: 'receipt-session-secret',
+      observedAt: '2026-08-23T10:00:08.000Z',
+      items: [{ deliveryRef: 'delivery-happy-secret', placement: 0 }]
+    });
+    assert.equal(service.deliverySnapshot('delivery-happy-secret').state, 'completed');
+    assert.deepEqual(Object.keys(service.snapshot()).sort(), aggregateKeys);
+    assert.equal(JSON.stringify(service.snapshot()).includes('delivery-happy-secret'), false);
+    await service.close();
+  });
+
+  await check('delivery admission/queue 竞态幂等，缺席、错 session 与外部 id 不扩容', async () => {
+    const localClock = makeClock('2026-08-23T11:00:00.000Z');
+    const service = makeService(tmp, 'delivery-admission', localClock);
+    await service.registerSession('delivery-session-a', {
+      origin: 'user', notificationFloorSeq: -1
+    });
+    await service.registerSession('delivery-session-b', {
+      origin: 'user', notificationFloorSeq: -1
+    });
+    const generation = await service.beginConnection();
+    await service.setAvailability('live', 'ready', generation);
+    service.registerDelivery({ deliveryRef: 'delivery-admission-a', sessionRef: 'delivery-session-a' });
+    const unknownAdmission = service.settleDeliveryAdmission({
+      deliveryRef: 'delivery-admission-a', state: 'unknown', reason: 'transport-unknown'
+    });
+    assert.equal(unknownAdmission.state, 'unknown');
+    assert.equal(unknownAdmission.reason, 'admission-unknown');
+    assert.equal(JSON.stringify(unknownAdmission).includes('transport-unknown'), false);
+    assert.equal(service.observeDeliveryQueue({
+      kind: 'queue-snapshot', sessionRef: 'delivery-session-a', items: []
+    }).observed, 0);
+    assert.equal(service.deliverySnapshot('delivery-admission-a').state, 'unknown');
+    assert.equal(service.observeDeliveryQueue({
+      kind: 'queue-snapshot', sessionRef: 'delivery-session-b',
+      items: [{ deliveryRef: 'delivery-admission-a', placement: 3 }]
+    }).observed, 0);
+    assert.equal(service.deliverySnapshot('delivery-admission-a').state, 'unknown');
+    assert.equal(service.observeDeliveryQueue({
+      kind: 'queue-snapshot', sessionRef: 'delivery-session-a',
+      items: [
+        { deliveryRef: 'external-delivery-secret', placement: 1 },
+        { deliveryRef: 'delivery-admission-a', placement: { raw: 'ignore' } }
+      ]
+    }).observed, 1);
+    assert.equal(service.deliverySnapshot('external-delivery-secret').reason, 'not-tracked');
+    assert.equal(service.deliverySnapshot('delivery-admission-a').state, 'queued');
+    assert.equal(service.deliverySnapshot('delivery-admission-a').placement, null);
+    assert.equal(service.settleDeliveryAdmission({
+      deliveryRef: 'delivery-admission-a', state: 'rejected', reason: 'late-reject'
+    }).state, 'queued');
+
+    service.registerDelivery({ deliveryRef: 'delivery-rejected', sessionRef: 'delivery-session-a' });
+    let rejected = service.settleDeliveryAdmission({
+      deliveryRef: 'delivery-rejected', state: 'rejected', reason: 'policy-rejected'
+    });
+    assert.equal(rejected.state, 'error');
+    assert.equal(rejected.result, 'rejected');
+    assert.equal(rejected.reason, 'admission-rejected');
+    assert.equal(JSON.stringify(rejected).includes('policy-rejected'), false);
+    service.settleDeliveryAdmission({ deliveryRef: 'delivery-rejected', state: 'accepted' });
+    service.observeDeliveryQueue({
+      kind: 'queue-snapshot', sessionRef: 'delivery-session-a',
+      items: [{ deliveryRef: 'delivery-rejected', placement: 'front' }]
+    });
+    rejected = service.deliverySnapshot('delivery-rejected');
+    assert.equal(rejected.state, 'error');
+    assert.equal(rejected.result, 'rejected');
+
+    service.registerDelivery({ deliveryRef: 'delivery-ingested-queue', sessionRef: 'delivery-session-a' });
+    await service.ingest({
+      kind: 'queue-snapshot', sessionRef: 'delivery-session-a',
+      items: [{ deliveryRef: 'delivery-ingested-queue', placement: 'pending' }]
+    }, { generation });
+    assert.equal(service.deliverySnapshot('delivery-ingested-queue').state, 'queued');
+    await assert.rejects(service.ingest({
+      kind: 'queue-snapshot', sessionRef: 'delivery-session-a', seq: 9, items: []
+    }, { generation }), /queue snapshot 不得带 seq/);
+    await service.close();
+  });
+
+  await check('delivery 只绑定同 session 的唯一 turn，双活动投递不猜 waiting', async () => {
+    const localClock = makeClock('2026-08-23T12:00:00.000Z');
+    const service = makeService(tmp, 'delivery-binding', localClock);
+    for (const sessionRef of ['binding-session', 'wrong-binding-session']) {
+      await service.registerSession(sessionRef, { origin: 'user', notificationFloorSeq: -1 });
+    }
+    const generation = await service.beginConnection();
+    await service.setAvailability('live', 'ready', generation);
+    for (const deliveryRef of ['binding-delivery-a', 'binding-delivery-b']) {
+      service.registerDelivery({ deliveryRef, sessionRef: 'binding-session' });
+      service.settleDeliveryAdmission({ deliveryRef, state: 'accepted' });
+    }
+    service.registerDelivery({
+      deliveryRef: 'wrong-binding-delivery', sessionRef: 'binding-session'
+    });
+    service.settleDeliveryAdmission({ deliveryRef: 'wrong-binding-delivery', state: 'accepted' });
+
+    await service.ingestMany([
+      { kind: 'turn-start', sessionRef: 'binding-session', seq: 0, turn: 1 },
+      {
+        kind: 'message', sessionRef: 'binding-session', seq: 1, turn: 1,
+        role: 'user', deliveryRef: 'binding-delivery-a'
+      },
+      {
+        kind: 'message', sessionRef: 'binding-session', seq: 2, turn: 1,
+        role: 'user', deliveryRef: 'binding-delivery-b'
+      }
+    ], { generation });
+    assert.equal(service.deliverySnapshot('binding-delivery-a').state, 'running');
+    assert.equal(service.deliverySnapshot('binding-delivery-b').state, 'queued');
+    await service.ingest({
+      kind: 'approval-open', sessionRef: 'binding-session', requestRef: 'binding-approval'
+    }, { generation });
+    assert.equal(service.deliverySnapshot('binding-delivery-a').state, 'waiting');
+    await service.ingest({
+      kind: 'approval-close', sessionRef: 'binding-session', requestRef: 'binding-approval'
+    }, { generation });
+
+    await service.ingestMany([
+      { kind: 'turn-start', sessionRef: 'binding-session', seq: 3, turn: 2 },
+      {
+        kind: 'message', sessionRef: 'binding-session', seq: 4, turn: 2,
+        role: 'user', deliveryRef: 'binding-delivery-b'
+      }
+    ], { generation });
+    await service.ingest({
+      kind: 'question-open', sessionRef: 'binding-session', requestRef: 'ambiguous-question'
+    }, { generation });
+    assert.equal(service.deliverySnapshot('binding-delivery-a').state, 'running');
+    assert.equal(service.deliverySnapshot('binding-delivery-b').state, 'running');
+
+    await service.ingestMany([
+      {
+        kind: 'message', sessionRef: 'binding-session', seq: 5, turn: 1,
+        role: 'assistant'
+      },
+      {
+        kind: 'turn-terminal', sessionRef: 'binding-session', seq: 6, turn: 1,
+        reason: 'completed'
+      }
+    ], { generation });
+    assert.equal(service.deliverySnapshot('binding-delivery-a').state, 'completed');
+    assert.equal(service.deliverySnapshot('binding-delivery-b').state, 'waiting');
+    await service.ingest({
+      kind: 'question-close', sessionRef: 'binding-session', requestRef: 'ambiguous-question'
+    }, { generation });
+    assert.equal(service.deliverySnapshot('binding-delivery-b').state, 'running');
+
+    await service.ingestMany([
+      { kind: 'turn-start', sessionRef: 'wrong-binding-session', seq: 0, turn: 1 },
+      {
+        kind: 'message', sessionRef: 'wrong-binding-session', seq: 1, turn: 1,
+        role: 'user', deliveryRef: 'wrong-binding-delivery'
+      }
+    ], { generation });
+    assert.equal(service.deliverySnapshot('wrong-binding-delivery').state, 'queued');
+    await service.close();
+  });
+
+  await check('delivery 在断线和本 session gap 时投影 unknown，恢复后回读且终态不倒退', async () => {
+    const localClock = makeClock('2026-08-23T13:00:00.000Z');
+    const service = makeService(tmp, 'delivery-coverage', localClock);
+    await service.registerSession('coverage-session', {
+      origin: 'user', notificationFloorSeq: -1
+    });
+    let generation = await service.beginConnection();
+    await service.setAvailability('live', 'ready', generation);
+    service.registerDelivery({ deliveryRef: 'coverage-delivery', sessionRef: 'coverage-session' });
+    service.settleDeliveryAdmission({ deliveryRef: 'coverage-delivery', state: 'accepted' });
+    await service.ingestMany([
+      { kind: 'turn-start', sessionRef: 'coverage-session', seq: 0, turn: 1 },
+      {
+        kind: 'message', sessionRef: 'coverage-session', seq: 1, turn: 1,
+        role: 'user', deliveryRef: 'coverage-delivery'
+      }
+    ], { generation });
+    assert.equal(service.deliverySnapshot('coverage-delivery').state, 'running');
+    await service.ingest({
+      kind: 'projection', sessionRef: 'coverage-session', seq: 3
+    }, { generation });
+    assert.deepEqual(
+      [service.deliverySnapshot('coverage-delivery').state,
+        service.deliverySnapshot('coverage-delivery').reason],
+      ['unknown', 'session-sequence-gap']
+    );
+    await service.ingest({
+      kind: 'projection', sessionRef: 'coverage-session', seq: 2
+    }, { generation });
+    assert.equal(service.deliverySnapshot('coverage-delivery').state, 'running');
+    await service.setAvailability('backfilling', 'history-gap', generation);
+    assert.equal(service.deliverySnapshot('coverage-delivery').state, 'unknown');
+    await service.setAvailability('live', 'history-gap', generation);
+    assert.equal(service.deliverySnapshot('coverage-delivery').reason, 'history-gap');
+    await service.setAvailability('live', 'ready', generation);
+    assert.equal(service.deliverySnapshot('coverage-delivery').state, 'running');
+    await service.ingestMany([
+      {
+        kind: 'message', sessionRef: 'coverage-session', seq: 4, turn: 1,
+        role: 'assistant'
+      },
+      {
+        kind: 'turn-terminal', sessionRef: 'coverage-session', seq: 5, turn: 1,
+        reason: 'completed'
+      }
+    ], { generation });
+    assert.equal(service.deliverySnapshot('coverage-delivery').state, 'completed');
+    await service.disconnect(generation);
+    assert.equal(service.deliverySnapshot('coverage-delivery').state, 'completed');
+
+    generation = await service.beginConnection();
+    await service.setAvailability('live', 'ready', generation);
+    service.registerDelivery({ deliveryRef: 'coverage-incomplete', sessionRef: 'coverage-session' });
+    service.settleDeliveryAdmission({ deliveryRef: 'coverage-incomplete', state: 'accepted' });
+    await service.ingestMany([
+      { kind: 'turn-start', sessionRef: 'coverage-session', seq: 6, turn: 2 },
+      {
+        kind: 'message', sessionRef: 'coverage-session', seq: 7, turn: 2,
+        role: 'user', deliveryRef: 'coverage-incomplete'
+      },
+      {
+        kind: 'turn-terminal', sessionRef: 'coverage-session', seq: 8, turn: 2,
+        reason: 'completed'
+      }
+    ], { generation });
+    const incomplete = service.deliverySnapshot('coverage-incomplete');
+    assert.equal(incomplete.state, 'error');
+    assert.equal(incomplete.result, 'incomplete');
+    await service.close();
+  });
+
+  await check('delivery tracker 有 TTL/容量上限，不持久化原始 id 或正文', async () => {
+    const localClock = makeClock('2026-08-23T14:00:00.000Z');
+    const service = makeService(tmp, 'delivery-bounded', localClock);
+    await service.registerSession('bounded-delivery-session-secret', {
+      origin: 'user', notificationFloorSeq: -1
+    });
+    let generation = await service.beginConnection();
+    await service.setAvailability('live', 'ready', generation);
+    service.registerDelivery({
+      deliveryRef: 'ttl-delivery-secret', sessionRef: 'bounded-delivery-session-secret'
+    });
+    await service.flush();
+    let serialized = fs.readFileSync(path.join(tmp, 'delivery-bounded.json'), 'utf8');
+    assert.equal(serialized.includes('ttl-delivery-secret'), false);
+    assert.equal(serialized.includes('deliveryTracker'), false);
+    assert.equal(JSON.stringify(service.snapshot()).includes('ttl-delivery-secret'), false);
+    localClock.set('2026-08-24T14:00:00.001Z');
+    assert.equal(service.deliverySnapshot('ttl-delivery-secret').reason, 'not-tracked');
+
+    for (let index = 0; index <= 1000; index += 1) {
+      service.registerDelivery({
+        deliveryRef: `capacity-delivery-secret-${index}`,
+        sessionRef: 'bounded-delivery-session-secret'
+      });
+    }
+    assert.equal(service.deliverySnapshot('capacity-delivery-secret-0').reason, 'not-tracked');
+    assert.equal(service.deliverySnapshot('capacity-delivery-secret-1000').state, 'submitting');
+    await service.flush();
+    serialized = fs.readFileSync(path.join(tmp, 'delivery-bounded.json'), 'utf8');
+    assert.equal(serialized.includes('capacity-delivery-secret'), false);
+    await service.close();
+  });
+
   await check('recentTasks 匿名、有限、无 sessionRef，snapshot 固定免责声明', async () => {
     const service = makeService(tmp, 'snapshot', clock, { recentTaskLimit: 2 });
     for (let index = 0; index < 3; index += 1) {

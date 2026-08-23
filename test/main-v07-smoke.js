@@ -112,6 +112,8 @@ async function run() {
     assert.match(html, /id="cockpit-theme-select"/);
     assert.match(html, /id="cockpit-theme-swatch"/);
     assert.match(html, /id="open-theme-settings"/);
+    assert.match(html, /id="cockpit-workspace"/);
+    assert.match(html, /id="rail-workspace"/);
     assert.doesNotMatch(html, /id="cockpit-panel"|id="cockpit-chat-placeholder"/);
     assert.doesNotMatch(html, /clamp\(340px,31vw,420px\)/);
     assert.match(html, /#cockpit-route[\s\S]*?height:136px/);
@@ -135,6 +137,33 @@ async function run() {
     );
     assert.equal(/preload|executeJavaScript/.test(viewBlock), false);
     assert.equal(/executeJavaScript/.test(mainSource), false);
+  });
+
+  await test('工作区标签只下发名称和可打开状态，经典台与驾驶舱复用安全打开入口', async () => {
+    assert.deepEqual(main.workspaceIdentitySurface({
+      busy: false,
+      current: { label: '\u0000 项目\nA ', effectivePath: '/private/work/project-a' }
+    }), { label: '项目 A', available: true });
+    assert.deepEqual(main.workspaceIdentitySurface({
+      busy: true,
+      current: { label: '切换中', effectivePath: '/private/work/project-b' }
+    }), { label: '切换中', available: false });
+    assert.equal(JSON.stringify(main.workspaceIdentitySurface({
+      current: { label: '项目 A', effectivePath: '/private/work/secret' }
+    })).includes('/private/work'), false, '渲染层不得拿到绝对路径');
+
+    const renderer = source('shell.js');
+    assert.match(renderer, /railWorkspace\.addEventListener\('click',[\s\S]*api\.openWorkspace\(\)/);
+    assert.match(renderer, /cockpitWorkspace\.addEventListener\('click',[\s\S]*api\.openWorkspace\(\)/);
+    assert.match(renderer, /button\.textContent = `工作区：\$\{workspaceLabel\}`/);
+    assert.equal(/innerHTML|insertAdjacentHTML|outerHTML/.test(renderer), false);
+
+    const onboarding = source('assets/workbenches/短视频创作台/onboarding.md');
+    assert.match(onboarding, /\[示意图\].*工作台.*会话.*工作区/);
+    assert.match(onboarding, /工作台 = 玩法界面/);
+    assert.match(onboarding, /工作区 = 它读写的文件夹/);
+    assert.match(onboarding, /会话 = 真正干活的 agent，任务写进它所在的文件夹/);
+    assert.match(onboarding, /文稿（Documents）\/鲸坞工作台\/默认工作区/);
   });
 
   await test('Cmd/Ctrl+K 先打开全宽对话再聚焦 dsh，未伪称定位远程输入框', async () => {
