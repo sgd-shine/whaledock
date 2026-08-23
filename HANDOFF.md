@@ -1,15 +1,28 @@
-# HANDOFF.md — WhaleDock v0.8.0 批次 5 发版交接（进行中）
+# HANDOFF.md — WhaleDock v0.9.0 体验流畅度批次 2/3 交接
 
-更新：2026-08-22 · v0.7.0 仍是公开稳定版；v0.8.0 已获批进入批次 5，生产升锁与本地成品证据已收口，尚待 main CI / tag / Release
+更新：2026-08-23 · v0.8.0 已公开发布；v0.9.0 当前在 PR #14 收口（功能提交 `637c940`），自动证据已通过，人工体验仍为 `NEEDS-HUMAN`
 
-## v0.8.0 批次 5 当前交接
+## v0.9.0 当前交接
+
+- 功能提交为 `637c940`，对应 PR [#14](https://github.com/sgd-shine/whaledock/pull/14)。0.9.0 版本号、发布说明与 app-runtime 合规身份冻结后的发版准备工作树已本地精确回读 **606 PASS / 31 个 ALL PASS**；功能 head 的首轮三平台 [CI run 32633856103](https://github.com/sgd-shine/whaledock/actions/runs/32633856103) 全绿，最终 PR head 与 main CI 仍待精确回读。
+- **批次 2｜现场任务回执环**：项目动作、块动作、灵感拆条均先走目标会话与工作区预检；mismatch/unknown 默认不发送，显式选择“仍然发”才继续。提交后在灵感区、项目卡、脚本块三类锚点显示回执、运行用时和等待/完成/错误/拒绝/无法确认的诚实投影；事件未接通或投递 unknown 时不冒充完成，也不自动重试。目标文件落盘后 watcher 自动刷新，显示 30 秒“刚更新”并提供安全结果打开入口。
+- **批次 3｜工作区去糊**：驾驶舱头部与普通工作台左栏显示安全工作区名称和复用 `openWorkspace` 的打开入口；首次引导和 README 解释“工作台 / 工作区 / 会话”，并明示全新用户的 `文稿（Documents）/鲸坞工作台/默认工作区`、重工作台同父目录落点。默认台/电商客服行为、主 dsh 视图隔离和运行时依赖闭包保持不变；发版准备只更新应用版本与由 lock SHA 绑定的合规身份。
+- 隐私与架构边界：renderer 不接收原始 `deliveryRef` / `sessionRef` / `taskKey`，快照不带正文；主 dsh `WebContentsView` 仍无 preload、无 `executeJavaScript`。未新增外部平台/网络协议或运行时依赖，只扩展鲸坞自有的窄 IPC 白名单。
+- app-runtime 仍为 52 包 / 830 文件，closure SHA-256 仍是 `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`；0.9.0 版本更新后的根 lock SHA-256 为 `9f68b1e8c3efd3cc96fe0c06a81a03f37f4e26d3bed160d893eec1398c8cde40`。
+- **受控 UI 证据已完成**：隔离源码 App 通过程序化真实 DOM 点击走完“灵感 → 选题 → 脚本 → 看到产出”，14 个实际界面状态均有 PNG/textContent 留档，关键帧 01/07/10/12/14 已目视核看并组成内部 MP4/GIF；去向预检、queued/running/completed、运行用时、“刚更新”、结果卡与脚本展开均可见。该证据锚定功能提交 `637c940`，当时应用版本字段仍为 v0.8.0；它使用独立 userData/工作区/端口和受控 dsh-compatible loopback fixture，不连接真实 dsh、模型或平台，不能当作 v0.9 成品验收。
+- **仍需 SGD 人工完成**：在真实会话中亲手复核同一剧本、cwd 不匹配默认不发、事件断开诚实降级，以及视觉/滚动/手感。保持 `NEEDS-HUMAN`，不能由 smoke、CI 或受控 fixture 代报通过。
+
+## v0.8.0 已公开发布结论
+
+- 正式 tag 落在 `main@9c09ee8`；[main CI 32631081067](https://github.com/sgd-shine/whaledock/actions/runs/32631081067) 三平台全绿，[Release run 32631179655](https://github.com/sgd-shine/whaledock/actions/runs/32631179655) 完成发布，[v0.8.0 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.8.0) 共 8 项资产。
+- 官方 macOS arm64 成品已完成安装回读。Windows 仍无真机验收；Intel x64 仍只有 Apple Silicon + Rosetta/云端证据；飞书真实企业租户、手机收发与人工绑定也仍待 SGD 验收。
 
 - SGD 明确批准“合入 dsh 与飞书代码，升生产锁，并落独立 app-runtime inventory/NOTICE/licenses/成品验证”。dsh 预合并 head 为 `05e489f5b4ff67617ed522ec2f5de542b8bd305a`；飞书原提交 `8ef005872e6b87d09eaba8ae601d132380151640` → `257b8bb60eff8ac97c18037dec03147036ef96fa` 已顺序合入，本分支对应 `e668611…` → `c444bfb…`，patch-id 一致。
 - 生产 dsh 已从 `0.1.0-rc.6` 精确切换到 `0.1.1-rc.2`，仅字节精确等于旧默认的持久配置一次性迁移；`latest`、其他版本、非规范值和 custom command 不动。正式 dsh lock SHA-256 `c084af82305715116ac5bd30d586be94e0fce9e00c31db0a309c3eecdd099527`，三平台 inventory 为 449 / 449 / 448 包，合规材料 214 份，与已验证 candidate capsule 精确一致。
 - 根依赖只新增精确 `@larksuiteoapi/node-sdk@1.73.0`。最终 lock 生产可达闭包为 52 包（MIT 40 / BSD-3-Clause 11 / Apache-2.0 1）、830 个源文件 / 39,607,980 B、35 份去重许可文本；全量与生产 `npm audit` 五级均 0。app-runtime inventory lock SHA-256 `b377ea28421419ee831a76ea93d01f92b45d420532a604c6f3a809b7a7aa88bf`，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`，成品预期树 `b363e6c80bca9296e566e0accae30143e6ce02dc53a660ec706bf8c9cfac1d02`。
 - dsh 与根 App 合规身份严格分开：前者仍使用根 `THIRD_PARTY_NOTICES.md` / `licenses/`，后者只使用 `compliance/app-runtime/` 并通过 `extraResources` 随包。Release 与 resume workflow 已要求 macOS `.app-bundle` / ZIP / 挂载 DMG 及 Windows unpacked / Setup / portable 同时通过两套成品 verifier。
 - 本地统一 `npm run smoke` 实跑 **579 PASS / ALL PASS**。本机 arm64 已实构建 ad-hoc `.app-bundle`：dsh 随包材料与 `codesign --deep --strict` 通过。首次真实 app-runtime probe 抓到 Electron 的 ASAR `fs` 虚拟目录及 electron-builder 的 hoist/manifest 重写差异；验证器现用 `original-fs` 验归档、按 name/version 多重集对账，并将经 builder 确定性清理的 manifest 与必需运行时文件集精确绑定 inventory，缺文件或运行字段漂移均 fail-closed。成品回执 `packages=52 files=449 tree=b363e6c8…`，SDK 在 adapter 构造前后未加载，仅显式 probe 时验证 `WSClient` / `EventDispatcher`。
-- 还未完成：将当前工作树提交并合入 `main`；最终精确 head 的三平台 CI；发版前再查 dsh npm `latest`；`v0.8.0` 注解 tag；Developer ID / Hardened Runtime / Apple 公证；六个安装产物及两份 checksum 回读；精确审批值的一次性生命周期；公开 Release 与本机官方 arm64 升级。Windows 与 Intel 真机仍是独立缺口。
+- 发布闭环已完成：生产切换随 `main@9c09ee8` 落地，三平台 CI、正式 tag、Release workflow、8 项资产与官方 macOS arm64 安装回读均已取得。Windows 与 Intel 真机，以及飞书真实租户/手机收发，仍是独立缺口。
 
 ## v0.7.0 已发布结论
 

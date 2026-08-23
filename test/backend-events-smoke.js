@@ -2,6 +2,7 @@
 
 // v0.3 dsh 事件适配器直接合约测试；由统一 smoke 子进程执行，不需要 Electron。
 const assert = require('assert/strict');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -90,6 +91,7 @@ async function main() {
   const rawParent = 'session-sensitive-parent';
   const rawMessage = 'message-sensitive-A';
   const rawQuestionRpc = 'question-sensitive-A';
+  const rawDeliveryRpc = 'delivery-sensitive-A';
   const requests = [];
   let nextRpc = 0;
   let largeHistoryResult = null;
@@ -137,7 +139,11 @@ async function main() {
           }) },
           { event: event('user/message', 7, {
             turn: 2,
-            message: { id: 'user-message-sensitive', content: [{ type: 'text', text: 'secret prompt' }] }
+            message: {
+              id: 'user-message-sensitive',
+              content: [{ type: 'text', text: 'secret prompt' }],
+              source: { kind: 'user', rpcId: rawDeliveryRpc }
+            }
           }) },
           { event: event('assistant/message', 8, {
             turn: 2,
@@ -313,6 +319,14 @@ async function main() {
     assert.equal(sessions[0].lastSeq, 11);
     assert.notEqual(sessions[0].sessionRef, rawSession);
     assert.notEqual(sessions[0].parentRef, rawParent);
+    assert.equal(
+      sessions[0].sessionRef,
+      backend.dshOpaqueRef('test-only-session-salt', 'session', rawSession)
+    );
+    const legacyDigest = crypto.createHmac('sha256', 'test-only-session-salt')
+      .update(`whaledock-events-v1\0session\0${rawSession}`)
+      .digest('hex');
+    assert.equal(sessions[0].sessionRef, `session-${legacyDigest}`);
     const serialized = JSON.stringify(sessions);
     for (const secret of [
       rawSession, rawParent, '/Users/private', 'private-preset', 'discard-me', 'dsh-home'
@@ -343,10 +357,14 @@ async function main() {
     assert.equal(result.events[2].usage.reasoningTokens, undefined);
     assert.equal(result.events[2].usage.outputTokens, 4);
     assert.notEqual(result.events[2].messageRef, rawMessage);
+    assert.equal(
+      result.events[1].deliveryRef,
+      backend.dshOpaqueRef('test-only-session-salt', 'delivery', rawDeliveryRpc)
+    );
     const serialized = JSON.stringify(result);
     for (const secret of [
       rawSession, rawMessage, 'legacy-user-message-sensitive', 'legacy secret prompt',
-      'secret prompt', 'secret answer', 'private title'
+      'secret prompt', 'secret answer', 'private title', rawDeliveryRpc
     ]) {
       assert.equal(serialized.includes(secret), false, secret);
     }
@@ -441,6 +459,59 @@ async function main() {
     assert.equal(received[0].kind, 'question-open');
     assert.notEqual(received[0].requestRef, rawQuestionRpc);
     assert.equal(JSON.stringify(received[0]).includes('private question body'), false);
+    subscription.close();
+    await subscription.closed;
+  });
+
+  await test('session/queue 只输出绑定 deliveryRef 的脱敏快照', async () => {
+    const received = [];
+    const subscription = adapter.subscribe({ onEvent: (value) => received.push(value) });
+    await subscription.opened;
+    const socket = FakeWebSocket.instances.at(-1);
+    socket.message({
+      type: 'server-request',
+      rpcId: 'queue-frame-rpc',
+      method: 'session/queue',
+      payload: {
+        type: 'session/queue',
+        sessionId: rawSession,
+        items: [{
+          id: 'raw-queue-item',
+          placement: 'queued',
+          message: {
+            id: 'raw-queue-message',
+            role: 'user',
+            content: [{ type: 'text', text: 'private queued prompt' }],
+            source: { kind: 'user', rpcId: rawDeliveryRpc }
+          }
+        }, {
+          id: 'raw-context-item',
+          placement: 'context',
+          message: {
+            id: 'raw-context-message',
+            role: 'assistant',
+            content: [{ type: 'text', text: 'private context' }],
+            source: { kind: 'agent' }
+          }
+        }]
+      }
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(received, [{
+      kind: 'queue-snapshot',
+      sessionRef: sessions[0].sessionRef,
+      items: [{
+        deliveryRef: backend.dshOpaqueRef(
+          'test-only-session-salt', 'delivery', rawDeliveryRpc
+        ),
+        placement: 'queued'
+      }]
+    }]);
+    const serialized = JSON.stringify(received);
+    for (const secret of [
+      rawSession, rawDeliveryRpc, 'raw-queue-item', 'raw-queue-message',
+      'private queued prompt', 'raw-context-message', 'private context'
+    ]) assert.equal(serialized.includes(secret), false, secret);
     subscription.close();
     await subscription.closed;
   });
@@ -546,7 +617,8 @@ async function main() {
     const history = await large.readHistory(listed.sessionRef, { maxMessages: 1 });
     largeHistoryResult = history;
     assert.equal(history.events.length, 9891);
-    assert.equal(history.events[0].kind, 'projection');
+    assert.equal(history.events[0].kind, 'turn-start');
+    assert.equal(history.events[0].turn, 1);
     assert.equal(history.events[9888].kind, 'projection');
     assert.equal(history.events[9889].kind, 'message');
     assert.equal(history.events[9890].kind, 'turn-terminal');

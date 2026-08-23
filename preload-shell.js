@@ -76,11 +76,11 @@ contextBridge.exposeInMainWorld('whaleShell', Object.freeze({
   setCockpitTheme: (request) => ipcRenderer.invoke('shell:cockpit-theme', request),
   getVideoState: () => ipcRenderer.invoke('shell:video:get'),
   openVideoDocument: (projectToken) => ipcRenderer.invoke('shell:video:document', { projectToken }),
-  runVideoProjectAction: (projectToken, actionId) => ipcRenderer.invoke(
-    'shell:video:project-action', { projectToken, actionId }
+  runVideoProjectAction: (request) => ipcRenderer.invoke(
+    'shell:video:project-action', request
   ),
-  runVideoBlockAction: (projectToken, blockToken, action) => ipcRenderer.invoke(
-    'shell:video:block-action', { projectToken, blockToken, action }
+  runVideoBlockAction: (request) => ipcRenderer.invoke(
+    'shell:video:block-action', request
   ),
   decideVideoProposal: (proposalToken, decision, proposalRevisionToken) => ipcRenderer.invoke(
     'shell:video:proposal-decision', decision === 'adopt'
@@ -92,6 +92,8 @@ contextBridge.exposeInMainWorld('whaleShell', Object.freeze({
   ),
   openShooting: (projectToken) => ipcRenderer.invoke('shell:video:shoot', { projectToken }),
   runVideoSceneAction: (request) => ipcRenderer.invoke('shell:video:scene-action', request),
+  ackDeliveryPulse: (request) => ipcRenderer.invoke('shell:delivery-ack', request),
+  openDeliveryResult: (request) => ipcRenderer.invoke('shell:delivery-open', request),
   openWorkspace: () => ipcRenderer.invoke('shell:open-workspace'),
   openSettings: () => ipcRenderer.invoke('shell:open-settings'),
   markOnboardingSeen: (workbenchId) => ipcRenderer.invoke('shell:onboarding-seen', workbenchId),

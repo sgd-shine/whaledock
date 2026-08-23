@@ -986,6 +986,22 @@ async function main() {
       result.status === 0 ? file : `${file} exit=${result.status}`);
   }
 
+  // v0.9 体验流畅度：预检/回执状态机与 Electron 薄层必须分组直测。
+  for (const [file, label] of [
+    ['delivery-receipts-smoke.js', '投递预检、贴卡回执与结果令牌'],
+    ['main-v09-flow-smoke.js', '工作区对账、严格投递包与驾驶舱可见合约']
+  ]) {
+    const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
+      cwd: path.join(__dirname, '..'),
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024
+    });
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    check(`v0.9: ${label}直测纳入统一 smoke`, result.status === 0,
+      result.status === 0 ? file : `${file} exit=${result.status}`);
+  }
+
   // v0.7 远程板块：纯 Node 通道核心与 Electron 薄层必须一起拿到证据。
   for (const [file, label] of [
     ['remote-smoke.js', '远程收推批、绑定与生命周期'],

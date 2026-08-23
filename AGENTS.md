@@ -4,7 +4,7 @@
 
 ## 项目状态一句话
 
-v0.7.0 已发布，v0.8.0 正在按已批准批次 5 收口：默认 dsh 升至 `0.1.1-rc.2`，飞书长连接只使用精确锁定的低层 SDK，并为根 App 运行时建立独立合规链。macOS 本地验证、三平台 CI、Windows/Intel 产物与人工验收必须分开报告；尤其不能把 Windows CI 构建成功写成 dsh Windows 真机已通过。批次 5 的合入、生产升锁和独立 app-runtime 合规已获 SGD 明确批准；签名、公证、公开 Release 仍必须走现有成品回读与精确审批门。
+v0.8.0 已公开发布，v0.9.0 正在收口视频驾驶舱体验流畅度批次：发送前对账目标会话 cwd 与当前工作区，投递后在原卡片显示匿名事件回执，并常显工作区与三层概念引导。默认 dsh 仍精确锁定 `0.1.1-rc.2`，根 App 运行时依赖仍只有飞书低层 SDK。macOS 本地验证、三平台 CI、Windows/Intel 产物、受控 UI 证据与 SGD 人工验收必须分开报告；尤其不能把 fixture、CI 或 watcher 回读写成 Windows/Intel 真机或真实上游模型已通过。
 
 ## 常用命令
 
@@ -62,7 +62,7 @@ npm run dist:win          # Windows x64 NSIS Setup + portable
 - macOS 系统应用可见性：`/Applications/WhaleDock.app` 是唯一可发现的主 App；构建归档与历史版本不计作安装，也不得出现在系统 App 界面；
 - Windows：GitHub Actions 只能证明构建/自动化；v0.2 按实验性、未真机验证口径发布，Setup、便携版、内置 dsh、托盘、快捷键、进程清理、开机自启与半自动更新仍列为发布后待补证；
 - 更新：macOS 可用本地假 Release/fetch 注入验证提醒；不得把假数据验证写成线上 Release 已验证；
-- 发布：SGD 已明确批准 v0.8.0 批次 5 的合入、生产升锁、独立 app-runtime 合规与正式发布；仍必须使用仓库既有 Developer ID/公证链，完成全载体成品回读，且只在精确摘要闭环后临时设置审批值并立即删除。
+- 发布：SGD 已明确批准执行本轮 v0.9.0 体验流畅度提示词并正式发布；仍必须使用仓库既有 Developer ID/公证链，完成全载体成品回读，且只在精确摘要闭环后临时设置审批值并立即删除。
 
 完整双平台人工清单见 `docs/开发方案-v0.2-2026-08-15.md` 第 8 节和当前 `HANDOFF.md`。
 
