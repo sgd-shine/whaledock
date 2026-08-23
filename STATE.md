@@ -1,10 +1,21 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-22（v0.7.0 已正式发布、完成线上更新提醒与本机官方 arm64 安装验收）
+更新：2026-08-23（v0.8.0 已公开发布；v0.9.0 PR #14 的批次 2/3 正在收口）
 
 ## 阶段结论
 
-**v0.7.0 已正式发布并成为 `releases/latest`；本机正式安装已升级到 `/Applications/WhaleDock.app` v0.7.0。**
+**v0.8.0 已公开发布；v0.9.0 当前在 PR #14 收口（功能提交 `637c940`），自动证据已过，人工体验仍为 `NEEDS-HUMAN`。**
+
+- v0.8.0 正式 tag 落在 `main@9c09ee8`；[main CI 32631081067](https://github.com/sgd-shine/whaledock/actions/runs/32631081067) 三平台全绿，[Release run 32631179655](https://github.com/sgd-shine/whaledock/actions/runs/32631179655) 完成发布，[公开 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.8.0) 为 8 项资产。
+- 官方 macOS arm64 成品已完成安装回读。Windows 仍无真机验收；Intel x64 仍只有 Apple Silicon + Rosetta/云端证据，不得由 CI、签名、公证或成品 probe 外推为真机通过。
+- v0.9.0 当前为 PR [#14](https://github.com/sgd-shine/whaledock/pull/14)，功能提交为 `637c940`。0.9.0 版本号与 app-runtime 合规身份冻结后的发版准备工作树已本地精确回读 **606 PASS / 31 个 ALL PASS**；功能 head 的首轮三平台 [CI run 32633856103](https://github.com/sgd-shine/whaledock/actions/runs/32633856103) 全绿，最终 PR head 与 main CI 仍待精确回读。
+- **批次 2｜现场任务回执环**：项目动作、块动作和灵感拆条先显示目标会话/工作区预检；不匹配或无法确认时默认不发送，只有显式覆盖才继续。投递后回执分别绑定灵感区、项目卡、脚本块三类锚点，显示排队/进行中/等待/终态及运行用时；事件不可用或结果未知时使用诚实文案且不自动重试，watcher 落盘后自动刷新、「刚更新」并提供安全结果打开入口。
+- **批次 3｜工作区去糊**：驾驶舱头部和普通工作台左栏补充安全工作区标签与打开入口；首次引导及 README 解释“工作台 / 工作区 / 会话”三层概念，并明示全新用户的 `文稿（Documents）/鲸坞工作台/默认工作区` 与重工作台同父目录落点。默认台、电商客服行为不变；主 dsh `WebContentsView` 仍无 preload / `executeJavaScript`，未新增运行时依赖；lockfile 只随应用版本更新和合规身份重生成。
+- 受控 loopback 源码 App 已完成“灵感 → 选题 → 脚本 → 看到产出”14 帧程序化真实 DOM 操作审计，内部 MP4/GIF、事件时间线和落地脚本回读齐全；这不是上游模型或平台证据。SGD 亲手可见性、交互手感与真实会话体验继续标记 **NEEDS-HUMAN**。
+
+## v0.7.0 历史发布结论
+
+**v0.7.0 曾正式发布并成为 `releases/latest`；当时本机正式安装升级到 `/Applications/WhaleDock.app` v0.7.0。**
 
 - SGD 完成远程页、色系、对话往返人工卡并回“过”后，注解 tag `v0.7.0` 精确指向三平台 [main CI 32566512173](https://github.com/sgd-shine/whaledock/actions/runs/32566512173) 全绿的 `310654e412af38fd0d49f575c57ad9c166d3f7c4`。三处体验小修随 PR [#9](https://github.com/sgd-shine/whaledock/pull/9) 发布：灵感成功存入立即清空、失败保留草稿；建议卡标题分行；页面级 `⌘K` / `Ctrl+K` 排除 Shift。
 - 首轮 [Release run 32567142239](https://github.com/sgd-shine/whaledock/actions/runs/32567142239) 整体为 failure，但 macOS/Windows build 均成功：两架构均为 Developer ID Application、`flags=0x10000(runtime)`，四项 Apple submission 全部 `Accepted`，两个 DMG staple/validate 与挂载 App Gatekeeper 均通过；三平台 runtime inventory 为 526 / 526 / 525 包。
@@ -16,7 +27,7 @@
 - `package-lock.json`、`compliance/`、`vendor/`、`licenses/` 与 `THIRD_PARTY_NOTICES.md` 相对 v0.6.0 零变化；root runtime dependencies=0，dsh 仍锁定 `0.1.0-rc.6`，无 S1。
 - `v0.7.0` tag 已落地，dsh 跟版升级线与远程批次 2 的开工条件已满足；两线的后续状态与证据由各自线程维护，不由本发版结论代替。
 
-## v0.8.0 dsh / 飞书整合｜批次 0–5（已批准，发版门进行中）
+## v0.8.0 dsh / 飞书整合｜批次 0–5（已公开发布）
 
 - 本线在独立 worktree `harness-desktop-v08-dsh-upgrade`、分支 `codex/v08-dsh-upgrade` 上从 `main@29070d5` 开工。批次 5 已在 dsh 预合并 head `05e489f5…` 之后按原父链合入飞书提交 `8ef005872e6b87d09eaba8ae601d132380151640` 与 `257b8bb60eff8ac97c18037dec03147036ef96fa`，本分支映射为 `e668611…` 与 `c444bfb…`，patch-id 一致，共享 `main.js` / `test/smoke.js` 已小步解冲突。
 - 2026-08-22T12:28Z 实时回读 npm `latest=next=0.1.1-rc.2`，发布时间 `2026-08-21T12:42:19.422Z`，tarball SHA-1 `1a5112369f1c46b13a6e6f21de8af5e6afd45074`；后续探针与候选材料只认该精确版本，若发布前 latest 再漂移则全套重跑。
@@ -37,7 +48,7 @@
 - 根 `package.json/package-lock.json` 已在独立窗精确锁定 `@larksuiteoapi/node-sdk@1.73.0`，未使用 `^` / `~`。最终根 lock 的生产可达闭包是 **52 包**（MIT 40 / BSD-3-Clause 11 / Apache-2.0 1）、源文件 830 个 / 39,607,980 B，许可原文去重 35 份；全量与 `--omit=dev` 的 `npm audit` 五级均为 0。该身份只存于 `compliance/app-runtime/`，没有混入 dsh runtime 材料。
 - 独立 app-runtime 链已基于最终 lock 生成且离线复核：inventory lock SHA-256 `b377ea28421419ee831a76ea93d01f92b45d420532a604c6f3a809b7a7aa88bf`，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`，成品预期树 `b363e6c80bca9296e566e0accae30143e6ce02dc53a660ec706bf8c9cfac1d02`；只有 `protobufjs@7.6.5` 的 postinstall 在精确脚本哈希 allowlist 中。CI/Release/resume 已要求 macOS `.app-bundle` / ZIP / 挂载 DMG 与 Windows unpacked / Setup / portable 全部同时运行 dsh 与 app-runtime verifier。
 - 本地统一 `npm run smoke` 实跑 **579 PASS / ALL PASS**。本机 arm64 真实 `electron-builder --mac dir` 已生成 ad-hoc 成品；dsh 随包材料与签名回读通过。app verifier 由此捕获并修复了 Electron ASAR 虚拟 `fs` 和 electron-builder 依赖 hoist/manifest 重写差异；最终将经确定性清理的 manifest 与必需运行时文件集全部绑定到 inventory，缺文件或改 `main` / `exports` / dependencies 都 fail-closed。真实成品回执 `packages=52 files=449 tree=b363e6c8…`，SDK 懒加载及 `WSClient` / `EventDispatcher` 导出已由成品 Electron 验证。
-- **当前发布边界**：工作树已完成生产切换与本地成品证据，但尚未合入 `main`、未打 `v0.8.0` tag、未获得最终三平台成品、未设置精确审批值也未创建公开 Release。发版前仍必须实时重查 npm `latest`；若不再是 rc.2，则停止并重走侦察/G1。
+- **发布闭环**：上述生产切换已随 `main@9c09ee8` 落地；[main CI 32631081067](https://github.com/sgd-shine/whaledock/actions/runs/32631081067) 三平台全绿，[Release run 32631179655](https://github.com/sgd-shine/whaledock/actions/runs/32631179655) 完成正式发布，[v0.8.0](https://github.com/sgd-shine/whaledock/releases/tag/v0.8.0) 共 8 项资产，官方 macOS arm64 成品已安装回读。Windows/Intel 真机及飞书真实租户/手机收发仍为独立待补证边界。
 
 **v0.6.0 历史发布基线：工作台包通过三平台 CI，macOS arm64/x64 成品使用 Developer ID Application 正式签名、开启 Hardened Runtime 并获 Apple 公证。**
 

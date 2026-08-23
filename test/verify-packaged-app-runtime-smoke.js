@@ -250,8 +250,8 @@ test('CI、Release 与续公证覆盖两套合规和全部安装载体', () => {
   assert.match(resume, /Resume tag\/package\/lock version mismatch/);
   assert.match(resume, /verify-packaged-compliance\.js --search="\$mount_dir\/WhaleDock\.app\/Contents\/Resources"/);
   assert.match(resume, /verify-packaged-app-runtime\.js --app="\$mount_dir\/WhaleDock\.app"/);
-  assert.match(release, /## v0\.8\.0 更新/);
-  assert.match(resume, /## v0\.8\.0 更新/);
+  assert.match(release, /## v0\.9\.0 更新/);
+  assert.match(resume, /## v0\.9\.0 更新/);
 });
 
 console.log(`PACKAGED APP RUNTIME ALL PASS (${passed})`);

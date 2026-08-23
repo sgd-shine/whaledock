@@ -6,6 +6,14 @@
 
 > ⚠️ 本项目是社区作品，与 DeepSeek 官方无关（Unofficial）。DeepSeek Harness 本体以 MIT 协议开源。本项目原名 Harness Desktop，自 v0.1.1 起更名为鲸坞 WhaleDock。
 
+## 当前状态（2026-08-23）
+
+- **v0.8.0 已公开发布**：正式 tag 落在 `main@9c09ee8`；[main CI 32631081067](https://github.com/sgd-shine/whaledock/actions/runs/32631081067) 三平台全绿，[Release run 32631179655](https://github.com/sgd-shine/whaledock/actions/runs/32631179655) 完成发布，[正式 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.8.0) 共 8 项资产。
+- 官方 macOS arm64 成品已完成下载安装回读；Windows 仍只有 CI/自动化证据、没有 Windows 真机验收，Intel x64 仍只有 Apple Silicon + Rosetta/云端证据、没有 Intel 真机验收。
+- **v0.9.0 正在发布收口**：当前为 PR [#14](https://github.com/sgd-shine/whaledock/pull/14)，功能提交为 `637c940`；0.9.0 版本号、发布说明与 app-runtime 合规身份已在发版准备工作树冻结，本地统一 smoke 精确回读 **606 PASS / 31 个 ALL PASS**。功能 head 的首轮三平台 [CI run 32633856103](https://github.com/sgd-shine/whaledock/actions/runs/32633856103) 全绿；最终 PR head 与 main CI 仍须精确回读。
+- v0.9 批次 2 已在源码与自动化层补上投递前去向预检、灵感区/项目卡/脚本块三类锚点上的回执、运行用时、诚实的 unavailable/unknown 降级、watcher 自动刷新、「刚更新」和结果打开；批次 3 补上驾驶舱与普通工作台的工作区标签/打开入口，以及“工作台 / 工作区 / 会话”三层引导和默认落点说明。默认台、电商客服、主 dsh 视图隔离与运行时依赖闭包边界保持不变。
+- v0.9 的受控 loopback 源码 App 已完成“灵感 → 选题 → 脚本 → 看到产出”14 帧程序化真实 DOM 操作审计，内部 MP4/GIF 与文件回读齐全；它不是真实上游模型，也不替代 SGD 亲手视觉/手感验收，后者仍为 **NEEDS-HUMAN**。
+
 ## v0.2 带来了什么
 
 - **Windows 与双架构 Mac**：提供 Windows x64 安装器/便携版，以及 macOS arm64、x64 独立安装包
@@ -135,7 +143,7 @@ SHA-256、Developer ID、Hardened Runtime、stapler 与 Gatekeeper 校验，安�
 
 正式 [`v0.7.0` Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.7.0) 为非 draft、非 prerelease；注解 tag 精确指向 `310654e412af38fd0d49f575c57ad9c166d3f7c4`，[main CI 32566512173](https://github.com/sgd-shine/whaledock/actions/runs/32566512173) 三平台全绿。发布链的通配符冲突修复后，本地统一 `npm run smoke` 为 **453 PASS / ALL PASS**；公开 Release 共 8 项资产。Windows 仍未做真机验收，Intel Mac 仍只有 Apple Silicon + Rosetta 抽查，不能由 CI、签名或公证替代。
 
-## v0.8.0 发布候选：dsh 跟版与飞书远程桥
+## v0.8.0 已公开发布：dsh 跟版与飞书远程桥
 
 - **dsh 精确升锁**：内置 runtime 与 npx 回退统一锁定 `@deepseek-ai/dsh@0.1.1-rc.2`；仅旧默认 `0.1.0-rc.6` 会一次性迁移，用户自定义选择不被覆盖。
 - **飞书远程桥**：接入自建应用的官方长连接，手机绑定后可进行受控的消息收发。根应用仅精确依赖 `@larksuiteoapi/node-sdk@1.73.0`，且只在飞书通道实际启用时懒加载；飞书关闭时不加载 SDK，也不建立平台网络连接。
@@ -143,7 +151,7 @@ SHA-256、Developer ID、Hardened Runtime、stapler 与 Gatekeeper 校验，安�
 
 > **手动启用 SQLite 的用户请先备份并保留旧 runtime。** dsh `0.1.1-rc.2` 的 opt-in SQLite schema 从 15 升到 17，当前没有迁移路径；鲸坞不会替你迁移、覆盖或清理这份数据。默认 JSONL 会话存储不受这条提示影响。
 
-v0.8.0 当前仍是**批次 5 进行中的发布候选**：源码锁定与合规材料已进入收口，但正式 tag、三平台最终成品回读、签名/公证和公开 Release 尚未完成。飞书真实企业租户、手机收发与人工绑定也尚未验收，不能由源码测试或成品 probe 代替；此处不声称 v0.8 已发布，也不声称 Windows 或 Intel Mac 真机已通过。
+v0.8.0 已由 `main@9c09ee8` 完成三平台 [CI 32631081067](https://github.com/sgd-shine/whaledock/actions/runs/32631081067) 与 [Release workflow 32631179655](https://github.com/sgd-shine/whaledock/actions/runs/32631179655)，并以 8 项资产[公开发布](https://github.com/sgd-shine/whaledock/releases/tag/v0.8.0)。官方 macOS arm64 成品已下载安装回读；飞书真实企业租户、手机收发与人工绑定仍未验收，Windows 与 Intel Mac 也仍无真机证据，不能由源码测试、CI 或成品 probe 代替。
 
 ## v0.5.0 已发布：桌面宠物与皮肤主题
 
@@ -340,7 +348,8 @@ node scripts/macos-build-visibility.js --out-dir=release --check
 - **v0.5.0**：批次 13 的桌面宠物与皮肤主题，已实现、过三平台 CI 并公开发布。宠物包与主题包都是纯静态资源，不执行包内代码、不联网下载。宠物包热重载、多只同屏与点击查看任务详情保留为 P2。
 - **v0.6.0**：工作台包机制、内置短视频创作台、托盘五态与叫醒阶梯，已实现、过三平台 CI 并公开发布；macOS 成品已正式签名并通过 Apple 公证。社区包目录、`.whaledock` 一键装、提示词输入表单与批量执行仍留待后续版本；`agent.cordis.yml` 继续**只检测不接通**。
 - **v0.7.0**：第一方视频驾驶舱、全宽对话现场、鲸坞全局色系快切、远程板块批次 1 骨架与电商客服示例包已公开发布；Windows/Intel 真机与 Windows 签名仍是独立边界。
-- **v0.8.0**：dsh 默认锁定升至 `0.1.1-rc.2`，飞书自建应用长连接与独立 app-runtime 合规链已进入批次 5 发布候选；正式 tag、三平台最终成品和公开 Release 尚未完成。
+- **v0.8.0**：dsh 默认锁定升至 `0.1.1-rc.2`，飞书自建应用长连接与独立 app-runtime 合规链已完成并公开发布；正式 Release 共 8 项资产，官方 macOS arm64 成品已安装回读。飞书真租户/手机、Windows 真机与 Intel 真机仍待补证。
+- **v0.9.0**：PR #14 正在收口体验流畅度批次 2/3，包括现场任务回执环和工作区去糊；发版准备工作树本地 606 PASS / 31 个 ALL PASS，功能 head 首轮三平台 CI 全绿，受控源码流程 MP4/GIF 已完成，SGD 人工体验仍为 `NEEDS-HUMAN`。
 - **v1.0**：macOS 签名/公证已在 v0.6.0 提前完成；v1.0 的范围不再把它当作未完前置项。Windows 签名与双平台真机覆盖仍需独立决策和证据。
 
 ## License
