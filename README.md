@@ -151,7 +151,7 @@ SHA-256、Developer ID、Hardened Runtime、stapler 与 Gatekeeper 校验，安�
 
 > **手动启用 SQLite 的用户请先备份并保留旧 runtime。** dsh `0.1.1-rc.2` 的 opt-in SQLite schema 从 15 升到 17，当前没有迁移路径；鲸坞不会替你迁移、覆盖或清理这份数据。默认 JSONL 会话存储不受这条提示影响。
 
-v0.8.0 已由 `main@9c09ee8` 完成三平台 [CI 32631081067](https://github.com/sgd-shine/whaledock/actions/runs/32631081067) 与 [Release workflow 32631179655](https://github.com/sgd-shine/whaledock/actions/runs/32631179655)，并以 8 项资产[公开发布](https://github.com/sgd-shine/whaledock/releases/tag/v0.8.0)。官方 macOS arm64 成品已下载安装回读；飞书真实企业租户、手机收发与人工绑定仍未验收，Windows 与 Intel Mac 也仍无真机证据，不能由源码测试、CI 或成品 probe 代替。
+v0.8.0 已由 `main@9c09ee8` 完成三平台 [CI 32631081067](https://github.com/sgd-shine/whaledock/actions/runs/32631081067) 与 [Release workflow 32631179655](https://github.com/sgd-shine/whaledock/actions/runs/32631179655)，[公开 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.8.0) 共 8 项资产。官方 macOS arm64 成品已下载安装回读；飞书真实企业租户、手机收发与人工绑定仍未验收，Windows 与 Intel Mac 也仍无真机证据，不能由源码测试、CI 或成品 probe 代替。
 
 ## v0.5.0 已发布：桌面宠物与皮肤主题
 
