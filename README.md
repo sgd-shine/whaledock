@@ -8,9 +8,8 @@
 
 ## 当前状态（2026-08-23）
 
-- **v0.8.0 已公开发布**：正式 tag 落在 `main@9c09ee8`；[main CI 32631081067](https://github.com/sgd-shine/whaledock/actions/runs/32631081067) 三平台全绿，[Release run 32631179655](https://github.com/sgd-shine/whaledock/actions/runs/32631179655) 完成发布，[正式 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.8.0) 共 8 项资产。
-- 官方 macOS arm64 成品已完成下载安装回读；Windows 仍只有 CI/自动化证据、没有 Windows 真机验收，Intel x64 仍只有 Apple Silicon + Rosetta/云端证据、没有 Intel 真机验收。
-- **v0.9.0 正在发布收口**：当前为 PR [#14](https://github.com/sgd-shine/whaledock/pull/14)，功能提交为 `637c940`；0.9.0 版本号、发布说明与 app-runtime 合规身份已在发版准备工作树冻结，本地统一 smoke 精确回读 **606 PASS / 31 个 ALL PASS**。功能 head 的首轮三平台 [CI run 32633856103](https://github.com/sgd-shine/whaledock/actions/runs/32633856103) 全绿；最终 PR head 与 main CI 仍须精确回读。
+- **v0.9.0 已公开发布**：注解 tag 精确指向 `main@80009fed`；[main CI 32634983004](https://github.com/sgd-shine/whaledock/actions/runs/32634983004) 三平台全绿，[Release run 32635087823](https://github.com/sgd-shine/whaledock/actions/runs/32635087823) attempt 2 完成发布，[正式 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.0) 为非 draft、非 prerelease，共 8 项资产。
+- 官方 macOS arm64 成品已下载安装并回读 0.9.0/arm64、Developer ID、Hardened Runtime、DMG stapling、Gatekeeper、两条成品合规链和 Spotlight 唯一安装；首次启动后系统新出现钥匙串 `SecurityAgent` 且尚无 0.9 初始化日志，按人工确认门处理而未代输或绕过，因此成品 GUI/真实会话仍为 **NEEDS-HUMAN**。v0.9 x64 成品在 Apple Silicon 上完成临时安装、签名/Gatekeeper 回读并由 Rosetta 拉起进程，但同样停在钥匙串门、没有 `SMOKE_OK`，所以功能启动仍未通过，也不是 Intel 真机证据。Windows 仍只有 CI/自动化证据、没有 Windows 真机验收。
 - v0.9 批次 2 已在源码与自动化层补上投递前去向预检、灵感区/项目卡/脚本块三类锚点上的回执、运行用时、诚实的 unavailable/unknown 降级、watcher 自动刷新、「刚更新」和结果打开；批次 3 补上驾驶舱与普通工作台的工作区标签/打开入口，以及“工作台 / 工作区 / 会话”三层引导和默认落点说明。默认台、电商客服、主 dsh 视图隔离与运行时依赖闭包边界保持不变。
 - v0.9 的受控 loopback 源码 App 已完成“灵感 → 选题 → 脚本 → 看到产出”14 帧程序化真实 DOM 操作审计，内部 MP4/GIF 与文件回读齐全；它不是真实上游模型，也不替代 SGD 亲手视觉/手感验收，后者仍为 **NEEDS-HUMAN**。
 
@@ -153,6 +152,16 @@ SHA-256、Developer ID、Hardened Runtime、stapler 与 Gatekeeper 校验，安�
 
 v0.8.0 已由 `main@9c09ee8` 完成三平台 [CI 32631081067](https://github.com/sgd-shine/whaledock/actions/runs/32631081067) 与 [Release workflow 32631179655](https://github.com/sgd-shine/whaledock/actions/runs/32631179655)，[公开 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.8.0) 共 8 项资产。官方 macOS arm64 成品已下载安装回读；飞书真实企业租户、手机收发与人工绑定仍未验收，Windows 与 Intel Mac 也仍无真机证据，不能由源码测试、CI 或成品 probe 代替。
 
+## v0.9.0 已公开发布：原地任务回执与工作区去糊
+
+- **投递前对账**：写脚本、块动作和灵感拆条先核对目标会话 cwd 与当前工作区；不匹配或无法确认时默认不发送，只有显式覆盖才继续。
+- **原地回执环**：回执锚定灵感区、项目卡或脚本块，显示排队、进行中、等待、完成、错误、拒绝与无法确认，以及运行用时；watcher 看到结果落盘后自动刷新“刚更新”和结果入口。
+- **工作区去糊**：驾驶舱和普通工作台常显安全工作区名称与打开入口；首次引导解释“工作台 / 工作区 / 会话”三层关系和默认落点。
+
+正式 tag `v0.9.0` 指向合并提交 `80009fed511a9345b0762fc564603b24d3361ff6`。本地最终统一 smoke 为 **606 PASS / 31 个 ALL PASS**，[PR #14 最终 CI 32634898329](https://github.com/sgd-shine/whaledock/actions/runs/32634898329) 与 [main CI 32634983004](https://github.com/sgd-shine/whaledock/actions/runs/32634983004) 均三平台全绿。发布工作流首轮只在精确审批门按预期 fail-closed；六份成品闭环后用本 tag 唯一摘要重跑 publish，成功创建 [v0.9.0 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.0)，审批变量随即删除并回读不存在。
+
+macOS arm64/x64 四项 Apple submission 均为 `Accepted`，两个 DMG 都通过 staple/validate，挂载 App 由 Gatekeeper 接受为 `Notarized Developer ID`。本机正式安装的 arm64 App 为 0.9.0、`com.sgd.whaledock`、Developer ID `wang jie (CS4NK76DA5)`、Hardened Runtime；DMG 有离线票据，安装后的 `.app` 本体没有独立 stapled ticket，但 Gatekeeper 仍接受，二者不混写。Windows 安装包仍未签名且未真机验证；Intel Mac 仍未做 Intel 真机验收。受控 loopback UI 证据也不代表真实 dsh、模型质量或 SGD 亲手体验。
+
 ## v0.5.0 已发布：桌面宠物与皮肤主题
 
 v0.5 给鲸坞加了两件可以完全自定义的东西，**都不需要写代码**。
@@ -190,7 +199,7 @@ v0.5 给鲸坞加了两件可以完全自定义的东西，**都不需要写代�
 | 电脑 | 下载文件 | 安装方式 |
 | --- | --- | --- |
 | Apple Silicon Mac | `WhaleDock-<版本>-arm64.dmg` | 打开 dmg，拖入「应用程序」 |
-| Intel Mac | `WhaleDock-<版本>-x64.dmg` | 打开 dmg，拖入「应用程序」；当前仅在 Apple Silicon + Rosetta 抽查，未做 Intel 真机 |
+| Intel Mac | `WhaleDock-<版本>-x64.dmg` | 打开 dmg，拖入「应用程序」；v0.9 在 Apple Silicon + Rosetta 仅抽查到钥匙串人工门，未完成 `SMOKE_OK`/正常退出，也未做 Intel 真机 |
 | Windows 10/11 x64 | `WhaleDock-Setup-<版本>.exe` | 双击，按当前用户安装 |
 | Windows 10/11 x64 便携使用 | `WhaleDock-<版本>-portable.exe` | 放到固定目录后直接双击；无需安装 |
 
@@ -349,7 +358,7 @@ node scripts/macos-build-visibility.js --out-dir=release --check
 - **v0.6.0**：工作台包机制、内置短视频创作台、托盘五态与叫醒阶梯，已实现、过三平台 CI 并公开发布；macOS 成品已正式签名并通过 Apple 公证。社区包目录、`.whaledock` 一键装、提示词输入表单与批量执行仍留待后续版本；`agent.cordis.yml` 继续**只检测不接通**。
 - **v0.7.0**：第一方视频驾驶舱、全宽对话现场、鲸坞全局色系快切、远程板块批次 1 骨架与电商客服示例包已公开发布；Windows/Intel 真机与 Windows 签名仍是独立边界。
 - **v0.8.0**：dsh 默认锁定升至 `0.1.1-rc.2`，飞书自建应用长连接与独立 app-runtime 合规链已完成并公开发布；正式 Release 共 8 项资产，官方 macOS arm64 成品已安装回读。飞书真租户/手机、Windows 真机与 Intel 真机仍待补证。
-- **v0.9.0**：PR #14 正在收口体验流畅度批次 2/3，包括现场任务回执环和工作区去糊；发版准备工作树本地 606 PASS / 31 个 ALL PASS，功能 head 首轮三平台 CI 全绿，受控源码流程 MP4/GIF 已完成，SGD 人工体验仍为 `NEEDS-HUMAN`。
+- **v0.9.0**：体验流畅度批次 2/3 已实现、过最终三平台 CI 并公开发布，共 8 项资产；官方 macOS arm64 成品已完成静态安装回读，受控源码流程 MP4/GIF 已完成。钥匙串确认后的成品 GUI、真实 dsh/模型、cwd mismatch、断线降级与 SGD 亲手体验仍为 `NEEDS-HUMAN`。
 - **v1.0**：macOS 签名/公证已在 v0.6.0 提前完成；v1.0 的范围不再把它当作未完前置项。Windows 签名与双平台真机覆盖仍需独立决策和证据。
 
 ## License

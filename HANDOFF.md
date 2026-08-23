@@ -1,16 +1,19 @@
 # HANDOFF.md — WhaleDock v0.9.0 体验流畅度批次 2/3 交接
 
-更新：2026-08-23 · v0.8.0 已公开发布；v0.9.0 当前在 PR #14 收口（功能提交 `637c940`），自动证据已通过，人工体验仍为 `NEEDS-HUMAN`
+更新：2026-08-23 · v0.9.0 已公开发布；自动、三平台 CI、全载体合规与官方 arm64 静态安装回读已闭环，人工体验仍为 `NEEDS-HUMAN`
 
-## v0.9.0 当前交接
+## v0.9.0 已公开发布交接
 
-- 功能提交为 `637c940`，对应 PR [#14](https://github.com/sgd-shine/whaledock/pull/14)。0.9.0 版本号、发布说明与 app-runtime 合规身份冻结后的发版准备工作树已本地精确回读 **606 PASS / 31 个 ALL PASS**；功能 head 的首轮三平台 [CI run 32633856103](https://github.com/sgd-shine/whaledock/actions/runs/32633856103) 全绿，最终 PR head 与 main CI 仍待精确回读。
+- 功能提交为 `637c940`，发版准备 head 为 `7176330`，对应 PR [#14](https://github.com/sgd-shine/whaledock/pull/14)，最终合并提交/tag 目标为 `80009fed511a9345b0762fc564603b24d3361ff6`。本地最终统一 smoke 精确回读 **606 PASS / 31 个 ALL PASS**；[最终 PR CI 32634898329](https://github.com/sgd-shine/whaledock/actions/runs/32634898329) 与 [main CI 32634983004](https://github.com/sgd-shine/whaledock/actions/runs/32634983004) 均 Ubuntu、Windows、macOS 全绿。
+- [Release run 32635087823](https://github.com/sgd-shine/whaledock/actions/runs/32635087823) attempt 2 已成功，[v0.9.0 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.0) 为非 draft、非 prerelease且有 8 项资产，`releases/latest` 已命中。首轮 publish 只因空审批变量按设计 fail-closed；精确摘要 `e1d196075c97b49d50a4ecc0695f2ea95f3e9b602996741612bcdf798237b0f9` 闭环后临时设值并只重跑 publish，成功后变量立即删除并回读不存在。
 - **批次 2｜现场任务回执环**：项目动作、块动作、灵感拆条均先走目标会话与工作区预检；mismatch/unknown 默认不发送，显式选择“仍然发”才继续。提交后在灵感区、项目卡、脚本块三类锚点显示回执、运行用时和等待/完成/错误/拒绝/无法确认的诚实投影；事件未接通或投递 unknown 时不冒充完成，也不自动重试。目标文件落盘后 watcher 自动刷新，显示 30 秒“刚更新”并提供安全结果打开入口。
 - **批次 3｜工作区去糊**：驾驶舱头部与普通工作台左栏显示安全工作区名称和复用 `openWorkspace` 的打开入口；首次引导和 README 解释“工作台 / 工作区 / 会话”，并明示全新用户的 `文稿（Documents）/鲸坞工作台/默认工作区`、重工作台同父目录落点。默认台/电商客服行为、主 dsh 视图隔离和运行时依赖闭包保持不变；发版准备只更新应用版本与由 lock SHA 绑定的合规身份。
-- 隐私与架构边界：renderer 不接收原始 `deliveryRef` / `sessionRef` / `taskKey`，快照不带正文；主 dsh `WebContentsView` 仍无 preload、无 `executeJavaScript`。未新增外部平台/网络协议或运行时依赖，只扩展鲸坞自有的窄 IPC 白名单。
+- 隐私与架构边界：公开投递预检/回执不下发 `deliveryRef` / `sessionRef` / `taskKey`；renderer 不接收上游 raw rpcId、raw session/event ID、正文或 cwd 绝对路径。主 dsh `WebContentsView` 仍无 preload、无 `executeJavaScript`。未新增外部平台/网络协议或运行时依赖，只扩展鲸坞自有的窄 IPC 白名单。
 - app-runtime 仍为 52 包 / 830 文件，closure SHA-256 仍是 `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`；0.9.0 版本更新后的根 lock SHA-256 为 `9f68b1e8c3efd3cc96fe0c06a81a03f37f4e26d3bed160d893eec1398c8cde40`。
 - **受控 UI 证据已完成**：隔离源码 App 通过程序化真实 DOM 点击走完“灵感 → 选题 → 脚本 → 看到产出”，14 个实际界面状态均有 PNG/textContent 留档，关键帧 01/07/10/12/14 已目视核看并组成内部 MP4/GIF；去向预检、queued/running/completed、运行用时、“刚更新”、结果卡与脚本展开均可见。该证据锚定功能提交 `637c940`，当时应用版本字段仍为 v0.8.0；它使用独立 userData/工作区/端口和受控 dsh-compatible loopback fixture，不连接真实 dsh、模型或平台，不能当作 v0.9 成品验收。
-- **仍需 SGD 人工完成**：在真实会话中亲手复核同一剧本、cwd 不匹配默认不发、事件断开诚实降级，以及视觉/滚动/手感。保持 `NEEDS-HUMAN`，不能由 smoke、CI 或受控 fixture 代报通过。
+- **官方 arm64 成品静态回读已完成**：公开 DMG SHA-256 为 `e731ea0f4e9fcb31293269a9c2cbce8a6754cfdfe696d5c2c6fd99c68e9b556b`，已安装到唯一 `/Applications/WhaleDock.app`；版本 0.9.0、arm64、Developer ID `wang jie (CS4NK76DA5)`、Hardened Runtime、DMG stapling、Gatekeeper `Notarized Developer ID`、dsh/app-runtime 两条成品 verifier 均通过。DMG 有票据，安装后的 App 本体无独立 stapled ticket，不能混写。首次启动新出现系统 `SecurityAgent` 且未产生 0.9 初始化日志；未代输或绕过钥匙串。
+- **x64 Rosetta 抽查只部分完成**：公开 x64 DMG 在 Apple Silicon 上通过哈希、stapling、临时唯一安装、x86_64、Developer ID 与 Gatekeeper 回读；隔离 userData 下由 `arch -x86_64` 拉起进程，但仍停在同一 `SecurityAgent` 人工门，30 秒内没有初始化日志或 `SMOKE_OK`。只终止该精确测试进程后已恢复、复验 arm64 正式安装；因此不能写成功能启动/正常退出通过，更不是 Intel 真机。
+- **仍需 SGD 人工完成**：先亲手处理钥匙串系统门，再在真实会话中复核同一剧本、cwd 不匹配默认不发、事件断开诚实降级、外部结果打开，以及视觉/滚动/手感；如要补齐 x64 Rosetta 抽查，还需在本人确认钥匙串后得到 `SMOKE_OK` 与正常退出。保持 `NEEDS-HUMAN`，不能由 smoke、CI、安装静态检查或受控 fixture 代报通过。Windows 与 Intel Mac 也仍无对应真机证据。
 
 ## v0.8.0 已公开发布结论
 

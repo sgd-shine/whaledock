@@ -1,17 +1,25 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-23（v0.8.0 已公开发布；v0.9.0 PR #14 的批次 2/3 正在收口）
+更新：2026-08-23（v0.9.0 已公开发布；自动与成品静态证据闭环，SGD 人工体验仍待完成）
 
 ## 阶段结论
 
-**v0.8.0 已公开发布；v0.9.0 当前在 PR #14 收口（功能提交 `637c940`），自动证据已过，人工体验仍为 `NEEDS-HUMAN`。**
+**v0.9.0 已公开发布：tag 指向 `main@80009fed`，三平台 CI、Developer ID/公证、8 项资产、审批变量回收与官方 arm64 安装静态回读均已闭环；钥匙串确认后的成品 GUI 与真实会话体验仍为 `NEEDS-HUMAN`。**
 
-- v0.8.0 正式 tag 落在 `main@9c09ee8`；[main CI 32631081067](https://github.com/sgd-shine/whaledock/actions/runs/32631081067) 三平台全绿，[Release run 32631179655](https://github.com/sgd-shine/whaledock/actions/runs/32631179655) 完成发布，[公开 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.8.0) 为 8 项资产。
-- 官方 macOS arm64 成品已完成安装回读。Windows 仍无真机验收；Intel x64 仍只有 Apple Silicon + Rosetta/云端证据，不得由 CI、签名、公证或成品 probe 外推为真机通过。
-- v0.9.0 当前为 PR [#14](https://github.com/sgd-shine/whaledock/pull/14)，功能提交为 `637c940`。0.9.0 版本号与 app-runtime 合规身份冻结后的发版准备工作树已本地精确回读 **606 PASS / 31 个 ALL PASS**；功能 head 的首轮三平台 [CI run 32633856103](https://github.com/sgd-shine/whaledock/actions/runs/32633856103) 全绿，最终 PR head 与 main CI 仍待精确回读。
+- v0.9.0 PR [#14](https://github.com/sgd-shine/whaledock/pull/14) 合入 `main@80009fed511a9345b0762fc564603b24d3361ff6`；[最终 PR CI 32634898329](https://github.com/sgd-shine/whaledock/actions/runs/32634898329) 与 [main CI 32634983004](https://github.com/sgd-shine/whaledock/actions/runs/32634983004) 均三平台全绿，本地最终 smoke 为 **606 PASS / 31 个 ALL PASS**。
+- [Release run 32635087823](https://github.com/sgd-shine/whaledock/actions/runs/32635087823) attempt 2 成功，[公开 v0.9.0 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.0) 为非 draft、非 prerelease且含 8 项资产，`releases/latest` 已命中；精确审批变量只存在于 publish 重跑窗口，发布回读后已删除。
+- 官方 macOS arm64 成品已安装到 `/Applications/WhaleDock.app`，回读 0.9.0/arm64、Developer ID、Hardened Runtime、DMG stapling、Gatekeeper、两条成品合规链与 Spotlight 唯一安装。截至 `2026-08-23T11:31:34Z`，首启后系统 `SecurityAgent` 仍存在且 0.9 初始化日志尚未写入；没有代输或绕过，钥匙串与后续 GUI 保持人工门。v0.9 x64 成品在 Apple Silicon 上完成临时安装、签名/Gatekeeper 回读并由 Rosetta 拉起进程，但同样停在钥匙串门、没有 `SMOKE_OK`；这既不是功能启动通过，也不是 Intel 真机证据。Windows 仍无真机验收。
 - **批次 2｜现场任务回执环**：项目动作、块动作和灵感拆条先显示目标会话/工作区预检；不匹配或无法确认时默认不发送，只有显式覆盖才继续。投递后回执分别绑定灵感区、项目卡、脚本块三类锚点，显示排队/进行中/等待/终态及运行用时；事件不可用或结果未知时使用诚实文案且不自动重试，watcher 落盘后自动刷新、「刚更新」并提供安全结果打开入口。
 - **批次 3｜工作区去糊**：驾驶舱头部和普通工作台左栏补充安全工作区标签与打开入口；首次引导及 README 解释“工作台 / 工作区 / 会话”三层概念，并明示全新用户的 `文稿（Documents）/鲸坞工作台/默认工作区` 与重工作台同父目录落点。默认台、电商客服行为不变；主 dsh `WebContentsView` 仍无 preload / `executeJavaScript`，未新增运行时依赖；lockfile 只随应用版本更新和合规身份重生成。
 - 受控 loopback 源码 App 已完成“灵感 → 选题 → 脚本 → 看到产出”14 帧程序化真实 DOM 操作审计，内部 MP4/GIF、事件时间线和落地脚本回读齐全；这不是上游模型或平台证据。SGD 亲手可见性、交互手感与真实会话体验继续标记 **NEEDS-HUMAN**。
+
+## v0.9.0 体验流畅度批次 2/3（已公开发布）
+
+- 正式注解 tag 对象 `cc874e04adc8ffcee64a44c9b7e48538a6afa089` 解引用到 `80009fed511a9345b0762fc564603b24d3361ff6`；没有重写 tag。Release workflow 首轮 macOS/Windows 构建、公证与成品校验成功，publish 只因审批变量为空按设计失败且没有创建 Release；精确发布集摘要闭环后只重跑 publish 并成功。
+- 六个安装产物为：arm64 DMG/ZIP 176,606,989 / 194,861,062 B，x64 DMG/ZIP 181,476,504 / 199,776,715 B，Windows Setup/portable 152,751,206 / 152,563,352 B；两份 checksum 资产为 372 / 189 B。六包总计 1,058,035,828 B。
+- dsh 三平台 inventory 为 449 / 449 / 448 包；同一已验证 inventory 的审计逻辑体积为 209,815,821 / 212,451,977 / 211,785,126 B，不能写成 Release runner 的现场磁盘占用。根 App runtime 的源码 inventory 为 52 包 / 830 文件，绑定逻辑体积 39,607,980 B；每个成品载体现场回读 52 包 / 449 文件和树哈希 `b363e6c80bca9296e566e0accae30143e6ce02dc53a660ec706bf8c9cfac1d02`，该成品 inventory 绑定逻辑体积为 18,034,144 B。
+- macOS arm64/x64 均为 Developer ID 且 `flags=0x10000(runtime)`；四项 Apple submission 均 `Accepted`，两份 DMG staple/validate 与挂载 App Gatekeeper 均通过。正式 arm64 安装占用 `601496 KiB`，其中 dsh runtime 为 `286668 KiB`；安装后的 `.app` 本体没有独立 stapled ticket，DMG 有票据且 Gatekeeper 接受 App，证据保持分列。
+- arm64 首启进程已出现；同一时段系统新出现钥匙串 `SecurityAgent`，且未进入新的 0.9 初始化日志，因此按人工确认门处理而不代输或绕过。x64 正式成品随后临时成为唯一 `/Applications/WhaleDock.app`，版本/架构、签名、Gatekeeper 和 DMG 校验通过；`arch -x86_64` 配合隔离 userData 拉起 x64 进程，但 30 秒内仍无初始化日志或 `SMOKE_OK`，于是只终止该精确进程并恢复、复验 arm64 正式安装。上述过程中的 3080 外部 dsh 始终为原 PID `9515`，没有被退出、替换或清理；这是当次审计事实，不是长期运行承诺。
 
 ## v0.7.0 历史发布结论
 
