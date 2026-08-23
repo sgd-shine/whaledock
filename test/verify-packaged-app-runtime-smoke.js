@@ -218,6 +218,7 @@ test('外层 verifier 用成品 Electron + ELECTRON_RUN_AS_NODE 发起私有 pro
     assert.equal(result.treeSha256, report.treeSha256);
     assert.equal(invocation.command, value.executable);
     assert.equal(invocation.options.env.ELECTRON_RUN_AS_NODE, '1');
+    assert.equal(invocation.options.timeout, 120_000);
     assert(invocation.args.includes('--probe'));
     assert(invocation.args.some((item) => item === `--asar=${path.join(value.resources, 'app.asar')}`));
   } finally {

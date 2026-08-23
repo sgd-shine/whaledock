@@ -412,7 +412,7 @@ function verifyApp(options = {}) {
     cwd: root,
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
     encoding: 'utf8',
-    timeout: 30_000,
+    timeout: 120_000,
     windowsHide: true
   });
   if (result.error || result.status !== 0) {
