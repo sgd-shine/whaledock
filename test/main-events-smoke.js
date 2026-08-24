@@ -506,7 +506,7 @@ async function run() {
       source.indexOf('async function activateEventLayerForBackend'),
       source.indexOf('function scheduleEventReconnect')
     );
-    assert.match(activation, /backend\.hasExactDshPackageProof\(\{[\s\S]*packageVersionProof: monitor\.identity\.state\.version/);
+    assert.match(activation, /backend\.hasExactDshPackageProof\(\{[\s\S]*packageVersionProof: monitor\.identity\.state\.packageVersionProof/);
     assert(!activation.includes('state.version !== config.DSH_CONTRACT.packageVersion'));
   });
 

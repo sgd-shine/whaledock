@@ -484,7 +484,7 @@ async function main() {
   targetSystemChild.kill = () => true;
   let targetVersionProbe = null;
   let targetSystemSpawn = null;
-  backend.start({ workdir: '/test/work' }, {}, {
+  const targetSystemState = backend.start({ workdir: '/test/work' }, {}, {
     platform: 'darwin',
     env: { PATH: '/test/bin' },
     homeDir: '/test/home',
@@ -506,7 +506,8 @@ async function main() {
         'web', '--port', '3080', '--no-open'
       ])
       && targetSystemSpawn.options.shell === false
-      && targetSystemSpawn.options.detached === true);
+      && targetSystemSpawn.options.detached === true
+      && targetSystemState.packageVersionProof === null);
   targetSystemChild.emit('exit', 0, null);
 
   const bundledResources = path.join(tmp, 'packaged-resources');
@@ -557,7 +558,8 @@ async function main() {
         env: { ELECTRON_RUN_AS_NODE: '1' },
         bundled: true,
         label: '内置 dsh@0.1.1-rc.2 web --port 3080 --no-open',
-        version: '0.1.1-rc.2'
+        version: '0.1.1-rc.2',
+        packageVersionProof: '0.1.1-rc.2'
       })
       && bundledFallback.bundled === true
       && bundledFallback.env.ELECTRON_RUN_AS_NODE === '1'
@@ -598,7 +600,8 @@ async function main() {
         env: { ELECTRON_RUN_AS_NODE: '1' },
         bundled: true,
         label: '内置 dsh@0.1.0-rc.6 web --port 3080',
-        version: '0.1.0-rc.6'
+        version: '0.1.0-rc.6',
+        packageVersionProof: '0.1.0-rc.6'
       }));
 
   // 端口应当未开
@@ -644,7 +647,8 @@ async function main() {
       args: ['-y', '@deepseek-ai/dsh@0.1.0-rc.6', 'web', '--port', '3080'],
       shell: false,
       label: 'npx -y @deepseek-ai/dsh@0.1.0-rc.6 web --port 3080',
-      version: '0.1.0-rc.6'
+      version: '0.1.0-rc.6',
+      packageVersionProof: '0.1.0-rc.6'
     })
       && pinned.file === '/test/bin/npx'
       && pinned.shell === false
@@ -655,13 +659,16 @@ async function main() {
       && pinned.label === 'npx -y @deepseek-ai/dsh@0.1.0-rc.6 web --port 3080'
       && latest.args[1] === '@deepseek-ai/dsh@latest'
       && latest.version === 'latest'
+      && latest.packageVersionProof === 'latest'
       && JSON.stringify(latest.args) === JSON.stringify([
         '-y', '@deepseek-ai/dsh@latest', 'web', '--port', '3080', '--no-open'
       ])
       && JSON.stringify(target.args) === JSON.stringify([
         '-y', '@deepseek-ai/dsh@0.1.1-rc.2', 'web', '--port', '3080', '--no-open'
       ])
-      && empty.args[1] === '@deepseek-ai/dsh@0.1.1-rc.2',
+      && target.packageVersionProof === '0.1.1-rc.2'
+      && empty.args[1] === '@deepseek-ai/dsh@0.1.1-rc.2'
+      && empty.packageVersionProof === '0.1.1-rc.2',
     pinned.label);
 
   const systemRc6 = backend.resolveCommand({ dshVersion: '0.1.1-rc.2' }, {
@@ -693,9 +700,11 @@ async function main() {
         'web', '--port', '3080', '--no-open'
       ])
       && systemTarget.label === 'dsh web --port 3080 --no-open'
+      && systemTarget.packageVersionProof === undefined
       && JSON.stringify(systemUnknown.args) === JSON.stringify([
         'web', '--port', '3080'
       ])
+      && systemUnknown.packageVersionProof === undefined
       && customVersionProbes === 0
       && JSON.stringify(customUntouched) === JSON.stringify({
         file: 'my-dsh-wrapper --safe',
@@ -703,7 +712,8 @@ async function main() {
         shell: true,
         label: 'my-dsh-wrapper --safe',
         version: '由自定义命令决定'
-      }));
+      })
+      && customUntouched.packageVersionProof === undefined);
 
   const windowsNpmRoot = path.join(tmp, 'system-windows');
   const windowsPackageRoot = path.join(
@@ -1002,9 +1012,12 @@ async function main() {
       result.status === 0 ? file : `${file} exit=${result.status}`);
   }
 
-  // v0.10 批次 0：切换必须立即可见，陈旧 external attach 必须先重新取证。
+  // v0.10：批次 0 切换反馈，以及默认关闭的上下文契约 P0A。
   for (const [file, label] of [
-    ['main-v10-switch-feedback-smoke.js', '切换反馈、陈旧 attach 与启动降级']
+    ['main-v10-switch-feedback-smoke.js', '切换反馈、陈旧 attach 与启动降级'],
+    ['context-bridge-smoke.js', '上下文 revision、turn freeze 与 delivery 证据合同'],
+    ['backend-context-bridge-smoke.js', 'managed dsh 资格门与假 transport 收口'],
+    ['main-v10-context-smoke.js', '默认关闭的主进程脱敏状态薄层']
   ]) {
     const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
       cwd: path.join(__dirname, '..'),

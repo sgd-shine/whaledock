@@ -30,6 +30,7 @@ const remoteFeishuRest = require('./lib/remote-feishu-rest');
 const remoteInbox = require('./lib/remote-inbox');
 const remoteSecureStore = require('./lib/remote-secure-store');
 const deliveryReceipts = require('./lib/delivery-receipts');
+const contextBridgeModel = require('./lib/context-bridge');
 const log = require('./lib/log');
 const update = require('./lib/update');
 
@@ -64,6 +65,7 @@ const VIDEO_DELIVERY_FILE_STAGES = Object.freeze({
 const deliveryReceiptService = deliveryReceipts.createFlowReceiptService();
 const deliveryBindings = new Map();
 let videoDeliverySubmissions = 0;
+const contextPocController = createContextPocController({ env: process.env });
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -213,6 +215,61 @@ async function confirmExternalAttachRetirement(runtime, port, adapters) {
   if (!shouldRetireExternalAttach(runtime, portOpen)) return false;
   return adapters.getPort() === port
     && sameBackendRuntimeIdentity(runtime, adapters.getRuntime());
+}
+
+// P0A 只接 feature flag 和脱敏状态：不做真实 bridge RPC，
+// 也不从“最近活动会话”猜测当前会话。flag 关闭时连状态机都不创建。
+function createContextPocController(options = {}) {
+  const bridgeModel = options.bridgeModel || contextBridgeModel;
+  const env = options.env === undefined ? process.env : options.env;
+  const enabled = bridgeModel.isContextPocEnabled(env);
+  if (!enabled) {
+    return Object.freeze({ enabled: false, bridgeModel, state: null });
+  }
+  let state = null;
+  try {
+    state = bridgeModel.createContextBridgeState({ enabled: true });
+  } catch (_error) {
+    // POC 状态机不可用时稍后由公开投影收口为 degraded；
+    // 不得因实验功能阻断主 dsh 界面。
+  }
+  return Object.freeze({ enabled: true, bridgeModel, state });
+}
+
+function contextPocShellSurface(controller, runtime = {}) {
+  if (!controller || controller.enabled !== true) return null;
+  const bridgeModel = controller.bridgeModel || contextBridgeModel;
+  const state = controller.state;
+  if (!state || typeof state.snapshot !== 'function') {
+    return bridgeModel.publicContextBridgeSurface(null);
+  }
+
+  let reason = null;
+  if (runtime.backendReady !== true
+      || (runtime.spawnedByUs === true && (!runtime.state || runtime.state.exited === true))) {
+    reason = 'bridge-unavailable';
+  } else {
+    const eligibility = backend.contextBridgeEligibility({
+      enabled: true,
+      spawnedByUs: runtime.spawnedByUs === true,
+      packageVersionProof: runtime.state && runtime.state.packageVersionProof,
+      bridgeMounted: false,
+      handshake: false
+    });
+    if (!eligibility.eligible) reason = eligibility.reason;
+  }
+
+  if (reason) {
+    try { state.disconnect(reason); } catch (_error) { /* 下面的公开投影统一降级 */ }
+  }
+  let snapshot = null;
+  try { snapshot = state.snapshot(); } catch (_error) { /* invalid-snapshot */ }
+  return bridgeModel.publicContextBridgeSurface(snapshot);
+}
+
+function contextPocShellStateField(controller, runtime = {}) {
+  if (!controller || controller.enabled !== true) return Object.freeze({});
+  return Object.freeze({ contextPoc: contextPocShellSurface(controller, runtime) });
 }
 
 function hotkeyBindings(value) {
@@ -2707,6 +2764,11 @@ function shellStateSnapshot(extra = {}) {
   return {
     defaultLabel: WORKBENCH_DEFAULT_LABEL,
     workspace,
+    ...contextPocShellStateField(contextPocController, {
+      backendReady,
+      spawnedByUs,
+      state: backendState
+    }),
     deliveries: deliveryReceiptSurface(),
     packages: listed.packages.map(workbenchRow),
     skipped: listed.skipped.map((item) => ({ id: String(item.id).slice(0, 120), reason: item.reason })),
@@ -3133,7 +3195,8 @@ async function submitWorkbenchAction(actionId) {
     adapter = backend.createDshPromptAdapter({
       port: config.get('port'),
       expectedHostVersion: config.DSH_CONTRACT.hostVersion,
-      packageVersionProof: spawnedByUs && backendState ? backendState.version : null
+      packageVersionProof: spawnedByUs && backendState
+        ? backendState.packageVersionProof : null
     });
   } catch (_error) {
     return { state: 'error', text: '自动提交能力不可用，请手动把提示词贴进会话。' };
@@ -3183,7 +3246,8 @@ function createVideoPromptAdapter(sessionSalt, onDeliveryPrepared) {
   return backend.createDshPromptAdapter({
     port: config.get('port'),
     expectedHostVersion: config.DSH_CONTRACT.hostVersion,
-    packageVersionProof: spawnedByUs && backendState ? backendState.version : null,
+    packageVersionProof: spawnedByUs && backendState
+      ? backendState.packageVersionProof : null,
     sessionSalt,
     ...(typeof onDeliveryPrepared === 'function'
       ? { onDeliveryPrepared, requireDeliveryPrepared: true } : {})
@@ -5379,7 +5443,7 @@ async function activateEventLayerForBackend(identity, options = {}) {
   if (monitor.identity.spawnedByUs
       && (!monitor.identity.state
         || !backend.hasExactDshPackageProof({
-          packageVersionProof: monitor.identity.state.version
+          packageVersionProof: monitor.identity.state.packageVersionProof
         }))) {
     await setEventAvailability(monitor, 'unavailable', 'contract-mismatch');
     log.line('events', '托管后端根包版本无法证明为锁定版，事件层 fail-closed');
@@ -7066,7 +7130,7 @@ async function recognizeSavedCapture(owner) {
       port: config.get('port'),
       expectedHostVersion: config.DSH_CONTRACT.hostVersion,
       packageVersionProof: spawnedByUs && backendState
-        ? backendState.version : null
+        ? backendState.packageVersionProof : null
     });
     capturePromptAdapter = promptAdapter;
     const listed = await promptAdapter.listTargets();
@@ -8578,7 +8642,8 @@ async function pollTrayFallbackOnce() {
     adapter = backend.createDshPromptAdapter({
       port: config.get('port'),
       expectedHostVersion: config.DSH_CONTRACT.hostVersion,
-      packageVersionProof: spawnedByUs && backendState ? backendState.version : null,
+      packageVersionProof: spawnedByUs && backendState
+        ? backendState.packageVersionProof : null,
       timeoutMs: 2000
     });
     const listed = await adapter.listTargets();
@@ -9031,6 +9096,9 @@ if (MAIN_HELPER_TEST) {
     workspaceIdentitySurface,
     shouldRetireExternalAttach,
     confirmExternalAttachRetirement,
+    createContextPocController,
+    contextPocShellSurface,
+    contextPocShellStateField,
     shouldInitializeRemoteSecureState,
     deliveryWorkspaceFacts,
     applyHotkeyBindings,
