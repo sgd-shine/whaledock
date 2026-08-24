@@ -1217,7 +1217,7 @@ function renderSwitcher() {
     if (index >= 1 && index <= 9) button.appendChild(text('span', `⌘⇧${index}`, 'key'));
     button.addEventListener('click', () => {
       closeLayer(switcherLayer);
-      void switchTo(row.id);
+      void switchTo(row.id, row.name);
     });
     switcherList.appendChild(button);
   });
@@ -1227,11 +1227,28 @@ function renderSwitcher() {
   }
 }
 
-function switchTo(workbenchId) {
+function switchTo(workbenchId, label) {
+  const targetLabel = typeof label === 'string' && label ? label : '所选工作台';
+  // 先在本地自有左栏给反馈，再发 IPC；即使主进程要做端口探针或系统确认，
+  // 用户也会在同一帧看到“正在切换”，严格早于 3 秒回归门。
+  state.busy = true;
+  renderRail();
+  showToast(`正在切换到「${targetLabel}」…`, 12000);
   return api.switchTo(workbenchId).then((result) => {
-    if (result && result.kind === 'error') showToast(result.text);
+    if (result && result.kind === 'error') {
+      showToast(`没有切换：${result.text || '请查看日志后重试。'}`, 12000);
+    } else if (result && result.kind === 'cancelled') {
+      showToast('已取消切换，仍在原来的工作台。');
+    } else {
+      showToast(`已切换到「${targetLabel}」。`);
+    }
+    return result;
   }).catch((error) => {
     showToast(error && error.message ? String(error.message).slice(0, 240) : '切换失败');
+  }).finally(() => {
+    state.busy = false;
+    renderRail();
+    void api.getState().then(applyState).catch(() => { /* 保留刚才的明确终态文案 */ });
   });
 }
 

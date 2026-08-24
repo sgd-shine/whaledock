@@ -1234,7 +1234,10 @@
   };
   let snapshot = null;
   let runtimeSnapshot = {};
-  let feishuCredentialStatus = { configured: false, appIdHint: null, available: true };
+  let feishuCredentialStatus = {
+    configured: false, appIdHint: null, available: true,
+    deferred: true, storedStatePresent: false
+  };
   let busy = false;
 
   function messageOf(value, fallback) {
@@ -1352,8 +1355,12 @@
     const channel = runtimeSnapshot.remote && runtimeSnapshot.remote.channels
       ? runtimeSnapshot.remote.channels.feishu || {} : {};
     const available = feishuCredentialStatus.available !== false;
-    feishuEls.save.disabled = busy || !available;
-    feishuEls.clear.disabled = busy || !available || feishuCredentialStatus.configured !== true;
+    const deferred = feishuCredentialStatus.deferred === true;
+    const canUseStorage = available || deferred;
+    feishuEls.save.disabled = busy || !canUseStorage;
+    feishuEls.clear.disabled = busy || !canUseStorage
+      || (feishuCredentialStatus.configured !== true
+        && feishuCredentialStatus.storedStatePresent !== true);
     feishuEls.test.disabled = busy || feishuCredentialStatus.configured !== true
       || channel.state !== 'connected' || channel.binding !== 'bound';
   }
@@ -1363,9 +1370,15 @@
     feishuCredentialStatus = {
       configured: source.configured === true,
       appIdHint: typeof source.appIdHint === 'string' ? source.appIdHint : null,
-      available: source.available !== false
+      available: source.available !== false,
+      deferred: source.deferred === true,
+      storedStatePresent: source.storedStatePresent === true
     };
-    if (!feishuCredentialStatus.available) {
+    if (feishuCredentialStatus.deferred) {
+      feishuEls.status.textContent = feishuCredentialStatus.storedStatePresent
+        ? '已发现本机加密状态，尚未读取钥匙串；清除或保存时再由系统确认'
+        : '尚未读取钥匙串；保存时再由系统确认';
+    } else if (!feishuCredentialStatus.available) {
       feishuEls.status.textContent = '当前系统安全存储不可用，已拒绝保存明文凭据';
     } else if (feishuCredentialStatus.configured) {
       feishuEls.status.textContent = `已安全保存在本机${feishuCredentialStatus.appIdHint ? ` · ${feishuCredentialStatus.appIdHint}` : ''}`;
@@ -1690,9 +1703,11 @@
         const use = wbNode('button', '切到这个', 'button');
         use.addEventListener('click', () => {
           use.disabled = true;
+          setStatus('正在切换工作台…');
           void api.switchWorkbench(pkg.id).then((result) => {
             if (result && result.kind === 'error') setStatus(result.text, 'error');
-            else setStatus('工作台已切换');
+            else if (result && result.kind === 'cancelled') setStatus('已取消工作台切换');
+            else setStatus('工作台已切换', 'success');
             return refreshWorkbenches();
           }).catch((error) => setStatus(messageOf(error, '切换失败'), 'error'))
             .finally(() => { use.disabled = false; });
@@ -1857,13 +1872,14 @@
     const button = document.getElementById('choose-workdir');
     button.disabled = true;
     button.classList.add('loading');
+    setStatus('正在选择并切换工作区…');
     try {
       const result = await api.switchWorkspace();
       if (responseFailed(result)) throw new Error(messageOf(result, '工作区切换失败'));
       if (result && result.result && result.result.status !== 'cancelled') {
         renderWorkspace(result);
         setStatus('工作区已完整切换', 'success');
-      }
+      } else setStatus('已取消工作区切换');
     } catch (error) {
       setStatus(messageOf(error, '无法打开目录选择器'), 'error');
     } finally {

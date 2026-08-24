@@ -1,6 +1,18 @@
-# HANDOFF.md — WhaleDock v0.9.0 体验流畅度批次 2/3 交接
+# HANDOFF.md — WhaleDock v0.10 批次 0/1 交接
 
-更新：2026-08-23 · v0.9.0 已公开发布；自动、三平台 CI、全载体合规与官方 arm64 静态安装回读已闭环，人工体验仍为 `NEEDS-HUMAN`
+更新：2026-08-24 · v0.10 批次 0 已修复，批次 1 对精确三栏蓝图判红并停在 HUMAN GATE；v0.9.0 仍是公开稳定版
+
+## v0.10 批次 0/1 交接（等待 SGD/Cowork）
+
+- 工作分支：`codex/v010-native-ui-recon`。版本化改动为 `lib/workspaces.js`、`main.js`、`shell.js`、`shell.html`、`settings.html`、`test/workspaces-smoke.js`、`test/main-remote-smoke.js`、`test/main-v10-switch-feedback-smoke.js`、`test/smoke.js`；`package.json` / lockfile 未动，无新运行时依赖。
+- 批次 0 根因：v0.9 attach 的外部 dsh 退出后，事件层只重连、不退休 `backendReady=true / spawnedByUs=false / backendState=null`；重工作台切换被 `ERR_WORKSPACE_EXTERNAL_ATTACH` 立即拒绝。旧 toast 位于 dsh child view 下方，所以用户看不到错误。v0.8 已存在同一缺陷，当前不走 v0.9.1 hotfix。
+- 修复合同：target 先 canonicalize/noop/预算收口，再在 coordinator 同一串行队列内复核 external；只有端口明确关闭且异步身份/端口仍一致才退休 stale attach。只停事件层，不杀未知进程。并发顺序、invalid/noop/budget、退出竞态均有回归。
+- 可见性合同：主窗与设置页在 IPC 前同帧显示进行中，3 秒验收点仍保留，settle 后显示成功/取消/失败终态；经典台 toast 在逻辑 `x=10..122`，不再被从 `x=132` 开始的 dsh view 覆盖。
+- 远程启动合同：远程关闭或没有密文状态时不调用 safeStorage；deferred 与 unavailable 分开，保存及存量清除仍可由用户显式触发；确需钥匙串时先绘制启动页，失败可见且只降级远程能力，关窗退出后不重建服务。
+- 自动证据：`npm run smoke` **620 PASS / 32 个 ALL PASS**；workspaces 35/35、v0.10 10/10、main remote 17/17；语法与 diff check 均通过。最终受控 GUI 在最新 diff 上回读 0.2ms 进行中、18ms 明确终态；外部 fixture 在 App 退出后仍存活，随后才由 owner 精确清理。它不是正式安装版/真实模型/Windows/Intel 证据。
+- 批次 1：dsh rc.2 的文件、事件、prompt、plugin CLI 能力可用；精确三栏布局不可由公开 additive slots 组合。Oil Creator 虽为 MIT 插件，但依赖替换 sidebar + 宿主 DOM compatibility seam，且版本范围不含当前 rc.2。结论是**精确验收红，停止实现**。
+- HUMAN GATE 两案：A）`conversation.view` 降级版，稳定但要切 tab；B）替换 root 的独立 proof-of-contract，可能三栏但违反上游 `DO NOT register root`，维护成本接近局部 fork。未得到 SGD/Cowork 选择前，不创建插件目录、不安装依赖、不改 dsh 锁、不写 `~/.dsh`。
+- 内部证据记录：`docs/验收记录-v0.10-批次0修复与批次1侦察-2026-08-24.md`（已挂 `.git/info/exclude`）。本批无 CI/Release、新包或体积证据，包/runtime 体积记 `N/A`。
 
 ## v0.9.0 已公开发布交接
 

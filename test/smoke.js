@@ -1002,6 +1002,21 @@ async function main() {
       result.status === 0 ? file : `${file} exit=${result.status}`);
   }
 
+  // v0.10 批次 0：切换必须立即可见，陈旧 external attach 必须先重新取证。
+  for (const [file, label] of [
+    ['main-v10-switch-feedback-smoke.js', '切换反馈、陈旧 attach 与启动降级']
+  ]) {
+    const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
+      cwd: path.join(__dirname, '..'),
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024
+    });
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    check(`v0.10: ${label}直测纳入统一 smoke`, result.status === 0,
+      result.status === 0 ? file : `${file} exit=${result.status}`);
+  }
+
   // v0.7 远程板块：纯 Node 通道核心与 Electron 薄层必须一起拿到证据。
   for (const [file, label] of [
     ['remote-smoke.js', '远程收推批、绑定与生命周期'],

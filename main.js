@@ -192,6 +192,29 @@ function workspaceIdentitySurface(surface) {
   };
 }
 
+// 外部 attach 没有鲸坞可管理的 child。只有它原先被证明为 external，且当前
+// 端口探针明确返回关闭时，才把鲸坞自己的陈旧运行态退休；绝不停止未知进程。
+function shouldRetireExternalAttach(runtime, portOpen) {
+  return workspaces.classifyBackendRuntime(runtime).kind === 'external' && portOpen === false;
+}
+
+function sameBackendRuntimeIdentity(left, right) {
+  return Boolean(left && right)
+    && left.backendReady === right.backendReady
+    && left.spawnedByUs === right.spawnedByUs
+    && left.state === right.state;
+}
+
+// 端口探针是异步的；在它返回前，后台恢复可能已经建立新的托管身份。
+// 因此退休决定必须同时对账捕获时身份、当前身份和端口配置。
+async function confirmExternalAttachRetirement(runtime, port, adapters) {
+  if (workspaces.classifyBackendRuntime(runtime).kind !== 'external') return false;
+  const portOpen = await adapters.isPortOpen(port);
+  if (!shouldRetireExternalAttach(runtime, portOpen)) return false;
+  return adapters.getPort() === port
+    && sameBackendRuntimeIdentity(runtime, adapters.getRuntime());
+}
+
 function hotkeyBindings(value) {
   const source = isPlainObject(value) ? value : {};
   const result = [];
@@ -695,6 +718,7 @@ let captureShuttingDown = false;
 // v0.7 远程板块生命周期。平台 adapter 后续逐批注册；骨架阶段未配置时必须显示 unavailable。
 let remoteService = null;
 let remoteSecureState = null;
+let remoteSecureStateStatus = 'deferred';
 let remoteReconfigurePromise = Promise.resolve();
 let remoteShutdownPromise = null;
 let remoteShutdownComplete = false;
@@ -714,7 +738,18 @@ if (!MAIN_HELPER_TEST) {
     app.on('second-instance', () => showApp());
     app.whenReady().then(onReady).catch((e) => {
       log.line('app', 'fatal: ' + (e && e.stack || e));
-      if (SMOKE) { console.log('SMOKE_FAIL: ' + e); app.exit(1); }
+      if (SMOKE) { console.log('SMOKE_FAIL: ' + e); app.exit(1); return; }
+      // 启动链任何一步失败都必须给人看得见的解释。尤其是 macOS 钥匙串
+      // 被拒后，不能只留一行日志让窗口看起来像“点了没反应”。
+      try {
+        status('error', '鲸坞启动没有完成', '请先处理系统安全提示；若仍失败，可在启动页打开日志。');
+        const win = createSplash();
+        win.show();
+        win.focus();
+      } catch (_surfaceError) {
+        try { dialog.showErrorBox('鲸坞启动没有完成', '请处理系统安全提示后重试，或打开日志排查。'); }
+        catch (_dialogError) { /* 系统错误面也不可用时只能保留 fatal 日志 */ }
+      }
     });
   }
 }
@@ -983,6 +1018,7 @@ function initializeWorkspaceCoordinator() {
     },
     startAndConfirm: (options) => startWorkspaceBackend(options),
     recoveryPortClear: async () => !(await backend.isPortOpen(config.get('port'))),
+    beforeSwitch: () => revalidateExternalAttachBeforeWorkspaceSwitch(),
     onCommit: async () => {
       refreshWorkspaceSurfaces();
       await launchCommittedWorkspaceEventLayer('工作区提交', { expectedManaged: true });
@@ -1021,6 +1057,30 @@ async function recoverWorkspaceAtStartup() {
     log.line('workspace', `工作区 journal 恢复失败：${error && error.code || 'unknown'}`);
     throw error;
   }
+}
+
+async function revalidateExternalAttachBeforeWorkspaceSwitch() {
+  const runtime = { backendReady, spawnedByUs, state: backendState };
+  if (workspaces.classifyBackendRuntime(runtime).kind !== 'external') return false;
+  const port = config.get('port');
+  const confirmed = await confirmExternalAttachRetirement(runtime, port, {
+    isPortOpen: (candidate) => backend.isPortOpen(candidate),
+    getRuntime: () => ({ backendReady, spawnedByUs, state: backendState }),
+    getPort: () => config.get('port')
+  });
+  if (!confirmed) return false;
+
+  backendReady = false;
+  try {
+    await stopEventLayer('外部 dsh 已离线，切换工作区前重新取证', {
+      disconnect: true, flushBatch: true
+    });
+  } catch (error) {
+    // 事件层只是只读旁路；关闭失败不能把已经明确离线的 external 状态继续冒充在线。
+    log.line('events', `退休离线 external attach 时关闭事件层失败：${error && error.code || 'unknown'}`);
+  }
+  log.line('workspace', '外部 dsh 端口已离线；只退休鲸坞 attach 状态，未停止任何进程');
+  return true;
 }
 
 async function switchWorkspace(target) {
@@ -1147,15 +1207,24 @@ function remoteSafeStorageAvailable() {
   }
 }
 
+function remoteSecureStatePath() {
+  return path.join(app.getPath('userData'), 'remote-secure-state.json');
+}
+
+function shouldInitializeRemoteSecureState(value, stateFileExists = true) {
+  return Boolean(value && value.remoteFeishuEnabled === true && stateFileExists === true);
+}
+
 function initRemoteSecureState() {
   remoteSecureState = null;
+  remoteSecureStateStatus = 'unavailable';
   if (!remoteSafeStorageAvailable()) {
     log.line('remote', 'secure-store-unavailable');
-    return;
+    return false;
   }
   try {
     remoteSecureState = remoteSecureStore.createRemoteSecureStore({
-      filePath: path.join(app.getPath('userData'), 'remote-secure-state.json'),
+      filePath: remoteSecureStatePath(),
       encrypt: (value) => {
         if (!remoteSafeStorageAvailable()) {
           throw remoteMainError('ERR_REMOTE_SAFE_STORAGE', '系统安全存储不可用');
@@ -1169,15 +1238,38 @@ function initRemoteSecureState() {
         return safeStorage.decryptString(value);
       }
     });
+    remoteSecureStateStatus = 'available';
+    return true;
   } catch (error) {
     remoteSecureState = null;
     log.line('remote', 'secure-store-init-failed:' + (error && error.code || 'unknown'));
+    return false;
   }
 }
 
 function remoteCredentialsSnapshot() {
+  const storedStatePresent = fs.existsSync(remoteSecureStatePath());
+  if (remoteSecureStateStatus === 'deferred') {
+    return {
+      feishu: {
+        available: true,
+        configured: false,
+        appIdHint: null,
+        deferred: true,
+        storedStatePresent
+      }
+    };
+  }
   if (!remoteSecureState || !remoteSafeStorageAvailable()) {
-    return { feishu: { available: false, configured: false, appIdHint: null } };
+    return {
+      feishu: {
+        available: false,
+        configured: false,
+        appIdHint: null,
+        deferred: false,
+        storedStatePresent
+      }
+    };
   }
   try {
     const status = remoteSecureState.credentialStatus();
@@ -1185,11 +1277,21 @@ function remoteCredentialsSnapshot() {
       feishu: {
         available: true,
         configured: status.configured === true,
-        appIdHint: typeof status.appIdHint === 'string' ? status.appIdHint : null
+        appIdHint: typeof status.appIdHint === 'string' ? status.appIdHint : null,
+        deferred: false,
+        storedStatePresent
       }
     };
   } catch (_error) {
-    return { feishu: { available: false, configured: false, appIdHint: null } };
+    return {
+      feishu: {
+        available: false,
+        configured: false,
+        appIdHint: null,
+        deferred: false,
+        storedStatePresent
+      }
+    };
   }
 }
 
@@ -2608,7 +2710,6 @@ function shellStateSnapshot(extra = {}) {
     deliveries: deliveryReceiptSurface(),
     packages: listed.packages.map(workbenchRow),
     skipped: listed.skipped.map((item) => ({ id: String(item.id).slice(0, 120), reason: item.reason })),
-    busy: false,
     current: active ? {
       ...workbenchRow(active),
       actions: active.actions.map((item) => ({
@@ -2624,7 +2725,10 @@ function shellStateSnapshot(extra = {}) {
       theme: cockpitThemeSurface(active),
       taskFlow: cockpitTaskFlow(canonicalEventSnapshot())
     } : null,
-    ...extra
+    ...extra,
+    // coordinator 是工作区事务的权威 busy；extra=true 只覆盖调用协调器前的极短准备段。
+    // v0.9 的高频事件刷新不得把进行中的切换写回 false。
+    busy: Boolean((workspaceCoordinator && workspaceCoordinator.busy) || extra.busy === true)
   };
 }
 
@@ -5550,7 +5654,6 @@ async function onReady() {
   });
   await initializeWorkspaceConfig();
   log.init(path.join(app.getPath('userData'), 'logs'));
-  initRemoteSecureState();
   initEventService();
   initializeWorkspaceCoordinator();
   log.line('app', `鲸坞 WhaleDock v${app.getVersion()} 启动 (${process.platform}/${process.arch})`);
@@ -5569,11 +5672,30 @@ async function onReady() {
   catch (error) { log.line('capture', `启动清理 staging 失败：${error && error.code || 'unknown'}`); }
   await recoverWorkspaceAtStartup();
   // 只有 journal 恢复与受保护根规范化完成后才允许真实长连接收件。
+  const secureStateExists = fs.existsSync(remoteSecureStatePath());
+  const remoteSecureWanted = shouldInitializeRemoteSecureState(config.get(), secureStateExists);
+  if (remoteSecureWanted) {
+    status('checking', '正在初始化已启用的远程通道', '系统可能请求钥匙串权限；本地工作台不会因拒绝而退出。');
+  } else if (config.get('remoteFeishuEnabled') === true) {
+    log.line('remote', 'secure-store-deferred-no-state');
+    status('warning', '飞书远程凭据尚未配置', '未读取钥匙串；本地 dsh 与工作台将继续启动。');
+  } else {
+    log.line('remote', 'secure-store-deferred-while-disabled');
+  }
+  await showStartupSurfaceBeforeSecureStorage();
+  if (quitting) return;
+  if (remoteSecureWanted && !initRemoteSecureState()) {
+    status('warning', '系统安全存储不可用', '远程通道已降级；本地 dsh 与工作台仍会继续启动。');
+  }
+  if (quitting) return;
   initRemoteService();
-  await syncRemoteConfig(config.get());
+  try { await syncRemoteConfig(config.get()); }
+  catch (error) {
+    log.line('remote', 'startup-sync-failed:' + (error && error.code || 'unknown'));
+    status('warning', '远程通道初始化失败', '本地 dsh 与工作台仍会继续启动；可稍后到设置里重试。');
+  }
   reconcileLoginItem();
-  if (!initialStartMinimized) createSplash();
-  else log.line('app', '启动最小化已启用：后台启动期间不创建启动页或主窗口');
+  if (initialStartMinimized) log.line('app', '启动最小化已启用：后台启动期间不创建启动页或主窗口');
   createTray();
   createAppMenu();
   registerHotkeys();
@@ -6083,6 +6205,35 @@ function createSplash() {
     }
   });
   return splash;
+}
+
+async function showStartupSurfaceBeforeSecureStorage() {
+  if (initialStartMinimized) return false;
+  const win = createSplash();
+  if (win.isDestroyed()) return false;
+  const contents = win.webContents;
+  if (contents && !contents.isDestroyed() && contents.isLoadingMainFrame()) {
+    await new Promise((resolve) => {
+      let timer = null;
+      const done = () => {
+        if (timer) clearTimeout(timer);
+        if (!contents.isDestroyed()) {
+          contents.removeListener('did-finish-load', done);
+          contents.removeListener('did-fail-load', done);
+        }
+        resolve();
+      };
+      contents.once('did-finish-load', done);
+      contents.once('did-fail-load', done);
+      timer = setTimeout(done, 1500);
+    });
+  }
+  if (win.isDestroyed()) return false;
+  win.show();
+  win.focus();
+  // 让本地 HTML 至少获得一个绘制机会，再触发可能阻塞主进程的 safeStorage 调用。
+  await new Promise((resolve) => setImmediate(resolve));
+  return true;
 }
 
 function closeSplash() {
@@ -7595,7 +7746,12 @@ function registerSettingsIpc() {
         const feishuStarting = Object.prototype.hasOwnProperty.call(
           normalized, 'remoteFeishuEnabled'
         ) && normalized.remoteFeishuEnabled === true && before.remoteFeishuEnabled !== true;
-        if (feishuStarting) await reconfigureRemoteService();
+        if (feishuStarting) {
+          if (!remoteSecureState && !initRemoteSecureState()) {
+            throw remoteMainError('ERR_REMOTE_SAFE_STORAGE', '系统安全存储不可用');
+          }
+          await reconfigureRemoteService();
+        }
         else await syncRemoteConfig(config.get());
       }
       catch (error) {
@@ -7668,6 +7824,7 @@ function registerSettingsIpc() {
         message: '飞书 App ID 或 App Secret 格式无效'
       };
     }
+    if (!remoteSecureState) initRemoteSecureState();
     if (!remoteSecureState || !remoteSafeStorageAvailable()) {
       return {
         ok: false,
@@ -7708,6 +7865,7 @@ function registerSettingsIpc() {
   }));
 
   ipcMain.handle('settings:remote-feishu-credentials-clear', trustedSettingsHandler(async () => {
+    if (!remoteSecureState) initRemoteSecureState();
     if (!remoteSecureState || !remoteSafeStorageAvailable()) {
       return {
         ok: false,
@@ -8871,6 +9029,9 @@ if (MAIN_HELPER_TEST) {
     workspaceJournalBlocksStartup,
     workspaceSurfaceSnapshot,
     workspaceIdentitySurface,
+    shouldRetireExternalAttach,
+    confirmExternalAttachRetirement,
+    shouldInitializeRemoteSecureState,
     deliveryWorkspaceFacts,
     applyHotkeyBindings,
     ocrScriptsRoot,
