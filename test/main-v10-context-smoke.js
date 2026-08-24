@@ -179,7 +179,8 @@ async function run() {
       const surface = main.contextPocShellSurface(controller, runtime);
       assert.equal(surface.state, 'degraded');
       assert.equal(surface.reason, reason);
-      assert.equal(fixture.calls.disconnect.length, 1);
+      assert.equal(fixture.calls.disconnect.length, 0,
+        '公开降级投影不得反向破坏同 Host 的内部 turn fence');
       assert.equal(['registered', 'staged', 'delivered'].includes(surface.state), false);
     }
   });

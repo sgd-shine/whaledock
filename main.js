@@ -66,6 +66,8 @@ const deliveryReceiptService = deliveryReceipts.createFlowReceiptService();
 const deliveryBindings = new Map();
 let videoDeliverySubmissions = 0;
 const contextPocController = createContextPocController({ env: process.env });
+let contextPocBridgeRuntime = null;
+let contextPocBridgeGeneration = 0;
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -226,14 +228,31 @@ function createContextPocController(options = {}) {
   if (!enabled) {
     return Object.freeze({ enabled: false, bridgeModel, state: null });
   }
+  const runtime = {
+    bridgeMounted: false,
+    handshake: null,
+    currentSessionRef: null,
+    eventHostInstanceId: null,
+    eventCursor: 0,
+    turnMisses: new Map(),
+    retiredSessionRefs: new Set(),
+    availabilityReason: null
+  };
   let state = null;
-  try {
-    state = bridgeModel.createContextBridgeState({ enabled: true });
-  } catch (_error) {
-    // POC 状态机不可用时稍后由公开投影收口为 degraded；
-    // 不得因实验功能阻断主 dsh 界面。
-  }
-  return Object.freeze({ enabled: true, bridgeModel, state });
+  const resetState = () => {
+    try { state = bridgeModel.createContextBridgeState({ enabled: true }); }
+    catch (_error) { state = null; }
+    return state;
+  };
+  resetState();
+  return Object.freeze({
+    enabled: true,
+    bridgeModel,
+    controllerId: `controller-${crypto.randomBytes(16).toString('hex')}`,
+    runtime,
+    get state() { return state; },
+    resetState
+  });
 }
 
 function contextPocShellSurface(controller, runtime = {}) {
@@ -253,23 +272,154 @@ function contextPocShellSurface(controller, runtime = {}) {
       enabled: true,
       spawnedByUs: runtime.spawnedByUs === true,
       packageVersionProof: runtime.state && runtime.state.packageVersionProof,
-      bridgeMounted: false,
-      handshake: false
+      bridgeMounted: runtime.state && runtime.state.contextBridgeMounted === true
+        && controller.runtime && controller.runtime.bridgeMounted === true,
+      handshake: Boolean(controller.runtime && controller.runtime.handshake)
     });
     if (!eligibility.eligible) reason = eligibility.reason;
   }
 
-  if (reason) {
-    try { state.disconnect(reason); } catch (_error) { /* 下面的公开投影统一降级 */ }
+  if (!reason && controller.runtime
+      && typeof controller.runtime.availabilityReason === 'string') {
+    reason = controller.runtime.availabilityReason;
   }
   let snapshot = null;
-  try { snapshot = state.snapshot(); } catch (_error) { /* invalid-snapshot */ }
-  return bridgeModel.publicContextBridgeSurface(snapshot);
+  try {
+    const sessionRef = controller.runtime && controller.runtime.currentSessionRef;
+    snapshot = sessionRef ? state.snapshot(sessionRef) : state.snapshot();
+  } catch (_error) { /* invalid-snapshot */ }
+  if (reason && snapshot) {
+    snapshot = {
+      ...snapshot,
+      connection: {
+        // renderer 仍沿用既有“context 降级”词义；这里只覆盖公开投影，
+        // 绝不为了一次状态渲染破坏同 Host 的 turn fence。
+        state: 'degraded',
+        reason
+      }
+    };
+  }
+  const surface = bridgeModel.publicContextBridgeSurface(snapshot);
+  const currentSessionRef = controller.runtime && controller.runtime.currentSessionRef;
+  const miss = contextPocTurnMissFor(controller, currentSessionRef);
+  if (miss && miss.sessionRef === currentSessionRef && surface
+      && ['ready', 'queued', 'effective', 'delivered'].includes(surface.state)) {
+    // 上一个原生 turn 已被 Host 证明“未注入”。即使后台已重新
+    // stage 成功，也不得把这条历史事实闪烁后隐藏；只有后续
+    // 真实 delivery proof 才能清除。
+    return Object.freeze({
+      ...surface,
+      state: 'degraded',
+      reason: miss.reason
+    });
+  }
+  return surface;
+}
+
+function contextPocTurnMissFor(controller, sessionRef) {
+  const misses = controller && controller.runtime && controller.runtime.turnMisses;
+  if (!(misses instanceof Map) || typeof sessionRef !== 'string') return null;
+  return misses.get(sessionRef) || null;
+}
+
+function contextPocRememberTurnMiss(controller, miss) {
+  if (!controller || !controller.runtime || !(controller.runtime.turnMisses instanceof Map)
+      || !miss || typeof miss.sessionRef !== 'string'
+      || !Number.isSafeInteger(miss.turn) || miss.turn < 1
+      || !['context-not-effective', 'session-unavailable'].includes(miss.reason)) return false;
+  const misses = controller.runtime.turnMisses;
+  const previous = misses.get(miss.sessionRef);
+  if (previous && previous.turn >= miss.turn) return false;
+  // Map 的插入顺序同时作为有界淘汰顺序；同 session 更新时先移到队尾。
+  misses.delete(miss.sessionRef);
+  misses.set(miss.sessionRef, Object.freeze({
+    sessionRef: miss.sessionRef,
+    turn: miss.turn,
+    reason: miss.reason
+  }));
+  const configuredLimit = controller.bridgeModel && controller.bridgeModel.LIMITS
+    && controller.bridgeModel.LIMITS.maxSessions;
+  const limit = Number.isSafeInteger(configuredLimit) && configuredLimit > 0
+    ? configuredLimit : 64;
+  while (misses.size > limit) misses.delete(misses.keys().next().value);
+  return true;
+}
+
+function contextPocClearTurnMiss(controller, sessionRef, afterTurn) {
+  const misses = controller && controller.runtime && controller.runtime.turnMisses;
+  if (!(misses instanceof Map) || typeof sessionRef !== 'string') return false;
+  const miss = misses.get(sessionRef);
+  if (!miss || (Number.isSafeInteger(afterTurn) && afterTurn <= miss.turn)) return false;
+  return misses.delete(sessionRef);
+}
+
+function contextPocShouldRememberTurnMiss(result, sessionRef, currentSessionRef,
+  selectionState = 'selected') {
+  if (!result || typeof sessionRef !== 'string') return false;
+  if (result.kind === 'turn-missed') return true;
+  // 新 session 的第一轮可能发生在 selection/resolve 与 events/read 之间。
+  // 此时主进程仍持有上一选择，但 Host journal 已经证明该 miss 属于本
+  // controller。先按 session 有界保留，公开面仍只读取当前 sessionRef，
+  // 因而既不会污染旧选择，也不会在下一拍绑定新选择后丢失事实。
+  return result.kind === 'ignored-stale' && result.reason === 'session-unavailable'
+    && ['selected', 'none', 'stale', 'conflict'].includes(selectionState)
+    && (currentSessionRef === null || typeof currentSessionRef === 'string');
+}
+
+function contextPocConnectHost(controller, handshake) {
+  if (!controller || controller.enabled !== true || !controller.runtime
+      || !controller.state || typeof controller.state.connect !== 'function') {
+    throw new Error('context POC controller unavailable');
+  }
+  const previousHost = controller.runtime.eventHostInstanceId;
+  const hostChanged = typeof previousHost === 'string'
+    && previousHost !== handshake.hostInstanceId;
+  if (hostChanged) {
+    // opaque sessionRef 含 Host 代际；新 Host 不可能再报告旧 ref。仅在代际
+    // 真正变化时丢弃旧状态，同一 Host 的 transport 重连仍保留并重放。
+    const reset = controller.resetState();
+    if (!reset || typeof reset.connect !== 'function') {
+      throw new Error('context POC state reset failed');
+    }
+    controller.runtime.currentSessionRef = null;
+  }
+  const connected = controller.state.connect(handshake);
+  if (!connected || !connected.snapshot
+      || connected.snapshot.connection.state !== 'ready') {
+    throw new Error('context POC contract rejected handshake');
+  }
+  if (previousHost !== handshake.hostInstanceId) {
+    controller.runtime.eventHostInstanceId = handshake.hostInstanceId;
+    controller.runtime.eventCursor = 0;
+    controller.runtime.turnMisses.clear();
+    controller.runtime.retiredSessionRefs.clear();
+  }
+  return Object.freeze({ connected, hostChanged });
 }
 
 function contextPocShellStateField(controller, runtime = {}) {
   if (!controller || controller.enabled !== true) return Object.freeze({});
   return Object.freeze({ contextPoc: contextPocShellSurface(controller, runtime) });
+}
+
+function contextPocReleaseRetiredSession(sessionRef, controller = contextPocController) {
+  if (!sessionRef || !controller || !controller.state
+      || typeof controller.state.releaseSession !== 'function'
+      || sessionRef === controller.runtime.currentSessionRef) return false;
+  try {
+    const released = controller.state.releaseSession({ sessionRef });
+    if (released && ['released', 'noop'].includes(released.kind)) {
+      contextPocClearTurnMiss(controller, sessionRef);
+      return true;
+    }
+  } catch (_error) { /* 仍有 open turn 时等对应 turn-end 再回收 */ }
+  return false;
+}
+
+function contextPocCurrentEffects(result, sessionRef, currentSessionRef, selectionState = 'selected') {
+  if (!result || !Array.isArray(result.effects) || sessionRef !== currentSessionRef
+      || selectionState !== 'selected') return [];
+  return result.effects;
 }
 
 function hotkeyBindings(value) {
@@ -1178,6 +1328,64 @@ async function chooseAndSwitchWorkspace(parentWindow) {
 
 function baseUrl() {
   return `http://127.0.0.1:${config.get('port')}`;
+}
+
+function contextPocHarnessUrl(controller, runtime = {}, origin = baseUrl()) {
+  if (!controller || controller.enabled !== true || !controller.controllerId
+      || runtime.backendReady !== true || runtime.spawnedByUs !== true
+      || !runtime.state || runtime.state.exited === true
+      || runtime.state.contextBridgeMounted !== true
+      || typeof runtime.state.contextBridgeSelectionToken !== 'string'
+      || !CONTEXT_POC_TOKEN_RE.test(runtime.state.contextBridgeSelectionToken)) return origin;
+  try {
+    const target = new URL(origin);
+    const fragment = new URLSearchParams();
+    fragment.set('whaledockController', controller.controllerId);
+    fragment.set(
+      'whaledockSelectionToken', runtime.state.contextBridgeSelectionToken
+    );
+    // fragment 不会进入 HTTP request target / Referer；Client 读取后立即清除。
+    target.hash = fragment.toString();
+    return target.href;
+  } catch (_error) {
+    return origin;
+  }
+}
+
+function harnessViewUrl(origin = baseUrl()) {
+  return contextPocHarnessUrl(contextPocController, {
+    backendReady,
+    spawnedByUs,
+    state: backendState
+  }, origin);
+}
+
+function contextPocReloadOrigin(currentUrl, fallbackOrigin = baseUrl()) {
+  try {
+    const fallback = new URL(fallbackOrigin);
+    const current = new URL(currentUrl);
+    if (current.origin !== fallback.origin) return fallback.href;
+    current.hash = '';
+    return current.href;
+  } catch (_error) {
+    try { return new URL(fallbackOrigin).href; } catch (_fallbackError) { return fallbackOrigin; }
+  }
+}
+
+async function reloadHarnessView(view = dshView, urlFactory = harnessViewUrl,
+  fallbackOrigin = baseUrl()) {
+  if (!view || !view.webContents || view.webContents.isDestroyed()) return false;
+  const currentUrl = typeof view.webContents.getURL === 'function'
+    ? view.webContents.getURL() : '';
+  const origin = contextPocReloadOrigin(currentUrl, fallbackOrigin);
+  try {
+    // 每次刷新都重新签发 fragment；直接 reload 已被 Client 清理的 URL
+    // 会让 selection reporter 在一次 lease 后静默失效。
+    await view.webContents.loadURL(urlFactory(origin));
+    return true;
+  } catch (_error) {
+    return false;
+  }
 }
 
 function sendSplash(channel, payload) {
@@ -2939,6 +3147,9 @@ async function applyWorkbench(workbenchId, options = {}) {
     config.get('workbenchOnboardingSeenIds')
   );
   refreshWorkbenchSurfaces({ showOnboarding: firstTime });
+  // 切换事务返回前主动同步本地上下文桥，避免仅靠 350ms 轮询
+  // 让用户在“已切换”后立即发送却冻结上一个工作台。
+  await wakeContextPocBridge();
   log.line('app', `工作台切换：${previous || '默认工作台'} → ${wanted || '默认工作台'}`);
   return { kind: 'ok' };
 }
@@ -5202,6 +5413,618 @@ function registerShootingIpc() {
   }));
 }
 
+// ---------- v0.10 P0B：受管 rc.2 上下文桥 ----------
+// 真实 raw session 永远停留在 dsh Host/Client 插件内部；主进程只消费临时 opaque ref。
+const CONTEXT_POC_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
+const CONTEXT_POC_TOKEN_RE = /^[a-f0-9]{64}$/;
+const CONTEXT_POC_SESSION_REF_RE = /^session-[a-f0-9]{64}$/;
+const CONTEXT_POC_EVENT_TYPES = new Set([
+  'ack', 'turn-start', 'turn-miss', 'delivery', 'turn-end'
+]);
+
+function contextPocExact(value, required, optional = []) {
+  if (!isPlainObject(value)) return false;
+  const allowed = new Set([...required, ...optional]);
+  return required.every((key) => Object.prototype.hasOwnProperty.call(value, key))
+    && Object.keys(value).every((key) => allowed.has(key));
+}
+
+function contextPocValidId(value) {
+  return typeof value === 'string' && CONTEXT_POC_ID_RE.test(value);
+}
+
+function contextPocHandshakeValue(value) {
+  if (!contextPocExact(value, [
+    'ok', 'type', 'protocol', 'contract', 'hostInstanceId', 'capabilities'
+  ]) || value.ok !== true || value.type !== 'handshake'
+      || value.protocol !== contextBridgeModel.CONTRACT_VERSION
+      || value.contract !== contextBridgeModel.CONTRACT_VERSION
+      || !contextPocValidId(value.hostInstanceId)
+      || !Array.isArray(value.capabilities) || value.capabilities.length > 16
+      || new Set(value.capabilities).size !== value.capabilities.length
+      || value.capabilities.some((item) => (
+        typeof item !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(item)
+      ))) return null;
+  return {
+    contract: value.contract,
+    hostInstanceId: value.hostInstanceId,
+    capabilities: [...value.capabilities]
+  };
+}
+
+function contextPocBindingValue(value, runtime, controller = contextPocController) {
+  if (!contextPocExact(value, ['state', 'hostInstanceId', 'sessionRef', 'code'], [
+    'controllerId', 'pageInstanceId', 'selectionRevision'
+  ]) || !['selected', 'none', 'stale', 'conflict'].includes(value.state)
+      || value.hostInstanceId !== runtime.handshake.hostInstanceId
+      || !(value.code === null || (typeof value.code === 'string' && value.code.length <= 64))) {
+    return null;
+  }
+  if (value.state !== 'selected') {
+    return value.sessionRef === null ? { state: value.state, code: value.code } : null;
+  }
+  if (typeof value.sessionRef !== 'string' || !CONTEXT_POC_SESSION_REF_RE.test(value.sessionRef)
+      || value.controllerId !== controller.controllerId
+      || !contextPocValidId(value.pageInstanceId)
+      || !Number.isSafeInteger(value.selectionRevision) || value.selectionRevision < 1) return null;
+  return {
+    state: 'selected',
+    sessionRef: value.sessionRef,
+    controllerId: value.controllerId,
+    pageInstanceId: value.pageInstanceId,
+    selectionRevision: value.selectionRevision,
+    code: null
+  };
+}
+
+function contextPocEventKeys(event) {
+  const common = ['contract', 'hostInstanceId', 'eventSeq', 'type', 'controllerId'];
+  if (event.type === 'ack') return [...common, 'ack'];
+  if (event.type === 'turn-start') return [...common, 'sessionRef', 'turn', 'frozenRevision'];
+  if (event.type === 'turn-miss') return [...common, 'sessionRef', 'turn', 'reason'];
+  if (event.type === 'delivery') return [...common, 'delivery', 'proof'];
+  if (event.type === 'turn-end') return [...common, 'sessionRef', 'turn'];
+  return null;
+}
+
+function contextPocValidAck(value, runtime) {
+  return contextPocExact(value, [
+    'contract', 'clientInstanceId', 'hostInstanceId', 'sessionRef', 'revision', 'state'
+  ], ['code']) && value.contract === contextBridgeModel.CONTRACT_VERSION
+    && value.hostInstanceId === runtime.handshake.hostInstanceId
+    && contextPocValidId(value.clientInstanceId)
+    && typeof value.sessionRef === 'string' && CONTEXT_POC_SESSION_REF_RE.test(value.sessionRef)
+    && Number.isSafeInteger(value.revision) && value.revision > 0
+    && ['queued', 'effective', 'rejected'].includes(value.state)
+    && (value.code === undefined || (typeof value.code === 'string'
+      && /^[a-z][a-z0-9-]{0,63}$/.test(value.code)));
+}
+
+function contextPocValidDelivery(value, runtime) {
+  return contextPocExact(value, [
+    'contract', 'clientInstanceId', 'hostInstanceId', 'sessionRef',
+    'openTurn', 'frozenRevision'
+  ]) && value.contract === contextBridgeModel.CONTRACT_VERSION
+    && value.hostInstanceId === runtime.handshake.hostInstanceId
+    && contextPocValidId(value.clientInstanceId)
+    && typeof value.sessionRef === 'string' && CONTEXT_POC_SESSION_REF_RE.test(value.sessionRef)
+    && Number.isSafeInteger(value.openTurn) && value.openTurn > 0
+    && Number.isSafeInteger(value.frozenRevision) && value.frozenRevision > 0;
+}
+
+function contextPocStageResponseValue(value, runtime, envelope) {
+  if (!contextPocExact(value, ['accepted'], ['state', 'eventSeq', 'code', 'ack'])
+      || typeof value.accepted !== 'boolean') return null;
+  if (value.accepted !== true) {
+    return typeof value.code === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(value.code)
+      && value.state === undefined && value.eventSeq === undefined && value.ack === undefined
+      ? value : null;
+  }
+  if (!['effective', 'queued', 'duplicate'].includes(value.state)
+      || !Number.isSafeInteger(value.eventSeq) || value.eventSeq < 0
+      || value.code !== undefined) return null;
+  if (value.state !== 'duplicate') return value.ack === undefined ? value : null;
+  if (!contextPocValidAck(value.ack, runtime)
+      || value.ack.clientInstanceId !== envelope.clientInstanceId
+      || value.ack.hostInstanceId !== envelope.hostInstanceId
+      || value.ack.sessionRef !== envelope.sessionRef
+      || value.ack.revision !== envelope.revision
+      || !['effective', 'queued'].includes(value.ack.state)) return null;
+  return value;
+}
+
+function contextPocEventsValue(value, runtime) {
+  if (!contextPocExact(value, [
+    'contract', 'hostInstanceId', 'oldestEventSeq', 'throughEventSeq',
+    'resyncRequired', 'events'
+  ]) || value.contract !== contextBridgeModel.CONTRACT_VERSION
+      || value.hostInstanceId !== runtime.handshake.hostInstanceId
+      || !Number.isSafeInteger(value.oldestEventSeq) || value.oldestEventSeq < 1
+      || !Number.isSafeInteger(value.throughEventSeq) || value.throughEventSeq < 0
+      || value.throughEventSeq < runtime.cursor
+      || typeof value.resyncRequired !== 'boolean'
+      || !Array.isArray(value.events) || value.events.length > 64) return null;
+  if (value.resyncRequired) return value.events.length === 0 ? value : null;
+  let expected = runtime.cursor + 1;
+  for (const event of value.events) {
+    const keys = isPlainObject(event) ? contextPocEventKeys(event) : null;
+    if (!keys || !CONTEXT_POC_EVENT_TYPES.has(event.type)
+        || !contextPocExact(event, keys)
+        || event.contract !== contextBridgeModel.CONTRACT_VERSION
+        || event.hostInstanceId !== runtime.handshake.hostInstanceId
+        || event.eventSeq !== expected || !contextPocValidId(event.controllerId)) return null;
+    if (event.type === 'ack' && !contextPocValidAck(event.ack, runtime)) return null;
+    if (event.type === 'delivery' && (!contextPocValidDelivery(event.delivery, runtime)
+        || !contextPocExact(event.proof, [
+          'messageSha256', 'sectionSha256', 'boundary'
+        ]) || !/^[a-f0-9]{64}$/.test(event.proof.messageSha256)
+        || !/^[a-f0-9]{64}$/.test(event.proof.sectionSha256)
+        || event.proof.boundary !== 'llm-stream-local')) return null;
+    if (event.type === 'turn-start' && (
+      typeof event.sessionRef !== 'string' || !CONTEXT_POC_SESSION_REF_RE.test(event.sessionRef)
+      || !Number.isSafeInteger(event.turn) || event.turn < 1
+      || !Number.isSafeInteger(event.frozenRevision) || event.frozenRevision < 1
+    )) return null;
+    if (event.type === 'turn-miss' && (
+      typeof event.sessionRef !== 'string' || !CONTEXT_POC_SESSION_REF_RE.test(event.sessionRef)
+      || !Number.isSafeInteger(event.turn) || event.turn < 1
+      || !['context-not-effective', 'session-unavailable'].includes(event.reason)
+    )) return null;
+    if (event.type === 'turn-end' && (
+      typeof event.sessionRef !== 'string' || !CONTEXT_POC_SESSION_REF_RE.test(event.sessionRef)
+      || !Number.isSafeInteger(event.turn) || event.turn < 1
+    )) return null;
+    expected += 1;
+  }
+  const last = value.events.length ? value.events[value.events.length - 1].eventSeq : runtime.cursor;
+  if (value.throughEventSeq < last) return null;
+  return value;
+}
+
+function currentContextPocProject() {
+  const workspace = currentWorkspaceSurface();
+  const workspaceKey = workspace && workspace.current && workspace.current.effectivePath;
+  if (!boundedPath(workspaceKey)) return null;
+  const active = currentWorkbench();
+  const workbenchId = active && typeof active.id === 'string'
+    ? `${active.source === 'user' ? 'user' : 'builtin'}:${crypto.createHash('sha256')
+      .update(active.id).digest('hex').slice(0, 32)}`
+    : null;
+  const workspaceLabel = safeText(
+    workspace.current.label, path.basename(workspaceKey) || '当前工作区', 72
+  );
+  const workbenchLabel = active ? safeText(active.name, '当前工作台', 40) : '默认工作台';
+  return {
+    workspaceKey,
+    relativePath: '.',
+    workbenchId,
+    title: `${workspaceLabel} · ${workbenchLabel}`,
+    projectRevision: null
+  };
+}
+
+function contextPocRuntimeCurrent(runtime) {
+  return Boolean(runtime && contextPocBridgeRuntime === runtime && !runtime.closed
+    && runtime.generation === contextPocBridgeGeneration && backendReady
+    && spawnedByUs && backendState === runtime.backendState
+    && runtime.backendState && runtime.backendState.exited !== true);
+}
+
+function contextPocDisconnect(reason) {
+  const state = contextPocController.state;
+  if (state && typeof state.disconnect === 'function') {
+    try { state.disconnect(reason); } catch (_error) { /* 公开面会统一降级 */ }
+  }
+}
+
+function contextPocSuspend(reason = 'bridge-disconnected') {
+  contextPocController.runtime.availabilityReason = reason;
+  const state = contextPocController.state;
+  if (state && typeof state.suspend === 'function') {
+    try { state.suspend(reason); } catch (_error) { /* 公开面仍按 reason 降级 */ }
+  }
+}
+
+function stopContextPocBridge(reason = 'bridge-disconnected') {
+  contextPocBridgeGeneration += 1;
+  const runtime = contextPocBridgeRuntime;
+  contextPocBridgeRuntime = null;
+  if (runtime) {
+    runtime.closed = true;
+    if (runtime.timer) clearTimeout(runtime.timer);
+    runtime.timer = null;
+    for (const resolve of runtime.waiters || []) resolve(false);
+    runtime.waiters = [];
+  }
+  if (contextPocController.enabled === true && contextPocController.runtime) {
+    contextPocController.runtime.bridgeMounted = false;
+    contextPocController.runtime.handshake = null;
+    contextPocSuspend(reason);
+  }
+}
+
+async function contextPocSendEffects(runtime, effects) {
+  for (const effect of effects || []) {
+    if (!contextPocRuntimeCurrent(runtime)) return false;
+    if (!effect || effect.type !== 'context-stage'
+        || !isPlainObject(effect.envelope) || !runtime.binding) {
+      throw new Error('context POC stage effect invalid');
+    }
+    const rawResponse = await runtime.transport.call('context/stage', {
+      controllerId: runtime.binding.controllerId,
+      pageInstanceId: runtime.binding.pageInstanceId,
+      selectionRevision: runtime.binding.selectionRevision,
+      envelope: effect.envelope
+    });
+    if (!contextPocRuntimeCurrent(runtime)) return false;
+    const response = contextPocStageResponseValue(rawResponse, runtime, effect.envelope);
+    if (!response || response.accepted !== true) {
+      const reason = response
+        && ['context-invalid', 'revision-conflict', 'session-unavailable', 'host-rejected']
+          .includes(response.code) ? response.code : 'host-rejected';
+      contextPocSuspend(reason);
+      throw new Error('context POC stage rejected');
+    }
+    // 传输重试的 duplicate 不再污染全局 journal，但必须附带
+    // 与本次 envelope 完全同源的 ACK，使状态机能恢复 effective/queued。
+    if (response.state === 'duplicate') {
+      const acknowledged = contextPocController.state.ack(response.ack);
+      if (!acknowledged || ['rejected', 'degraded'].includes(acknowledged.kind)) {
+        throw new Error('context POC duplicate ACK rejected');
+      }
+    }
+  }
+  return contextPocRuntimeCurrent(runtime);
+}
+
+async function contextPocApplyEvent(runtime, event) {
+  // 全局游标必须消费其他 controller 的事件，但绝不把它们喂给本 controller 状态机。
+  if (event.controllerId !== contextPocController.controllerId) return;
+  const state = contextPocController.state;
+  if (!state) return;
+  let result = null;
+  let sessionRef = null;
+  if (event.type === 'ack' && event.ack) {
+    sessionRef = event.ack.sessionRef;
+    result = state.ack(event.ack);
+    if (result && ['rejected', 'degraded'].includes(result.kind)) {
+      throw new Error('context POC ACK state mismatch');
+    }
+  } else if (event.type === 'turn-start') {
+    sessionRef = event.sessionRef;
+    result = state.observeHostTurnStart({
+      sessionRef,
+      turn: event.turn,
+      frozenRevision: event.frozenRevision
+    });
+    if (!result || !['turn-started', 'noop'].includes(result.kind)) {
+      throw new Error('context POC turn start state mismatch');
+    }
+    const frozen = state.snapshot(sessionRef).session;
+    if (!frozen || frozen.openTurn !== event.turn
+        || frozen.frozenRevision !== event.frozenRevision) {
+      throw new Error('context POC frozen revision mismatch');
+    }
+  } else if (event.type === 'turn-miss') {
+    sessionRef = event.sessionRef;
+    result = state.observeTurnMiss({
+      sessionRef,
+      turn: event.turn,
+      reason: event.reason
+    });
+    if (contextPocShouldRememberTurnMiss(
+      result,
+      sessionRef,
+      runtime.binding && runtime.binding.sessionRef,
+      runtime.selectionState
+    )) {
+      contextPocRememberTurnMiss(contextPocController, {
+        sessionRef,
+        turn: event.turn,
+        reason: event.reason
+      });
+      log.line('context', `原生 turn 未注入工作台上下文：${event.reason}`);
+    } else if (!result || result.kind !== 'ignored-stale') {
+      throw new Error('context POC turn miss state mismatch');
+    }
+  } else if (event.type === 'delivery' && event.delivery) {
+    sessionRef = event.delivery.sessionRef;
+    result = state.observeDelivery(event.delivery);
+    if (result && ['rejected', 'degraded'].includes(result.kind)) {
+      throw new Error('context POC delivery state mismatch');
+    }
+    if (result && ['delivered', 'noop'].includes(result.kind)
+        && contextPocClearTurnMiss(
+          contextPocController,
+          event.delivery.sessionRef,
+          event.delivery.openTurn
+        )) log.line('context', '后续原生 turn 已取得上下文 delivery proof');
+  } else if (event.type === 'turn-end') {
+    sessionRef = event.sessionRef;
+    result = state.observeTurnEnd({ sessionRef, turn: event.turn });
+    if (!result || !['turn-ended', 'noop'].includes(result.kind)) {
+      throw new Error('context POC turn end state mismatch');
+    }
+  }
+  // 已退役 session 的尾部事件仍要按序消费，才能验证 turn/ACK；但它
+  // 产生的后续 stage 不能借用当前新 binding 发往另一会话。
+  const currentEffects = contextPocCurrentEffects(
+    result,
+    sessionRef,
+    contextPocController.runtime.currentSessionRef,
+    runtime.selectionState
+  );
+  if (currentEffects.length) {
+    await contextPocSendEffects(runtime, currentEffects);
+  }
+}
+
+function scheduleContextPocTick(runtime, delayMs = 350) {
+  if (!contextPocRuntimeCurrent(runtime)) return;
+  if (runtime.timer) clearTimeout(runtime.timer);
+  runtime.timer = setTimeout(() => {
+    runtime.timer = null;
+    void contextPocTick(runtime);
+  }, delayMs);
+  if (runtime.timer && typeof runtime.timer.unref === 'function') runtime.timer.unref();
+}
+
+async function contextPocDrainEventPages(runtime, hooks = {}) {
+  const isCurrent = hooks.isCurrent || contextPocRuntimeCurrent;
+  const parse = hooks.parse || contextPocEventsValue;
+  const applyEvent = hooks.applyEvent || contextPocApplyEvent;
+  const onCursor = hooks.onCursor || ((eventSeq) => {
+    contextPocController.runtime.eventHostInstanceId = runtime.handshake.hostInstanceId;
+    contextPocController.runtime.eventCursor = eventSeq;
+  });
+  const maxPages = hooks.maxPages === undefined ? 8 : hooks.maxPages;
+  if (!Number.isSafeInteger(maxPages) || maxPages < 1 || maxPages > 8) {
+    throw new Error('context POC event page limit invalid');
+  }
+  let changed = false;
+  for (let page = 0; page < maxPages; page += 1) {
+    const rawEvents = await runtime.transport.call('events/read', {
+      contract: contextBridgeModel.CONTRACT_VERSION,
+      hostInstanceId: runtime.handshake.hostInstanceId,
+      afterEventSeq: runtime.cursor
+    });
+    if (!isCurrent(runtime)) return { caughtUp: false, changed };
+    const batch = parse(rawEvents, runtime);
+    if (!batch) throw new Error('context POC event cursor invalid');
+    if (batch.resyncRequired) {
+      const gap = new Error('context POC event journal gap');
+      gap.code = 'ERR_CONTEXT_POC_EVENT_GAP';
+      throw gap;
+    }
+    if (batch.events.length === 0 && runtime.cursor < batch.throughEventSeq) {
+      throw new Error('context POC event page made no progress');
+    }
+    for (const event of batch.events) {
+      await applyEvent(runtime, event);
+      // apply 可能等待 stage RPC；等待期间 backend/Host 代际可能已经轮换。
+      // 旧代只能放弃本页，绝不能把自己的 cursor 写回新代全局状态。
+      if (!isCurrent(runtime)) return { caughtUp: false, changed };
+      runtime.cursor = event.eventSeq;
+      onCursor(runtime.cursor);
+      changed = true;
+    }
+    if (runtime.cursor === batch.throughEventSeq) return { caughtUp: true, changed };
+    if (runtime.cursor > batch.throughEventSeq) {
+      throw new Error('context POC event cursor advanced beyond host');
+    }
+  }
+  return { caughtUp: false, changed };
+}
+
+async function wakeContextPocBridge() {
+  let runtime = contextPocBridgeRuntime;
+  while (contextPocRuntimeCurrent(runtime) && runtime.busy) {
+    await new Promise((resolve) => runtime.waiters.push(resolve));
+    runtime = contextPocBridgeRuntime;
+  }
+  if (!contextPocRuntimeCurrent(runtime)) return false;
+  if (runtime.timer) clearTimeout(runtime.timer);
+  runtime.timer = null;
+  await contextPocTick(runtime);
+  return contextPocRuntimeCurrent(runtime);
+}
+
+async function contextPocTick(runtime) {
+  if (!contextPocRuntimeCurrent(runtime) || runtime.busy) return;
+  runtime.busy = true;
+  let changed = false;
+  try {
+    const rawBinding = await runtime.transport.call('selection/resolve', {
+      contract: contextBridgeModel.CONTRACT_VERSION,
+      controllerId: contextPocController.controllerId
+    });
+    if (!contextPocRuntimeCurrent(runtime)) return;
+    const binding = contextPocBindingValue(rawBinding, runtime);
+    if (!binding) throw new Error('context POC selection response invalid');
+    const selectionFence = binding.state === 'selected' ? null : binding;
+    if (selectionFence) runtime.selectionState = selectionFence.state;
+    if (!selectionFence) {
+      const connection = contextPocController.state.snapshot().connection;
+      if (connection.state !== 'ready') {
+        const reconnected = contextPocController.state.connect(runtime.handshake);
+        if (reconnected.snapshot.connection.state !== 'ready') {
+          throw new Error('context POC state refused recovered selection');
+        }
+        runtime.resumeEffects.push(...reconnected.effects);
+        changed = true;
+      }
+      const bindingChanged = !runtime.binding
+        || runtime.binding.sessionRef !== binding.sessionRef
+        || runtime.binding.pageInstanceId !== binding.pageInstanceId
+        || runtime.binding.selectionRevision !== binding.selectionRevision;
+      if (bindingChanged) {
+        const retired = contextPocController.runtime.currentSessionRef;
+        if (retired && retired !== binding.sessionRef) {
+          contextPocController.runtime.retiredSessionRefs.add(retired);
+        }
+        runtime.binding = binding;
+        contextPocController.runtime.currentSessionRef = binding.sessionRef;
+        changed = true;
+      }
+      runtime.selectionState = 'selected';
+    }
+
+    // Host journal 是权威时序：必须先重放已发生的 ACK/turn，
+    // 再根据最新工作台 stage。反过来会用 rev2 覆盖 rev1 的 turn fence。
+    const drained = await contextPocDrainEventPages(runtime);
+    if (!contextPocRuntimeCurrent(runtime)) return;
+    if (drained.changed) changed = true;
+    if (!drained.caughtUp) {
+      if (changed) pushShellState();
+      // 单轮最多读取有限页；尚未追平时必须主动续跑。这里先挂下一拍，
+      // 当前 finally 会在计时器回调前释放 busy，避免大 journal 永久停在中途。
+      scheduleContextPocTick(runtime, 0);
+      return;
+    }
+
+    if (selectionFence) {
+      if (selectionFence.state === 'none') {
+        contextPocController.runtime.availabilityReason = null;
+        if (runtime.binding || contextPocController.runtime.currentSessionRef) changed = true;
+        const retired = contextPocController.runtime.currentSessionRef;
+        if (retired) contextPocController.runtime.retiredSessionRefs.add(retired);
+        runtime.binding = null;
+        runtime.selectionState = 'none';
+        contextPocController.runtime.currentSessionRef = null;
+      } else {
+        runtime.selectionState = selectionFence.state;
+        contextPocController.runtime.availabilityReason = 'session-unavailable';
+        changed = true;
+      }
+    } else {
+      // 选择已验证且 Host journal 已追平，到这里才允许恢复绿色公开态。
+      contextPocController.runtime.availabilityReason = null;
+      const resumeEffects = runtime.resumeEffects.filter((effect) => (
+        effect && effect.envelope && effect.envelope.sessionRef === binding.sessionRef
+      ));
+      runtime.resumeEffects = [];
+      if (!await contextPocSendEffects(runtime, resumeEffects)) return;
+      if (!contextPocRuntimeCurrent(runtime)) return;
+
+      const project = currentContextPocProject();
+      if (project) {
+        const staged = contextPocController.state.stage({
+          sessionRef: binding.sessionRef,
+          project
+        });
+        if (staged.kind !== 'noop') {
+          changed = true;
+          // 本地先投影 queued/syncing，绝不在 RPC 等待期继续显示旧 effective。
+          pushShellState();
+        }
+        if (!await contextPocSendEffects(runtime, staged.effects)) return;
+        if (!contextPocRuntimeCurrent(runtime)) return;
+      }
+    }
+    for (const retired of [...contextPocController.runtime.retiredSessionRefs]) {
+      if (contextPocReleaseRetiredSession(retired)) {
+        contextPocController.runtime.retiredSessionRefs.delete(retired);
+        changed = true;
+      }
+    }
+    if (changed) pushShellState();
+  } catch (error) {
+    if (contextPocRuntimeCurrent(runtime)) {
+      if (error && error.code === 'ERR_CONTEXT_POC_EVENT_GAP') {
+        // 同一 Host 的有序 journal 已无法完整回放；原样从 0 重连只会
+        // 永久循环。本 backend 代直接 terminal degrade，原生聊天仍正常。
+        contextPocDisconnect('bridge-degraded');
+        contextPocController.runtime.availabilityReason = 'bridge-degraded';
+        runtime.closed = true;
+        runtime.terminal = true;
+        log.line('context', '上下文桥事件缺口，本后端代已 fail-closed');
+        pushShellState();
+      } else {
+        contextPocSuspend('bridge-disconnected');
+        contextPocController.runtime.handshake = null;
+        pushShellState();
+        runtime.closed = true;
+        contextPocBridgeRuntime = null;
+        const state = runtime.backendState;
+        const generation = ++contextPocBridgeGeneration;
+        const timer = setTimeout(() => {
+          if (!quitting && generation === contextPocBridgeGeneration
+              && backendReady && spawnedByUs && backendState === state && !state.exited) {
+            void startContextPocBridge(state);
+          }
+        }, 1000);
+        if (timer && typeof timer.unref === 'function') timer.unref();
+      }
+    }
+    return;
+  } finally {
+    runtime.busy = false;
+    for (const resolve of runtime.waiters.splice(0)) resolve(contextPocRuntimeCurrent(runtime));
+  }
+  scheduleContextPocTick(runtime);
+}
+
+async function startContextPocBridge(state) {
+  stopContextPocBridge('bridge-disconnected');
+  if (contextPocController.enabled !== true || !state || state.exited === true
+      || state.contextBridgeMounted !== true || backendState !== state
+      || spawnedByUs !== true || backendReady !== true) return false;
+  contextPocController.runtime.bridgeMounted = true;
+  const generation = ++contextPocBridgeGeneration;
+  try {
+    const transport = backend.createContextBridgeTransport(state);
+    const rawHandshake = await transport({
+      type: 'handshake', protocol: contextBridgeModel.CONTRACT_VERSION
+    });
+    if (generation !== contextPocBridgeGeneration || backendState !== state || state.exited) return false;
+    const handshake = contextPocHandshakeValue(rawHandshake);
+    if (!handshake) throw new Error('context POC handshake invalid');
+    const eligibility = backend.contextBridgeEligibility({
+      enabled: true,
+      spawnedByUs: true,
+      packageVersionProof: state.packageVersionProof,
+      bridgeMounted: true,
+      handshake: true
+    });
+    if (!eligibility.eligible) throw new Error('context POC eligibility changed');
+    const { connected } = contextPocConnectHost(contextPocController, handshake);
+    const runtime = {
+      generation,
+      backendState: state,
+      transport,
+      handshake,
+      binding: null,
+      selectionState: 'none',
+      cursor: contextPocController.runtime.eventCursor,
+      resumeEffects: [...connected.effects],
+      busy: false,
+      closed: false,
+      terminal: false,
+      timer: null,
+      waiters: []
+    };
+    contextPocBridgeRuntime = runtime;
+    contextPocController.runtime.handshake = handshake;
+    pushShellState();
+    void contextPocTick(runtime);
+    return true;
+  } catch (_error) {
+    if (generation === contextPocBridgeGeneration) {
+      contextPocController.runtime.handshake = null;
+      contextPocSuspend('bridge-unavailable');
+      pushShellState();
+      const retryTimer = setTimeout(() => {
+        if (!quitting && generation === contextPocBridgeGeneration
+            && backendReady && spawnedByUs && backendState === state && !state.exited) {
+          void startContextPocBridge(state);
+        }
+      }, 1000);
+      if (retryTimer && typeof retryTimer.unref === 'function') retryTimer.unref();
+    }
+    return false;
+  }
+}
+
 function budgetIsPaused() {
   const snapshot = canonicalEventSnapshot();
   return Boolean(snapshot && snapshot.budget && snapshot.budget.paused === true);
@@ -5258,6 +6081,9 @@ async function closeEventTransport(monitor, options = {}) {
 }
 
 async function stopEventLayer(reason, options = {}) {
+  if (options.disconnect !== false && options.disconnectContext !== false) {
+    stopContextPocBridge('bridge-disconnected');
+  }
   const monitor = eventMonitor;
   if (!monitor) return;
   eventMonitor = null;
@@ -5408,7 +6234,12 @@ async function bootstrapEventLayer(monitor) {
 }
 
 async function activateEventLayerForBackend(identity, options = {}) {
-  await stopEventLayer('切换后端连接代', { disconnect: true });
+  // 只旋转事件旁路；同一 backend 的 WS 波动不得撕掉独立的
+  // context turn fence。backend 切换/退出等外层路径仍会显式一起停止。
+  await stopEventLayer('切换后端连接代', {
+    disconnect: true,
+    disconnectContext: false
+  });
   if (!eventService || quitting || !backendReady) return;
   const generation = ++eventBackendGeneration;
   const serviceGeneration = await eventService.beginConnection(generation);
@@ -5485,14 +6316,26 @@ async function activateEventLayerForBackend(identity, options = {}) {
 }
 
 async function launchEventLayer(identity, options = {}) {
+  let eventReady = false;
   try {
     await activateEventLayerForBackend(identity, options);
-    return Boolean(eventMonitor && eventMonitor.established
+    eventReady = Boolean(eventMonitor && eventMonitor.established
       && eventLayerCurrent(eventMonitor) && identityStillCurrent(identity));
   } catch (error) {
     log.line('events', `事件层启动异常，主 Harness 继续可用：${error && error.code || 'unknown'}`);
-    return false;
   }
+  // activate 内部会先 rotate 旧事件代；context 必须在它之后启动，
+  // 否则刚完成的 handshake 会被 stopEventLayer 立即断开。
+  if (identity && identity.spawnedByUs === true && identity.state
+      && identity.state.contextBridgeMounted === true && identityStillCurrent(identity)) {
+    if (!contextPocBridgeRuntime || contextPocBridgeRuntime.backendState !== identity.state) {
+      void startContextPocBridge(identity.state);
+    }
+  } else if (contextPocController.enabled === true) {
+    stopContextPocBridge(identity && identity.spawnedByUs === false
+      ? 'external-unproven' : 'bridge-unavailable');
+  }
+  return eventReady;
 }
 
 async function handleEventTransportClosed(monitor, error) {
@@ -5714,7 +6557,12 @@ async function handleEventEffects(value, monitor) {
 async function onReady() {
   backend.setRuntimeInfo({
     execPath: process.execPath,
-    resourcesPath: process.resourcesPath
+    resourcesPath: process.resourcesPath,
+    userDataPath: app.getPath('userData'),
+    contextPocAssetRoot: app.isPackaged
+      ? path.join(process.resourcesPath, 'context-poc')
+      : path.join(__dirname, 'context-poc'),
+    contextPocEnabled: contextPocController.enabled
   });
   await initializeWorkspaceConfig();
   log.init(path.join(app.getPath('userData'), 'logs'));
@@ -6045,8 +6893,10 @@ async function reconcileDshConfig() {
 function reloadMainWindowAfterRecovery() {
   const win = mainWindow;
   if (!win || win.isDestroyed() || !dshView || dshView.webContents.isDestroyed()) return;
-  void dshView.webContents.loadURL(baseUrl()).catch((e) => {
-    log.line('app', '后台恢复后重载界面失败: ' + (e && e.message || e));
+  void reloadHarnessView().then((loaded) => {
+    // Electron 导航异常可能把完整 URL（含 fragment capability）放进 message。
+    // 持久日志只记录固定脱敏文案，绝不拼接异常对象。
+    if (!loaded) log.line('app', '后台恢复后重载界面失败（详情已脱敏）');
   });
 }
 
@@ -6353,7 +7203,7 @@ function openMainWindow() {
   const tryLoad = () => {
     if (quitting || win.isDestroyed() || view.webContents.isDestroyed()) return;
     retryTimer = null;
-    void view.webContents.loadURL(baseUrl()).catch(() => { /* did-fail-load 里处理 */ });
+    void view.webContents.loadURL(harnessViewUrl()).catch(() => { /* did-fail-load 里处理 */ });
   };
   // 统一统计初次加载、后台恢复重载与用户手动刷新，避免直接 loadURL 时出现“第 0 次”。
   view.webContents.on('did-start-loading', () => { attempts += 1; });
@@ -8908,7 +9758,7 @@ function createAppMenu() {
           label: '刷新界面',
           accelerator: 'CmdOrCtrl+R',
           click: () => {
-            if (dshView && !dshView.webContents.isDestroyed()) dshView.webContents.reload();
+            void reloadHarnessView();
           }
         },
         { role: 'toggleDevTools', label: '开发者工具' },
@@ -9099,6 +9949,20 @@ if (MAIN_HELPER_TEST) {
     createContextPocController,
     contextPocShellSurface,
     contextPocShellStateField,
+    contextPocHarnessUrl,
+    contextPocReloadOrigin,
+    reloadHarnessView,
+    contextPocHandshakeValue,
+    contextPocBindingValue,
+    contextPocEventsValue,
+    contextPocStageResponseValue,
+    contextPocCurrentEffects,
+    contextPocRememberTurnMiss,
+    contextPocClearTurnMiss,
+    contextPocShouldRememberTurnMiss,
+    contextPocConnectHost,
+    contextPocReleaseRetiredSession,
+    contextPocDrainEventPages,
     shouldInitializeRemoteSecureState,
     deliveryWorkspaceFacts,
     applyHotkeyBindings,

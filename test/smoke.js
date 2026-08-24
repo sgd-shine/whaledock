@@ -1017,7 +1017,10 @@ async function main() {
     ['main-v10-switch-feedback-smoke.js', '切换反馈、陈旧 attach 与启动降级'],
     ['context-bridge-smoke.js', '上下文 revision、turn freeze 与 delivery 证据合同'],
     ['backend-context-bridge-smoke.js', 'managed dsh 资格门与假 transport 收口'],
-    ['main-v10-context-smoke.js', '默认关闭的主进程脱敏状态薄层']
+    ['backend-context-poc-assets-smoke.js', '隔离资产、命令装饰与真实 transport'],
+    ['context-poc-plugin-smoke.js', 'rc.2 Host/Client 静态插件与 delivery 合同'],
+    ['main-v10-context-smoke.js', '默认关闭的主进程脱敏状态薄层'],
+    ['main-v10-context-p0b-smoke.js', '主进程 opaque selection、事件游标与工作区 stage']
   ]) {
     const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
       cwd: path.join(__dirname, '..'),

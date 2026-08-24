@@ -1,0 +1,3 @@
+- insert:
+    - id: whaledock-context-bridge-poc
+      name: '@whaledock/context-bridge-poc'

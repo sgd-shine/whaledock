@@ -75,6 +75,16 @@
     ],
     "extraResources": [
       {
+        "from": "context-poc",
+        "to": "context-poc",
+        "filter": [
+          "context-bridge.patch.yml",
+          "plugin/package.json",
+          "plugin/lib/index.js",
+          "plugin/lib/client.js"
+        ]
+      },
+      {
         "from": "assets/ocr",
         "to": "ocr",
         "filter": [

@@ -56,6 +56,18 @@ function ack(sessionRef, revision, state, overrides = {}) {
   };
 }
 
+function delivery(sessionRef, openTurn, frozenRevision, overrides = {}) {
+  return {
+    contract: bridge.CONTRACT_VERSION,
+    clientInstanceId: CLIENT,
+    hostInstanceId: HOST,
+    sessionRef,
+    openTurn,
+    frozenRevision,
+    ...overrides
+  };
+}
+
 async function run() {
   await check('公开导出与环境门有限且只接受精确 1', async () => {
     assert.equal(bridge.CONTRACT_VERSION, 'whaledock.context-bridge/v1');
@@ -130,6 +142,8 @@ async function run() {
       project({ relativePath: '../秘密.md' }),
       project({ relativePath: '/tmp/秘密.md' }),
       project({ relativePath: '02_脚本/../秘密.md' }),
+      project({ relativePath: 'C:private' }),
+      project({ relativePath: 'file:/tmp/秘密.md' }),
       project({ title: '坏\u0000标题' }),
       project({ title: '字'.repeat(bridge.LIMITS.maxTitleChars + 1) }),
       project({ projectRevision: 'not-a-hash' }),
@@ -255,9 +269,37 @@ async function run() {
       }),
       (error) => error && error.code === 'ERR_CONTEXT_BRIDGE_CONTRACT'
     );
+    const firstSession = `session-${'0'.repeat(64)}`;
+    const released = state.releaseSession({ sessionRef: firstSession });
+    assert.equal(released.kind, 'released');
+    assert.equal(released.snapshot.sessionCount, bridge.LIMITS.maxSessions - 1);
+    const replacement = state.stage({
+      sessionRef: `session-${bridge.LIMITS.maxSessions.toString(16).padStart(64, '0')}`,
+      project: project({ relativePath: '02_脚本/replacement.md' })
+    });
+    assert.equal(replacement.kind, 'queued');
+    assert.equal(replacement.snapshot.sessionCount, bridge.LIMITS.maxSessions);
     state.disconnect('bridge-disconnected');
     const replayed = state.connect(handshake('host-instance-0002'));
     assert.equal(replayed.effects.length, bridge.LIMITS.maxSessions);
+  });
+
+  await check('turn-miss 只降级命中的 session，退役 session 不会永久耗尽容量', async () => {
+    const state = bridge.createContextBridgeState({ enabled: true, clientInstanceId: CLIENT });
+    state.connect(handshake());
+    state.stage({ sessionRef: SESSION_A, project: project() });
+    state.ack(ack(SESSION_A, 1, 'effective'));
+    const missed = state.observeTurnMiss({
+      sessionRef: SESSION_A,
+      turn: 1,
+      reason: 'context-not-effective'
+    });
+    assert.equal(missed.kind, 'turn-missed');
+    assert.equal(missed.snapshot.connection.state, 'ready');
+    assert.equal(missed.snapshot.session.lastError, 'context-not-effective');
+    assert.equal(state.observeTurnStart({ sessionRef: SESSION_A, turn: 1 }).kind, 'ignored-stale');
+    assert.equal(state.releaseSession({ sessionRef: SESSION_A }).kind, 'released');
+    assert.equal(state.snapshot().sessionCount, 0);
   });
 
   await check('turn freeze 阻止中途 effect，多次切换在 turn end 合并为最新项', async () => {
@@ -393,6 +435,26 @@ async function run() {
     assert.equal(blocked.kind, 'blocked');
     assert.equal(blocked.reason, 'context-not-effective');
     assert.equal(blocked.snapshot.session.openTurn, null);
+
+    const raced = bridge.createContextBridgeState({ enabled: true, clientInstanceId: CLIENT });
+    raced.connect(handshake());
+    raced.stage({ sessionRef: SESSION_A, project: project() });
+    raced.ack(ack(SESSION_A, 1, 'effective'));
+    const hostStarted = raced.observeHostTurnStart({
+      sessionRef: SESSION_A,
+      turn: 8,
+      frozenRevision: 1
+    });
+    assert.equal(hostStarted.kind, 'turn-started');
+    assert.equal(hostStarted.snapshot.session.frozenRevision, 1);
+    raced.stage({
+      sessionRef: SESSION_A,
+      project: project({ relativePath: '02_脚本/raced.md', title: '竞态更新' })
+    });
+    const racedEnd = raced.observeTurnEnd({ sessionRef: SESSION_A, turn: 8 });
+    assert.equal(racedEnd.effects[0].envelope.revision, 2,
+      'Host 已冻结旧 effective 时，新 desired 必须留到 turn-end');
+
     state.ack(ack(SESSION_A, 2, 'effective'));
     const started = state.observeTurnStart({ sessionRef: SESSION_A, turn: 8 });
     assert.equal(started.kind, 'turn-started');
@@ -575,6 +637,47 @@ async function run() {
     assert.equal(ended.effects[0].envelope.revision, 2);
     assert.equal(ended.snapshot.session.turnFenceLost, false);
     assert.equal(ended.snapshot.session.lastError, null);
+  });
+
+  await check('同 Host 可恢复暂停保留 open turn，turn-end 重放可幂等重试 effect', async () => {
+    const state = bridge.createContextBridgeState({ enabled: true, clientInstanceId: CLIENT });
+    const host = handshake('host-instance-suspend1');
+    state.connect(host);
+    const first = state.stage({ sessionRef: SESSION_A, project: project() });
+    state.ack(ack(SESSION_A, first.effects[0].envelope.revision, 'effective', {
+      hostInstanceId: host.hostInstanceId
+    }));
+    state.observeHostTurnStart({ sessionRef: SESSION_A, turn: 11, frozenRevision: 1 });
+    state.stage({
+      sessionRef: SESSION_A,
+      project: project({ relativePath: '02_脚本/suspended-next.md', title: '暂停后下一版' })
+    });
+
+    const suspended = state.suspend('bridge-disconnected');
+    assert.equal(suspended.kind, 'suspended');
+    assert.equal(suspended.snapshot.connection.state, 'disconnected');
+    assert.equal(suspended.snapshot.session.openTurn, 11);
+    assert.equal(suspended.snapshot.session.frozenRevision, 1);
+    assert.equal(suspended.snapshot.session.effectiveRevision, 1);
+    assert.equal(suspended.snapshot.session.turnFenceLost, false);
+    const resumed = state.connect(host);
+    assert.equal(resumed.kind, 'connected');
+    assert.deepEqual(resumed.effects, [], 'open turn 的 pending 必须等 turn-end');
+    const delivered = state.observeDelivery(delivery(SESSION_A, 11, 1, {
+      hostInstanceId: host.hostInstanceId
+    }));
+    assert.equal(delivered.kind, 'delivered');
+    const ended = state.observeTurnEnd({ sessionRef: SESSION_A, turn: 11 });
+    assert.equal(ended.kind, 'turn-ended');
+    assert.equal(ended.effects[0].envelope.revision, 2);
+
+    state.suspend('bridge-disconnected');
+    const resumedAfterFailedEffect = state.connect(host);
+    assert.equal(resumedAfterFailedEffect.effects[0].envelope.revision, 2);
+    const replayedEnd = state.observeTurnEnd({ sessionRef: SESSION_A, turn: 11 });
+    assert.equal(replayedEnd.kind, 'noop');
+    assert.equal(replayedEnd.effects[0].envelope.revision, 2,
+      'cursor 未推进时重放同一 turn-end 必须重新给出未确认 effect');
   });
 
   await check('断线清除旧 host 证明但保留 desired，新实例重放且旧 ACK 无效', async () => {
