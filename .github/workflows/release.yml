@@ -80,12 +80,14 @@ jobs:
 
       - name: Build macOS arm64 DMG and ZIP
         # runtime 已在上一步按 inventory 核验；这里直接打包，避免 predist 再生成一次后绕过核验。
-        run: npx --no-install electron-builder --mac dmg zip --arm64 --publish never
+        run: npx --no-install electron-builder --config electron-builder.v0.9.1.cjs --mac dmg zip --arm64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
       - name: Verify packaged macOS arm64 compliance materials
-        run: node scripts/verify-packaged-compliance.js --search=release --minimum=1
+        run: |
+          node scripts/hotfix-build-config.js --resources=release/.app-archives.noindex/WhaleDock-arm64.app-bundle/Contents/Resources
+          node scripts/verify-packaged-compliance.js --search=release --minimum=1
 
       - name: Verify macOS arm64 app runtime in archive, ZIP, and DMG
         shell: bash
@@ -104,9 +106,11 @@ jobs:
           ditto -x -k "release/WhaleDock-${version}-arm64-mac.zip" "$workdir"
           app="$(find "$workdir" -maxdepth 2 -name '*.app' -print -quit)"
           test -n "$app"
+          node scripts/hotfix-build-config.js --resources="$app/Contents/Resources"
           node scripts/verify-packaged-compliance.js --search="$app/Contents/Resources" --minimum=1
           node scripts/verify-packaged-app-runtime.js --app="$app"
           hdiutil attach "release/WhaleDock-${version}-arm64.dmg" -nobrowse -readonly -mountpoint "$mount_dir"
+          node scripts/hotfix-build-config.js --resources="$mount_dir/WhaleDock.app/Contents/Resources"
           node scripts/verify-packaged-compliance.js --search="$mount_dir/WhaleDock.app/Contents/Resources" --minimum=1
           node scripts/verify-packaged-app-runtime.js --app="$mount_dir/WhaleDock.app"
           hdiutil detach "$mount_dir"
@@ -137,12 +141,14 @@ jobs:
 
       - name: Build macOS x64 DMG and ZIP
         # 同上，确保进入产物的就是刚核验过的 x64 runtime。
-        run: npx --no-install electron-builder --mac dmg zip --x64 --publish never
+        run: npx --no-install electron-builder --config electron-builder.v0.9.1.cjs --mac dmg zip --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
       - name: Verify packaged macOS compliance materials
-        run: node scripts/verify-packaged-compliance.js --search=release --minimum=2
+        run: |
+          node scripts/hotfix-build-config.js --resources=release/.app-archives.noindex/WhaleDock-x64.app-bundle/Contents/Resources
+          node scripts/verify-packaged-compliance.js --search=release --minimum=2
 
       - name: Verify macOS x64 app runtime in archive, ZIP, and DMG
         shell: bash
@@ -161,9 +167,11 @@ jobs:
           ditto -x -k "release/WhaleDock-${version}-x64-mac.zip" "$workdir"
           app="$(find "$workdir" -maxdepth 2 -name '*.app' -print -quit)"
           test -n "$app"
+          node scripts/hotfix-build-config.js --resources="$app/Contents/Resources"
           node scripts/verify-packaged-compliance.js --search="$app/Contents/Resources" --minimum=1
           node scripts/verify-packaged-app-runtime.js --app="$app"
           hdiutil attach "release/WhaleDock-${version}-x64.dmg" -nobrowse -readonly -mountpoint "$mount_dir"
+          node scripts/hotfix-build-config.js --resources="$mount_dir/WhaleDock.app/Contents/Resources"
           node scripts/verify-packaged-compliance.js --search="$mount_dir/WhaleDock.app/Contents/Resources" --minimum=1
           node scripts/verify-packaged-app-runtime.js --app="$mount_dir/WhaleDock.app"
           hdiutil detach "$mount_dir"
@@ -446,12 +454,17 @@ jobs:
 
       - name: Build Windows installer and portable executable
         # runtime 已按 Windows inventory 核验，禁止 predist 重建后绕过材料门。
-        run: npx --no-install electron-builder --win nsis portable --x64 --publish never
+        run: npx --no-install electron-builder --config electron-builder.v0.9.1.cjs --win nsis portable --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
       - name: Verify packaged Windows compliance materials
-        run: node scripts/verify-packaged-compliance.js --search=release --minimum=1
+        shell: pwsh
+        run: |
+          node scripts/hotfix-build-config.js --resources=release/win-unpacked/resources
+          if ($LASTEXITCODE -ne 0) { throw "win-unpacked context-poc exclusion verification failed" }
+          node scripts/verify-packaged-compliance.js --search=release --minimum=1
+          if ($LASTEXITCODE -ne 0) { throw "win-unpacked dsh compliance verification failed" }
 
       - name: Verify Windows app runtime in unpacked, Setup, and portable artifacts
         shell: pwsh
@@ -478,6 +491,8 @@ jobs:
             if ($inner.Count -ne 1) { throw "Expected one app-*.7z in $asset, got $($inner.Count)" }
             & $sevenZip x -y "-o$app" $inner[0].FullName | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "Failed to extract $($inner[0].FullName)" }
+            node scripts/hotfix-build-config.js "--resources=$app/resources"
+            if ($LASTEXITCODE -ne 0) { throw "context-poc exclusion verification failed for $asset" }
             node scripts/verify-packaged-compliance.js "--search=$app/resources" --minimum=1
             if ($LASTEXITCODE -ne 0) { throw "dsh compliance verification failed for $asset" }
             node scripts/verify-packaged-app-runtime.js "--app=$app"
@@ -579,11 +594,11 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
-            ## v0.9.0 更新
+            ## v0.9.1 更新
 
-            - **投递前先看去向**：视频驾驶舱会在发送前显示目标会话与工作区是否匹配；不匹配或无法确认时默认不发送，只有当次显式选择“仍然发”才继续。
-            - **原地任务回执**：项目动作、内容块和灵感拆条的卡片会显示排队、进行中耗时、等待、完成或错误。事件层未接通时只显示“已发出；事件未接通，完成后文件会自动出现”，unknown 不自动重试；目标文件出现后自动刷新并标出“刚更新”。
-            - **工作区去糊**：驾驶舱头部与普通工作台左栏常显当前工作区；首次引导解释“工作台 / 工作区 / 会话”三层关系和默认文件落点。主 dsh 页面仍无 preload 或 DOM 注入。
+            - **工作台切换不再“点了没反应”**：当先前连接的外部 dsh 已离线时，鲸坞会安全复核并退休陈旧连接状态；切换开始、成功、取消或失败都会在左栏给出可见反馈，失败时说明原因。鲸坞仍不会停止外部启动的 dsh。
+            - **安全启动可见降级**：未启用或尚未配置飞书远程能力时，启动不读取系统钥匙串；确需安全存储时先显示启动状态。钥匙串不可用或用户未确认时，只降级远程能力，本地 dsh 与工作台继续启动，并保留可见说明。
+            - **本版不含 v0.10 实验功能**（指可启用的用户功能）：默认关闭的壳侧预备代码仍在，但 `context-poc` 第三方 UI fork 资产未随安装包分发，因此无法启用上下文桥或同屏实验台。
 
             ## macOS 安装
 
@@ -594,8 +609,7 @@ jobs:
             ## 重要平台边界
 
             - 手动启用 dsh SQLite 存储的用户须在升级前备份并保留旧 runtime：`0.1.1-rc.2` 的 opt-in SQLite schema 从 15 升到 17，当前没有迁移路径；鲸坞不会自动迁移、覆盖或清理。默认 JSONL 会话存储不受影响。
-            - 回执只向界面投影 dsh 事件层的匿名最小字段；事件中的会话正文会立即丢弃，不保存、不持久化，也不向 renderer 下发。事件不可用、历史缺口或关联无法证明时会明确降级，不能把 UI 状态当成平台审计或计费凭据。
-            - 受控 loopback 源码流程只证明鲸坞自身 UI/回执/watcher 链，不等于真实 dsh、上游模型或 SGD 人工手感验收；cwd mismatch/unknown、事件断线和外部结果打开仍需人工复核。
+            - 受控源码流程与自动化只证明鲸坞自身链路，不等于真实 dsh、上游模型或 SGD 人工手感验收；v0.9.1 更新后的工作台切换仍需用户亲手确认。
             - 飞书源码与成品自动验证不能代替真实平台验收；本版尚未完成真实企业租户、手机收发与人工绑定验证。
             - Windows x64 构建未签名，且为实验性支持，尚未完成 Windows 真机验证；SmartScreen 拦截时可选择“更多信息 → 仍要运行”。CI 通过不代表 Windows dsh/飞书真机已通过。
             - Intel x64 仅在 Apple Silicon + Rosetta 环境抽查，尚未完成 Intel Mac 真机验证。

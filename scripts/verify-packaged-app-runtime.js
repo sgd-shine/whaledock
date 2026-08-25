@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { HOTFIX_VERSION, verifyHotfixResources } = require('./hotfix-build-config');
 
 const DEFAULT_ROOT = path.resolve(__dirname, '..');
 const SDK_NAME = '@larksuiteoapi/node-sdk';
@@ -402,6 +403,9 @@ function verifyApp(options = {}) {
   const materials = verifyPackagedMaterials({ root, resources: layout.resources });
   const inventory = inventoryContract(readJson(materials.inventoryPath, '成品 inventory'));
   const rootPackage = readJson(path.join(root, 'package.json'), '仓库 package.json');
+  if (rootPackage.version === HOTFIX_VERSION) {
+    verifyHotfixResources(layout.resources);
+  }
   const run = options.spawnSync || spawnSync;
   const result = run(layout.executable, [
     __filename,
