@@ -68,6 +68,26 @@ async function main() {
     const patch = fs.readFileSync(path.join(sourceRoot, 'context-bridge.patch.yml'), 'utf8');
     assert.match(patch, /id: whaledock-context-bridge-poc/);
     assert.match(patch, /name: '@whaledock\/context-bridge-poc'/);
+    const layoutManifest = JSON.parse(fs.readFileSync(
+      path.join(sourceRoot, 'forks', 'ui-layout', 'package.json'), 'utf8'
+    ));
+    const conversationManifest = JSON.parse(fs.readFileSync(
+      path.join(sourceRoot, 'forks', 'ui-conversation', 'package.json'), 'utf8'
+    ));
+    assert.equal(layoutManifest.name, '@deepseek-ai/dsh-client-ui-layout');
+    assert.equal(conversationManifest.name, '@deepseek-ai/dsh-client-ui-conversation');
+    const layoutFork = fs.readFileSync(path.join(
+      sourceRoot, 'forks', 'ui-layout', 'lib', 'client.js'
+    ), 'utf8');
+    assert.match(layoutFork, /data-whaledock-layout/);
+    assert.match(layoutFork, /useWorkspaces/);
+    assert.match(layoutFork, /workspaces\.connectWorkspace\(workspaceId\)/);
+    assert.match(layoutFork, /右侧已有未发送内容/);
+    const conversationFork = fs.readFileSync(path.join(
+      sourceRoot, 'forks', 'ui-conversation', 'lib', 'client.js'
+    ), 'utf8');
+    assert.match(conversationFork, /whaledockContextGate/);
+    assert.match(conversationFork, /工作台上下文尚未准备好/);
   });
 
   await test('Client 静态 bundle 从正式 sessions.list 上报选择并维持同 revision 心跳', async () => {
@@ -95,8 +115,11 @@ async function main() {
       },
       setInterval(fn) { const id = ++timerId; timers.set(id, fn); return id; },
       clearInterval(id) { timers.delete(id); },
+      setTimeout,
+      clearTimeout,
       URLSearchParams,
       AbortController,
+      Date,
       Symbol,
       Object,
       Number,
@@ -113,6 +136,8 @@ async function main() {
     let sessionListener = null;
     let hostListener = null;
     let dispose = null;
+    let gate = null;
+    let gateDisposed = false;
     const connection = {
       isLoopback: true,
       rpc: {
@@ -143,6 +168,13 @@ async function main() {
     };
     plugin.apply({
       get: (name) => (name === 'connection' ? connection : sessions),
+      reflect: {
+        provide(name, value) {
+          assert.equal(name, 'whaledockContextGate');
+          gate = value;
+          return () => { gateDisposed = true; };
+        }
+      },
       effect: (factory) => { dispose = factory(); }
     });
     await Promise.resolve();
@@ -164,13 +196,14 @@ async function main() {
     hostListener();
     await Promise.resolve();
     assert.equal(calls[2].payload.selectionRevision, 2);
-    await Promise.resolve();
-    await Promise.resolve();
+    await new Promise((resolve) => setImmediate(resolve));
     assert.equal(calls[3].payload.selectionRevision, 6);
     assert.equal(storage.get('whaledock.context.selection.controller-12345678'), '6');
     assert.equal(timers.size, 1);
+    assert.equal(typeof gate.beforeSend, 'function');
     dispose();
     assert.equal(timers.size, 0);
+    assert.equal(gateDisposed, true);
   });
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-context-plugin-'));
@@ -256,6 +289,22 @@ async function main() {
       assert.equal(selection.value.state, 'selected');
       assert.match(selection.value.sessionRef, /^session-[a-f0-9]{64}$/);
       const sessionRef = selection.value.sessionRef;
+      const preflight = (overrides = {}) => rpcHandler('context/preflight', {
+        contract: CONTRACT,
+        controllerId: 'controller-12345678',
+        pageInstanceId: 'page-123456789012',
+        selectionRevision: 1,
+        currentSessionId: 'raw-session-a',
+        mode: 'queue',
+        managed: true,
+        selectionToken: SELECTION_TOKEN,
+        ...overrides
+      });
+      assert.deepEqual((await preflight()).value, {
+        ready: false, code: 'context-not-effective'
+      });
+      assert.equal((await preflight({ currentSessionId: 'raw-session-other' })).value.ready, false);
+      assert.equal((await preflight({ selectionToken: 'ef'.repeat(32) })).ok, false);
 
       const resolved = await rpcHandler('selection/resolve', {
         contract: 'whaledock.context-bridge/v1',
@@ -288,6 +337,7 @@ async function main() {
       });
       assert.equal(staged.value.accepted, true);
       assert.equal(staged.value.state, 'effective');
+      assert.deepEqual((await preflight()).value, { ready: true, code: null });
 
       for (const relativePath of [
         '/Users/example/private', '../../private', 'C:/private', 'C:private', 'file:/private'
@@ -308,6 +358,9 @@ async function main() {
 
       const sessionEvent = listeners.get('session/event').handler;
       sessionEvent({ id: 'raw-session-a' }, { type: 'turn/start', data: { turn: 7 } });
+      assert.deepEqual((await preflight({ mode: 'steer' })).value, {
+        ready: true, code: null
+      });
       const contextText = contextProvider.text({ agent: { id: 'raw-session-a' } });
       assert.match(contextText, /contextRevision/);
       assert.match(contextText, /视频项目 A/);

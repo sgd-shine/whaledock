@@ -127,11 +127,19 @@ async function main() {
       assert.equal(fs.statSync(path.join(packageRoot, 'package.json')).isFile(), true);
       assert.equal(fs.statSync(path.join(packageRoot, 'lib', 'index.js')).isFile(), true);
       assert.equal(fs.statSync(path.join(packageRoot, 'lib', 'client.js')).isFile(), true);
+      for (const forkName of ['dsh-client-ui-layout', 'dsh-client-ui-conversation']) {
+        const forkRoot = path.join(
+          first.homePath, 'profiles', 'web', 'node_modules', '@deepseek-ai', forkName
+        );
+        assert.equal(fs.statSync(path.join(forkRoot, 'package.json')).isFile(), true);
+        assert.equal(fs.statSync(path.join(forkRoot, 'LICENSE')).isFile(), true);
+        assert.equal(fs.statSync(path.join(forkRoot, 'lib', 'client.js')).isFile(), true);
+      }
       assert.equal(first.homePath.startsWith(path.resolve(info.userDataPath) + path.sep), true);
       assert.equal(first.homePath.includes(`${path.sep}.dsh${path.sep}`), false);
     });
 
-    await test('命令只在 web 后插 patch，并大小写无关覆盖隔离环境', async () => {
+    await test('web alias 改为 profile 形式再添加 patch，隔离环境大小写无关', async () => {
       const prepared = backend.prepareContextPocAssets(
         backend.contextPocPlan(bundledPlan(), info),
         { randomBytes: (size) => Buffer.alloc(size, 0xab) }
@@ -140,9 +148,8 @@ async function main() {
         ...bundledPlan(),
         env: { ELECTRON_RUN_AS_NODE: '1', dsh_home: '/untrusted', Dsh_Home: '/old' }
       }, prepared);
-      const web = decorated.args.indexOf('web');
-      assert.deepEqual(decorated.args.slice(web, web + 5), [
-        'web', '--patch', prepared.patchPath, '--port', '3080'
+      assert.deepEqual(decorated.args.slice(-7), [
+        '--profile', 'web', '--patch', prepared.patchPath, '--port', '3080', '--no-open'
       ]);
       assert.equal(decorated.env.DSH_HOME, prepared.homePath);
       assert.equal(decorated.env.WHALEDOCK_CONTEXT_BRIDGE_TOKEN, 'ab'.repeat(32));
@@ -151,6 +158,7 @@ async function main() {
       assert.equal(Object.keys(decorated.env).filter((key) => key.toUpperCase() === 'DSH_HOME').length, 1);
       for (const args of [
         ['web', '--patch', '/already', '--port', '3080'],
+        ['--profile', 'web', '--port', '3080'],
         ['web', 'web', '--port', '3080'],
         ['web', '--port', '3080', '--port', '3081'],
         ['--port', '3080'],

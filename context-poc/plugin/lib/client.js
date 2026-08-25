@@ -8,6 +8,8 @@ window.__ModuleLoader__.load({
     const CHANNEL = '/whaledock.context';
     const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
     const TOKEN_RE = /^[a-f0-9]{64}$/;
+    const PREFLIGHT_TIMEOUT_MS = 2500;
+    const PREFLIGHT_RETRY_MS = 120;
     const inject = ['connection', 'sessions'];
 
     function randomId(prefix) {
@@ -62,34 +64,86 @@ window.__ModuleLoader__.load({
         persistRevision();
         Promise.resolve().then(() => publish(true));
       };
-      const publish = (force = false) => {
+      const registerSelection = async (force = false, expectedSessionId) => {
         const snapshot = sessions.list.getSnapshot();
-        if (!snapshot || snapshot.phase === 'pending') return;
+        if (!snapshot || snapshot.phase === 'pending') return null;
         const currentSessionId = snapshot.current ?? null;
-        if (!force && Object.is(lastCurrent, currentSessionId)) return;
+        if (expectedSessionId !== undefined && currentSessionId !== expectedSessionId) return null;
+        if (!force && Object.is(lastCurrent, currentSessionId)) return null;
         if (!Object.is(lastCurrent, currentSessionId)) {
           lastCurrent = currentSessionId;
           selectionRevision += 1;
           persistRevision();
         }
-        void connection.rpc.call(CHANNEL, 'selection/register', {
-          contract: CONTRACT,
-          controllerId,
-          pageInstanceId,
-          selectionRevision,
-          currentSessionId,
-          managed,
-          selectionToken
-        }, abort.signal).then(recoverRevision).catch(() => {
-          // 实验桥断开不得影响 dsh 原生会话与输入。
-        });
+        try {
+          const reply = await connection.rpc.call(CHANNEL, 'selection/register', {
+            contract: CONTRACT,
+            controllerId,
+            pageInstanceId,
+            selectionRevision,
+            currentSessionId,
+            managed,
+            selectionToken
+          }, abort.signal);
+          recoverRevision(reply);
+          return reply;
+        } catch (_error) {
+          return null;
+        }
       };
+
+      const publish = (force = false) => { void registerSelection(force); };
+      const waitForRetry = (signal) => new Promise((resolve) => {
+        if (abort.signal.aborted || signal?.aborted) { resolve(false); return; }
+        let timer = null;
+        const finish = (value) => {
+          if (timer !== null) globalThis.clearTimeout(timer);
+          abort.signal.removeEventListener('abort', onAbort);
+          signal?.removeEventListener('abort', onAbort);
+          resolve(value);
+        };
+        const onAbort = () => finish(false);
+        abort.signal.addEventListener('abort', onAbort, { once: true });
+        signal?.addEventListener('abort', onAbort, { once: true });
+        timer = globalThis.setTimeout(() => finish(true), PREFLIGHT_RETRY_MS);
+      });
+      const gate = Object.freeze({
+        async beforeSend(sessionId, mode, signal) {
+          if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 256
+              || (mode !== 'queue' && mode !== 'steer')) return false;
+          const deadline = Date.now() + PREFLIGHT_TIMEOUT_MS;
+          while (!abort.signal.aborted && !signal?.aborted && Date.now() <= deadline) {
+            const registered = await registerSelection(true, sessionId);
+            const value = registered?.ok === true ? registered.value : null;
+            if (value?.state === 'selected') {
+              try {
+                const reply = await connection.rpc.call(CHANNEL, 'context/preflight', {
+                  contract: CONTRACT,
+                  controllerId,
+                  pageInstanceId,
+                  selectionRevision,
+                  currentSessionId: sessionId,
+                  mode,
+                  managed,
+                  selectionToken
+                }, signal || abort.signal);
+                const result = reply?.ok === true ? reply.value : null;
+                if (result?.ready === true) return true;
+              } catch (_error) { /* 在 2.5s 界内继续等待 main 完成 stage */ }
+            }
+            if (Date.now() >= deadline || !await waitForRetry(signal)) break;
+          }
+          return false;
+        }
+      });
 
       publish();
       const unsubscribeSessions = sessions.list.subscribe(() => publish());
       const unsubscribeHost = connection.hostDescription.subscribe(() => publish(true));
       const heartbeat = globalThis.setInterval(() => publish(true), 5000);
+      const disposeGate = ctx.reflect.provide('whaledockContextGate', gate);
       ctx.effect(() => () => {
+        disposeGate();
         unsubscribeSessions();
         unsubscribeHost();
         globalThis.clearInterval(heartbeat);

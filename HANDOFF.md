@@ -1,18 +1,19 @@
-# HANDOFF.md — WhaleDock v0.10 批次 0/1 交接
+# HANDOFF.md — WhaleDock v0.10 批次 0–2 交接
 
-更新：2026-08-24 · v0.10 批次 0 已修复，批次 1 对精确三栏蓝图判红并停在 HUMAN GATE；v0.9.0 仍是公开稳定版
+更新：2026-08-24 · SGD 已选择方案 B，P1 同屏多项目工作台与发送前闸门已在本地实验分支实现；v0.9.0 仍是公开稳定版
 
-## v0.10 批次 0/1 交接（等待 SGD/Cowork）
+## v0.10 当前交接
 
-- 工作分支：`codex/v010-native-ui-recon`。版本化改动为 `lib/workspaces.js`、`main.js`、`shell.js`、`shell.html`、`settings.html`、`test/workspaces-smoke.js`、`test/main-remote-smoke.js`、`test/main-v10-switch-feedback-smoke.js`、`test/smoke.js`；`package.json` / lockfile 未动，无新运行时依赖。
-- 批次 0 根因：v0.9 attach 的外部 dsh 退出后，事件层只重连、不退休 `backendReady=true / spawnedByUs=false / backendState=null`；重工作台切换被 `ERR_WORKSPACE_EXTERNAL_ATTACH` 立即拒绝。旧 toast 位于 dsh child view 下方，所以用户看不到错误。v0.8 已存在同一缺陷，当前不走 v0.9.1 hotfix。
-- 修复合同：target 先 canonicalize/noop/预算收口，再在 coordinator 同一串行队列内复核 external；只有端口明确关闭且异步身份/端口仍一致才退休 stale attach。只停事件层，不杀未知进程。并发顺序、invalid/noop/budget、退出竞态均有回归。
-- 可见性合同：主窗与设置页在 IPC 前同帧显示进行中，3 秒验收点仍保留，settle 后显示成功/取消/失败终态；经典台 toast 在逻辑 `x=10..122`，不再被从 `x=132` 开始的 dsh view 覆盖。
-- 远程启动合同：远程关闭或没有密文状态时不调用 safeStorage；deferred 与 unavailable 分开，保存及存量清除仍可由用户显式触发；确需钥匙串时先绘制启动页，失败可见且只降级远程能力，关窗退出后不重建服务。
-- 自动证据：`npm run smoke` **620 PASS / 32 个 ALL PASS**；workspaces 35/35、v0.10 10/10、main remote 17/17；语法与 diff check 均通过。最终受控 GUI 在最新 diff 上回读 0.2ms 进行中、18ms 明确终态；外部 fixture 在 App 退出后仍存活，随后才由 owner 精确清理。它不是正式安装版/真实模型/Windows/Intel 证据。
-- 批次 1：dsh rc.2 的文件、事件、prompt、plugin CLI 能力可用；精确三栏布局不可由公开 additive slots 组合。Oil Creator 虽为 MIT 插件，但依赖替换 sidebar + 宿主 DOM compatibility seam，且版本范围不含当前 rc.2。结论是**精确验收红，停止实现**。
-- HUMAN GATE 两案：A）`conversation.view` 降级版，稳定但要切 tab；B）替换 root 的独立 proof-of-contract，可能三栏但违反上游 `DO NOT register root`，维护成本接近局部 fork。未得到 SGD/Cowork 选择前，不创建插件目录、不安装依赖、不改 dsh 锁、不写 `~/.dsh`。
-- 内部证据记录：`docs/验收记录-v0.10-批次0修复与批次1侦察-2026-08-24.md`（已挂 `.git/info/exclude`）。本批无 CI/Release、新包或体积证据，包/runtime 体积记 `N/A`。
+- 工作分支：`codex/v010-native-ui-recon`。开发前的最近可运行 P0B 为 `5e8cfa318c0d7d8fd0a58ea3b2a9254f14fcfe51`；备份分支 `codex/backup-v010-p0b-runnable-20260824`、tag `backup/v010-p0b-runnable-20260824` 与仓库外 bundle 均已验证回读到该 commit。
+- 批次 0 的 stale external attach、可见 toast 与安全 remote 启动修复保持不变；旧批证据见 `docs/验收记录-v0.10-批次0修复与批次1侦察-2026-08-24.md`。
+- P0A/P0B 已提交为 `eb76fbf` / `5e8cfa3`：纯 Node 上下文合同、isolated static Host/Client bridge、opaque selection、turn freeze、delivery proof 和 managed bundled rc.2 限域均通过；外部 dsh 不接管、不停止。
+- P1 方案 B 只在 `WHALEDOCK_CONTEXT_POC=1`、鲸坞自行拉起、精确 bundled `0.1.1-rc.2` 时 shadow 两个 MIT 包：`ui-layout` 与 `ui-conversation`。根生产依赖未扩张，用户 `~/.dsh` 不读取、不写入、不迁移、不清理。
+- 当前体验：默认“内容”态三栏显示原生 workspace 项目库、阶段面板和原生 dsh 对话；“会话”可返回原界面。零会话项目可见，第一次操作才通过官方 `connectWorkspace()` 建立会话；阶段动作只填入原生草稿，不自动发送，已有草稿拒绝覆盖。
+- prompt admission 前新增 `context/preflight`；Client 等待最多 2.5 秒，Host 精确核对 page/controller/capability/revision/session/mode。未 ready 时发送被拦截、草稿保留，不产生伪 project-aware turn。
+- 真实 isolated rc.2 已证明 package shadow：served layout `35,763 B`，SHA-256 与 fork 源码同为 `b942a0020abe8e3e730995c520cf63c87c928a7b339cb78ec749299475e1a542`。受控 GUI 已走完多项目无预绑定、填草稿、拒绝覆盖、preflight 拦截和 960/1024/1280 宽度。
+- 定向回归为 P0B Host/Client `10/10`、资产/启动器 `8/8`、主进程 `12/12`；最终统一 `npm run smoke` 为 `688 PASS / 0 FAIL / 38 个 ALL PASS`，末行 `ALL PASS`。
+- 本批 14 个隔离静态资产合计 `528,834 B`；本机 darwin/arm64 ignored runtime 约 `280 MiB`。没有打包、CI、Release、签名或公证，因此无新包体积或线上链接。
+- 仍需 SGD：真实会话/远端模型、物理键盘与 13 英寸主观手感、多项目连续 queue/steer、原生详情抽屉、会话态返回、拍摄窗往返。Windows、Intel 与正式安装版仍分别 `NEEDS-HUMAN`；本批不推送、不合并、不发布。
 
 ## v0.9.0 已公开发布交接
 

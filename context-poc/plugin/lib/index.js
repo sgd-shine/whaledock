@@ -396,6 +396,39 @@ export function apply(ctx) {
     return ok({ accepted: true, state: 'effective', eventSeq: event?.eventSeq || eventSeq });
   };
 
+  const preflightContext = (payload) => {
+    if (!exact(payload, [
+      'contract', 'controllerId', 'pageInstanceId', 'selectionRevision',
+      'currentSessionId', 'mode', 'managed', 'selectionToken'
+    ]) || payload.contract !== CONTRACT || !validId(payload.controllerId)
+        || !validId(payload.pageInstanceId)
+        || !Number.isSafeInteger(payload.selectionRevision) || payload.selectionRevision < 1
+        || !validRawSession(payload.currentSessionId) || payload.currentSessionId === null
+        || (payload.mode !== 'queue' && payload.mode !== 'steer')
+        || payload.managed !== true
+        || !tokenMatches(payload.selectionToken, selectionToken)) return bad();
+    const selection = controllers.get(payload.controllerId);
+    const resolved = resolveSelectionState(selection);
+    if (!selection || resolved.state !== 'selected'
+        || selection.pageInstanceId !== payload.pageInstanceId
+        || selection.selectionRevision !== payload.selectionRevision
+        || selection.raw !== payload.currentSessionId) {
+      return ok({ ready: false, code: resolved.code || 'session-unavailable' });
+    }
+    const record = recordsByRef.get(selection.sessionRef);
+    if (!record || record.revoked || record.raw !== payload.currentSessionId) {
+      return ok({ ready: false, code: 'session-unavailable' });
+    }
+    // queue 在当前 turn 期间可等待 pending 上下文于 turn/end 生效；
+    // steer 属于当前 turn，必须已经有冻结上下文。
+    const envelope = record.openTurn !== null && payload.mode === 'steer'
+      ? record.frozen
+      : (record.pending || record.effective);
+    return envelope
+      ? ok({ ready: true, code: null })
+      : ok({ ready: false, code: 'context-not-effective' });
+  };
+
   const handler = async (endpoint, payload) => {
     try {
       sweep();
@@ -443,6 +476,7 @@ export function apply(ctx) {
         });
       }
       if (endpoint === 'context/stage') return stageContext(payload);
+      if (endpoint === 'context/preflight') return preflightContext(payload);
       if (endpoint === 'events/read') {
         const value = withAuth(payload, ['contract', 'hostInstanceId', 'afterEventSeq']);
         if (!value || value.contract !== CONTRACT || value.hostInstanceId !== hostInstanceId

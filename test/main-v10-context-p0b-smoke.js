@@ -774,7 +774,17 @@ async function mainTest() {
       'context-bridge.patch.yml',
       'plugin/package.json',
       'plugin/lib/index.js',
-      'plugin/lib/client.js'
+      'plugin/lib/client.js',
+      'forks/ui-layout/package.json',
+      'forks/ui-layout/LICENSE',
+      'forks/ui-layout/lib/index.js',
+      'forks/ui-layout/lib/invariant.js',
+      'forks/ui-layout/lib/client.js',
+      'forks/ui-conversation/package.json',
+      'forks/ui-conversation/LICENSE',
+      'forks/ui-conversation/lib/index.js',
+      'forks/ui-conversation/lib/invariant.js',
+      'forks/ui-conversation/lib/client.js'
     ]);
     assert.deepEqual(pkg.dependencies, {
       '@larksuiteoapi/node-sdk': '1.73.0'
