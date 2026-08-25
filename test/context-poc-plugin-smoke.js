@@ -119,9 +119,18 @@ async function main() {
     assert.match(pluginClient, /data-whaledock-layout/);
     assert.match(pluginClient, /function creatorProjects/);
     assert.match(pluginClient, /archivedSessionIds/);
-    assert.match(pluginClient, /const STAGE_COPY = new Map/);
+    assert.doesNotMatch(pluginClient, /const STAGE_COPY = new Map/);
+    for (const operation of [
+      'catalog.read', 'document.read', 'topic.choose',
+      'project.action.prepare', 'project.action.submit',
+      'receipts.read', 'receipts.ack', 'receipts.open'
+    ]) assert.match(pluginClient, new RegExp(`'${operation.replace('.', '\\.')}'`));
+    assert.match(pluginClient, /contentRef/);
+    assert.match(pluginClient, /这一格还没做/);
     assert.match(pluginClient, /workspaces\.connectWorkspace\(workspaceId\)/);
-    assert.match(pluginClient, /右侧已有未发送内容/);
+    assert.match(pluginClient, /async fillDraft\(sessionId, text, workspaceId, signal\)/,
+      '旧填草稿守门能力保留，但新 UI 不再展示或调用');
+    assert.doesNotMatch(pluginClient, /填入右侧草稿/);
     assert.match(pluginClient, /whaledockContentShell/);
     const conversationFork = fs.readFileSync(path.join(
       sourceRoot, 'forks', 'ui-conversation', 'lib', 'client.js'

@@ -2800,6 +2800,13 @@ function videoToken(kind, epoch, ...parts) {
     .digest('hex').slice(0, 24)}`;
 }
 
+function videoContentRef(epoch, relativePath) {
+  if (!Number.isSafeInteger(epoch) || epoch < 0) throw new Error('内容引用代际无效');
+  const cleanPath = videoCockpit.safeRelativePath(relativePath);
+  if (!cleanPath || cleanPath !== relativePath) throw new Error('内容引用路径无效');
+  return videoToken('content', epoch, cleanPath);
+}
+
 const VIDEO_FILE_BINDING_KEYS = Object.freeze([
   'rootDev', 'rootIno', 'parentDev', 'parentIno', 'fileDev', 'fileIno'
 ]);
@@ -2876,12 +2883,13 @@ function videoProjectActions(item, active) {
   }));
 }
 
-function videoProjectCard(item, projectToken, active) {
+function videoProjectCard(item, projectToken, contentRef, active) {
   const fields = isPlainObject(item.fields) ? item.fields : {};
   const cleanList = (value) => (Array.isArray(value) ? value : [])
     .map((entry) => safeText(entry, '', 80)).filter(Boolean).slice(0, 8);
   return {
     projectToken,
+    contentRef,
     title: safeText(item.title, '未命名项目', 120),
     stage: Object.prototype.hasOwnProperty.call(VIDEO_STAGE_LABELS, item.stage) ? item.stage : null,
     stageLabel: VIDEO_STAGE_LABELS[item.stage] || '未分类',
@@ -2990,12 +2998,13 @@ function refreshVideoWorkspaceSnapshot() {
     const cardByPath = new Map();
     const cards = scanned.items.map((item) => {
       const token = videoToken('project', runtime.epoch, item.relativePath, item.hash);
+      const contentRef = videoContentRef(runtime.epoch, item.relativePath);
       projectTokens.set(token, {
         relativePath: item.relativePath,
         hash: item.hash,
         stage: item.stage
       });
-      const card = videoProjectCard(item, token, active);
+      const card = videoProjectCard(item, token, contentRef, active);
       if (item.stage === 'publish') {
         try {
           const document = videoCockpit.readDocument(runtime.root, item.relativePath);
@@ -3825,12 +3834,35 @@ function videoReceiptWatcher(context, receiptId) {
 }
 
 function rememberDeliveryBinding(deliveryRef, value) {
+  try {
+    const liveReceiptIds = new Set(deliveryReceiptService.snapshot({
+      owner: VIDEO_DELIVERY_OWNER
+    }).receipts.map((receipt) => receipt.receiptId));
+    for (const [key, binding] of deliveryBindings) {
+      if (!binding || !liveReceiptIds.has(binding.receiptId)) deliveryBindings.delete(key);
+    }
+  } catch (_error) { /* 只用于回收旧绑定；快照异常不破坏新回执 */ }
   while (deliveryBindings.size >= 256) {
     const oldest = deliveryBindings.keys().next().value;
     if (oldest === undefined) break;
     deliveryBindings.delete(oldest);
   }
   deliveryBindings.set(deliveryRef, value);
+}
+
+function deliveryBindingProject(receiptId) {
+  if (!deliveryToken(receiptId)) return null;
+  for (const binding of deliveryBindings.values()) {
+    if (binding && binding.receiptId === receiptId
+        && typeof binding.projectRelativePath === 'string'
+        && typeof binding.projectRootIdentityKey === 'string') {
+      return Object.freeze({
+        relativePath: binding.projectRelativePath,
+        rootIdentityKey: binding.projectRootIdentityKey
+      });
+    }
+  }
+  return null;
 }
 
 async function createVideoDeliveryReceipt(prepared, context) {
@@ -3859,6 +3891,10 @@ async function createVideoDeliveryReceipt(prepared, context) {
     deliveryRef: prepared.deliveryRef,
     receiptId: receipt.receiptId,
     admission: null,
+    projectRelativePath: context && typeof context.projectRelativePath === 'string'
+      ? videoCockpit.safeRelativePath(context.projectRelativePath) : null,
+    projectRootIdentityKey: context && typeof context.projectRootIdentityKey === 'string'
+      ? context.projectRootIdentityKey : null,
     watcher: videoReceiptWatcher(context, receipt.receiptId)
   });
   pushShellState();
@@ -4920,7 +4956,7 @@ function videoTargetedActionPrompt(relativePath, actionPrompt) {
 async function submitVideoProjectAction(value) {
   const dispatch = videoProjectDispatchRequest(value);
   const request = dispatch.request;
-  const { record } = readVideoDocumentByToken(request.projectToken);
+  const { runtime, record } = readVideoDocumentByToken(request.projectToken);
   const active = currentWorkbench();
   const allowed = active && active.actions.find((action) => action.id === request.actionId);
   if (!allowed) return { state: 'error', text: '这个动作不属于当前工作台，没有发送。' };
@@ -4939,7 +4975,11 @@ async function submitVideoProjectAction(value) {
     ),
     anchorRef: request.projectToken,
     expectedStage: `${VIDEO_STAGE_LABELS[fileStage] || '文件'}产出`,
-    context: { watchKind: 'files', fileStage }
+    context: {
+      watchKind: 'files', fileStage,
+      projectRelativePath: record.relativePath,
+      projectRootIdentityKey: runtime.rootIdentityKey
+    }
   };
   if (!dispatch.confirmation) {
     log.line('video', `项目动作 ${record.stage || 'unknown'}/${allowed.id} 等待投递预检`);
@@ -5233,7 +5273,11 @@ async function submitVideoBlockAction(value) {
       ),
       anchorRef: request.blockToken,
       expectedStage: '对话回答',
-      context: { watchKind: 'none' }
+      context: {
+        watchKind: 'none',
+        projectRelativePath: document.relativePath,
+        projectRootIdentityKey: runtime.rootIdentityKey
+      }
     };
     return dispatch.confirmation
       ? submitPreparedVideoPrompt(spec, dispatch.confirmation)
@@ -5257,6 +5301,8 @@ async function submitVideoBlockAction(value) {
     expectedStage: '建议副本',
     context: {
       watchKind: 'proposal',
+      projectRelativePath: document.relativePath,
+      projectRootIdentityKey: runtime.rootIdentityKey,
       proposalToken,
       proposalRelativePath: plan.relativePath,
       plan,
@@ -5725,7 +5771,9 @@ const CONTEXT_POC_WORKSPACE_FILE_PENDING_MS = 10000;
 const CONTEXT_POC_WORKSPACE_FILE_EXECUTION_MARGIN_MS = 750;
 const CONTEXT_POC_MAX_WORKSPACE_FILE_READ_BATCH = 4;
 const CONTEXT_POC_WORKSPACE_FILE_OPERATIONS = new Set([
-  'catalog.read', 'document.read', 'topic.choose'
+  'catalog.read', 'document.read', 'topic.choose',
+  'project.action.prepare', 'project.action.submit',
+  'receipts.read', 'receipts.ack', 'receipts.open'
 ]);
 const CONTEXT_POC_WORKSPACE_FILE_REJECT_CODES = new Set([
   'workspace-unavailable', 'workspace-mismatch', 'operation-invalid',
@@ -5861,9 +5909,54 @@ function contextPocWorkspaceFileTopicInput(value) {
   });
 }
 
+function contextPocWorkspaceFileActionPrepareInput(value) {
+  return Object.freeze(videoProjectActionRequest(value));
+}
+
+function contextPocWorkspaceFileActionSubmitInput(value) {
+  if (!contextPocExact(value, [
+    'projectToken', 'actionId', 'preflightToken', 'override'
+  ])) throw new Error('项目动作提交请求无效');
+  const dispatch = videoProjectDispatchRequest(value);
+  if (!dispatch.confirmation) throw new Error('项目动作提交缺少预检');
+  return Object.freeze({
+    ...dispatch.request,
+    preflightToken: dispatch.confirmation.preflightToken,
+    override: dispatch.confirmation.override
+  });
+}
+
+function contextPocWorkspaceFileReceiptsInput(value) {
+  if (!contextPocExact(value, ['projectToken', 'limit'])) {
+    throw new Error('投递回执请求无效');
+  }
+  videoDocumentRequest({ projectToken: value.projectToken });
+  if (!Number.isSafeInteger(value.limit) || value.limit < 1 || value.limit > 6) {
+    throw new Error('投递回执上限无效');
+  }
+  return Object.freeze({ projectToken: value.projectToken, limit: value.limit });
+}
+
+function contextPocWorkspaceWorkflow(value) {
+  if (value && value.publish && value.publish.published === true) {
+    return Object.freeze({ status: 'published', label: '已发布' });
+  }
+  const stage = value && value.stage;
+  if (stage === 'inspiration') return Object.freeze({ status: 'inspiration', label: '灵感' });
+  if (stage === 'topic') return Object.freeze({ status: 'topic', label: '选题' });
+  if (stage === 'script') return Object.freeze({ status: 'script', label: '写稿' });
+  if (stage === 'shoot' || stage === 'edit') {
+    return Object.freeze({ status: 'shoot', label: '拍摄' });
+  }
+  if (stage === 'publish') return Object.freeze({ status: 'unpublished', label: '待发布' });
+  return Object.freeze({ status: 'uncategorized', label: '未分类' });
+}
+
 function contextPocWorkspaceCatalogCard(value) {
   if (!isPlainObject(value) || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)) {
+      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
+      || typeof value.contentRef !== 'string'
+      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)) {
     throw new Error('内容卡投影无效');
   }
   const cleanList = (items) => (Array.isArray(items) ? items : [])
@@ -5874,8 +5967,21 @@ function contextPocWorkspaceCatalogCard(value) {
     aiDisclosure: ['unknown', 'ai', 'not-ai'].includes(value.publish.aiDisclosure)
       ? value.publish.aiDisclosure : 'unknown'
   }) : null;
+  const workflow = contextPocWorkspaceWorkflow({ stage: value.stage, publish });
+  const actions = (Array.isArray(value.actions) ? value.actions : []).slice(0, 4).map((action) => {
+    if (!isPlainObject(action)
+        || typeof action.id !== 'string' || !/^[a-z][a-z0-9_-]{0,63}$/.test(action.id)) {
+      throw new Error('内容卡动作投影无效');
+    }
+    return Object.freeze({
+      id: action.id,
+      label: safeText(action.label, '继续', 32),
+      hint: safeText(action.hint, '', 100)
+    });
+  });
   return Object.freeze({
     projectToken: value.projectToken,
+    contentRef: value.contentRef,
     title: safeText(value.title, '未命名项目', 120),
     stage: Object.prototype.hasOwnProperty.call(VIDEO_STAGE_LABELS, value.stage)
       ? value.stage : null,
@@ -5888,7 +5994,10 @@ function contextPocWorkspaceCatalogCard(value) {
     angleOptions: cleanList(value.angles),
     hookOptions: cleanList(value.hooks),
     canShoot: value.canShoot === true,
-    publish
+    publish,
+    workflowStatus: workflow.status,
+    workflowLabel: workflow.label,
+    actions: Object.freeze(actions)
   });
 }
 
@@ -5965,6 +6074,151 @@ function contextPocWorkspaceMutationResult(value) {
   return Object.freeze({ ...value });
 }
 
+function contextPocWorkspaceSafeMessage(value, fallback) {
+  return safeText(value, fallback, 160);
+}
+
+function contextPocWorkspaceIsoTime(value) {
+  return typeof value === 'string'
+    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
+    && Number.isFinite(Date.parse(value));
+}
+
+function contextPocWorkspaceActionPrepareResult(value) {
+  if (contextPocExact(value, ['state', 'text']) && value.state === 'error') {
+    return Object.freeze({
+      state: 'error',
+      message: contextPocWorkspaceSafeMessage(value.text, '无法完成投递预检。')
+    });
+  }
+  if (!contextPocExact(value, [
+    'kind', 'preflightToken', 'targetLabel', 'workspaceLabel', 'workspaceMatch',
+    'targetRunning', 'eventTracking', 'expiresAt'
+  ]) || value.kind !== 'preflight' || !deliveryToken(value.preflightToken)
+      || !['match', 'mismatch', 'unknown'].includes(value.workspaceMatch)
+      || typeof value.targetRunning !== 'boolean'
+      || !['ready', 'unavailable'].includes(value.eventTracking)
+      || !contextPocWorkspaceIsoTime(value.expiresAt)) {
+    throw new Error('项目动作预检投影无效');
+  }
+  return Object.freeze({
+    kind: 'preflight',
+    preflightToken: value.preflightToken,
+    targetLabel: safeText(value.targetLabel, '目标会话', 96),
+    workspaceLabel: safeText(value.workspaceLabel, '当前工作区', 96),
+    workspaceMatch: value.workspaceMatch,
+    targetRunning: value.targetRunning,
+    eventTracking: value.eventTracking,
+    expiresAt: value.expiresAt
+  });
+}
+
+function contextPocWorkspaceActionSubmitResult(value) {
+  if (contextPocExact(value, ['state', 'text']) && value.state === 'error') {
+    return Object.freeze({
+      state: 'error',
+      message: contextPocWorkspaceSafeMessage(value.text, '投递没有完成。')
+    });
+  }
+  const hasReceipt = isPlainObject(value)
+    && Object.prototype.hasOwnProperty.call(value, 'receiptId');
+  if (!contextPocExact(value, hasReceipt
+    ? ['state', 'reason', 'target', 'receiptId']
+    : ['state', 'reason', 'target'])
+      || !['accepted', 'rejected', 'unknown'].includes(value.state)
+      || typeof value.reason !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(value.reason)
+      || typeof value.target !== 'string'
+      || (hasReceipt && !deliveryToken(value.receiptId))) {
+    throw new Error('项目动作提交投影无效');
+  }
+  return Object.freeze({
+    state: value.state,
+    reason: value.reason,
+    target: safeText(value.target, '目标会话', 96),
+    ...(hasReceipt ? { receiptId: value.receiptId } : {})
+  });
+}
+
+function contextPocWorkspaceReceipt(value) {
+  if (!isPlainObject(value) || !deliveryToken(value.receiptId)
+      || typeof value.targetLabel !== 'string'
+      || !['ready', 'unavailable'].includes(value.tracking)
+      || typeof value.trackingText !== 'string'
+      || typeof value.expectedStage !== 'string'
+      || !deliveryReceipts.DELIVERY_STATES.includes(value.status)
+      || typeof value.statusText !== 'string'
+      || !contextPocWorkspaceIsoTime(value.createdAt)
+      || !contextPocWorkspaceIsoTime(value.updatedAt)
+      || !(value.terminalAt === null
+        || contextPocWorkspaceIsoTime(value.terminalAt))
+      || !Number.isSafeInteger(value.elapsedMs) || value.elapsedMs < 0
+      || !(value.durationMs === null
+        || (Number.isSafeInteger(value.durationMs) && value.durationMs >= 0))
+      || !Number.isSafeInteger(value.resultCount) || value.resultCount < 0
+      || value.resultCount > 100
+      || (value.resultToken !== undefined && !deliveryToken(value.resultToken))
+      || (value.pulseAt !== undefined
+        && !contextPocWorkspaceIsoTime(value.pulseAt))
+      || (value.pulseId !== undefined && !deliveryToken(value.pulseId))
+      || ((value.resultCount === 1) !== (value.resultToken !== undefined))
+      || ((value.pulseAt !== undefined) !== (value.pulseId !== undefined))) {
+    throw new Error('投递回执投影无效');
+  }
+  return Object.freeze({
+    receiptId: value.receiptId,
+    targetLabel: safeText(value.targetLabel, '目标会话', 96),
+    tracking: value.tracking,
+    trackingText: safeText(value.trackingText, '', 96),
+    expectedStage: safeText(value.expectedStage, '', 96),
+    status: value.status,
+    statusText: safeText(value.statusText, '', 160),
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+    terminalAt: value.terminalAt,
+    elapsedMs: value.elapsedMs,
+    durationMs: value.durationMs,
+    resultCount: value.resultCount,
+    ...(value.resultToken === undefined ? {} : { resultToken: value.resultToken }),
+    ...(value.pulseAt === undefined ? {} : { pulseAt: value.pulseAt }),
+    ...(value.pulseId === undefined ? {} : { pulseId: value.pulseId })
+  });
+}
+
+function contextPocWorkspaceReceiptsResult(value) {
+  if (!contextPocExact(value, ['kind', 'projectToken', 'receipts'])
+      || value.kind !== 'receipts'
+      || typeof value.projectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
+      || !Array.isArray(value.receipts) || value.receipts.length > 6) {
+    throw new Error('投递回执列表投影无效');
+  }
+  return Object.freeze({
+    kind: 'receipts',
+    projectToken: value.projectToken,
+    receipts: Object.freeze(value.receipts.map(contextPocWorkspaceReceipt))
+  });
+}
+
+function contextPocWorkspaceReceiptAckResult(value) {
+  if (!contextPocExact(value, ['kind']) || !['ok', 'stale'].includes(value.kind)) {
+    throw new Error('投递回执确认投影无效');
+  }
+  return Object.freeze({ kind: value.kind });
+}
+
+function contextPocWorkspaceReceiptOpenResult(value) {
+  if (contextPocExact(value, ['kind']) && value.kind === 'ok') {
+    return Object.freeze({ kind: 'ok' });
+  }
+  if (contextPocExact(value, ['kind', 'text']) && value.kind === 'error') {
+    return Object.freeze({
+      kind: 'error',
+      message: contextPocWorkspaceSafeMessage(value.text, '无法打开这份结果。')
+    });
+  }
+  throw new Error('投递结果打开投影无效');
+}
+
 function contextPocWorkspaceOperationErrorCode(error) {
   const code = error && error.code;
   if (code === 'ERR_WORKSPACE_UNAVAILABLE') return 'workspace-unavailable';
@@ -6011,6 +6265,23 @@ function contextPocWorkspaceFileOperations(options = {}) {
   const chooseTopic = options.chooseTopic || ((input) => runVideoSceneAction({
     action: 'choose-topic', ...input
   }));
+  const projectAction = options.projectAction || submitVideoProjectAction;
+  const verifyProject = options.verifyProject || readVideoDocumentByToken;
+  const receiptSnapshot = options.receiptSnapshot || (() => (
+    deliveryReceiptService.snapshot({ owner: VIDEO_DELIVERY_OWNER })
+  ));
+  const receiptProjectBinding = options.receiptProjectBinding
+    || deliveryBindingProject;
+  const ackReceipt = options.ackReceipt || ((input) => {
+    const acknowledged = deliveryReceiptService.ackPulse({
+      owner: VIDEO_DELIVERY_OWNER,
+      receiptId: input.receiptId,
+      pulseId: input.pulseId
+    });
+    if (acknowledged) pushShellState();
+    return acknowledged;
+  });
+  const openReceipt = options.openReceipt || openDeliveryResult;
   return Object.freeze({
     'catalog.read': Object.freeze({
       validate: (input) => contextPocWorkspaceFilePageInput(input, 4),
@@ -6084,6 +6355,85 @@ function contextPocWorkspaceFileOperations(options = {}) {
         };
       },
       redact: contextPocWorkspaceMutationResult,
+      errorCode: contextPocWorkspaceOperationErrorCode
+    }),
+    'project.action.prepare': Object.freeze({
+      validate: contextPocWorkspaceFileActionPrepareInput,
+      async handle({ input, context }) {
+        contextPocAssertWorkspaceOperationCurrent(context);
+        return projectAction(input);
+      },
+      redact: contextPocWorkspaceActionPrepareResult,
+      errorCode: contextPocWorkspaceOperationErrorCode
+    }),
+    'project.action.submit': Object.freeze({
+      validate: contextPocWorkspaceFileActionSubmitInput,
+      async handle({ input, context }) {
+        contextPocAssertWorkspaceOperationCurrent(context);
+        return projectAction(input);
+      },
+      redact: contextPocWorkspaceActionSubmitResult,
+      errorCode: contextPocWorkspaceOperationErrorCode
+    }),
+    'receipts.read': Object.freeze({
+      validate: contextPocWorkspaceFileReceiptsInput,
+      async handle({ input, context }) {
+        contextPocAssertWorkspaceOperationCurrent(context);
+        const verified = verifyProject(input.projectToken);
+        if (!verified || !verified.runtime
+            || typeof verified.runtime.rootIdentityKey !== 'string'
+            || !verified.record || typeof verified.record.relativePath !== 'string') {
+          throw new Error('投递回执项目绑定无效');
+        }
+        const projectRelativePath = videoCockpit.safeRelativePath(
+          verified.record.relativePath
+        );
+        const snapshot = receiptSnapshot();
+        if (!contextPocExact(snapshot, ['receipts']) || !Array.isArray(snapshot.receipts)) {
+          throw new Error('投递回执快照无效');
+        }
+        const receipts = [];
+        const related = snapshot.receipts.filter((receipt) => {
+          if (!isPlainObject(receipt)) return false;
+          if (receipt.anchorRef === input.projectToken) return true;
+          const binding = receiptProjectBinding(receipt.receiptId);
+          return isPlainObject(binding)
+            && binding.relativePath === projectRelativePath
+            && binding.rootIdentityKey === verified.runtime.rootIdentityKey;
+        });
+        for (const receipt of related.slice(0, input.limit)) {
+          const candidate = [...receipts, receipt];
+          const projected = contextPocWorkspaceReceiptsResult({
+            kind: 'receipts', projectToken: input.projectToken, receipts: candidate
+          });
+          if (Buffer.byteLength(JSON.stringify(projected), 'utf8') > 5600 && receipts.length) break;
+          receipts.push(receipt);
+        }
+        return {
+          kind: 'receipts',
+          projectToken: input.projectToken,
+          receipts
+        };
+      },
+      redact: contextPocWorkspaceReceiptsResult,
+      errorCode: contextPocWorkspaceOperationErrorCode
+    }),
+    'receipts.ack': Object.freeze({
+      validate: (input) => Object.freeze(deliveryPulseRequest(input)),
+      async handle({ input, context }) {
+        contextPocAssertWorkspaceOperationCurrent(context);
+        return { kind: ackReceipt(input) ? 'ok' : 'stale' };
+      },
+      redact: contextPocWorkspaceReceiptAckResult,
+      errorCode: contextPocWorkspaceOperationErrorCode
+    }),
+    'receipts.open': Object.freeze({
+      validate: (input) => Object.freeze(deliveryResultRequest(input)),
+      async handle({ input, context }) {
+        contextPocAssertWorkspaceOperationCurrent(context);
+        return openReceipt(input);
+      },
+      redact: contextPocWorkspaceReceiptOpenResult,
       errorCode: contextPocWorkspaceOperationErrorCode
     })
   });
@@ -11199,6 +11549,7 @@ if (MAIN_HELPER_TEST) {
     videoBlockDispatchRequest,
     videoProposalDecisionRequest,
     videoProposalRevisionToken,
+    videoContentRef,
     videoUndoRequest,
     videoSceneActionRequest,
     videoSceneDispatchRequest,

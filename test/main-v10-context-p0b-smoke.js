@@ -753,6 +753,7 @@ async function mainTest() {
 
     const worstProjects = Array.from({ length: 4 }, (_item, index) => ({
       projectToken: `project-${String(index + 1).repeat(24)}`,
+      contentRef: `content-${String(index + 1).repeat(24)}`,
       title: '标题'.repeat(100), stage: 'topic', stageLabel: '选题',
       status: '待确认'.repeat(40), updated: '2026-08-25T12:00:00.000Z',
       decision: '决策'.repeat(100), angle: '角度'.repeat(100), hook: '钩子'.repeat(120),
@@ -805,6 +806,7 @@ async function mainTest() {
           generation: 11,
           projects: [{
             projectToken: `project-${'e'.repeat(24)}`,
+            contentRef: `content-${'e'.repeat(24)}`,
             title: '真实项目', stage: 'topic', stageLabel: '选题',
             status: 'needs-decision', updated: '2026-08-25T12:00:00.000Z',
             angles: [], hooks: [], canShoot: false, publish: null
@@ -889,6 +891,290 @@ async function mainTest() {
     assert.deepEqual({ status: deadlineSettle.payload.status, code: deadlineSettle.payload.code }, {
       status: 'rejected', code: 'operation-timeout'
     }, 'Host 不能通过 claim 重置原始绝对 deadline');
+  });
+
+  await test('workspace files 高层动作与回执只返回有限安全投影', async () => {
+    const projectToken = `project-${'a'.repeat(24)}`;
+    const actionId = 'script';
+    const preflightToken = 'preflight-opaque-01';
+    const receiptId = 'receipt-opaque-01';
+    const pulseId = 'pulse-opaque-01';
+    const resultToken = 'result-opaque-01';
+    const sourceRelativePath = '02_脚本/稳定项目.md';
+    const blockReceiptId = 'receipt-opaque-2';
+    const unrelatedReceiptId = 'receipt-opaque-4';
+    const otherWorkspaceReceiptId = 'receipt-opaque-6';
+    const rootIdentityKey = '101:202';
+    const calls = [];
+    const ops = main.contextPocWorkspaceFileOperations({
+      catalog: () => ({
+        generation: 12,
+        projects: [
+          ['inspiration', null], ['topic', null], ['script', null], ['shoot', null],
+          ['edit', null], ['publish', { ready: false, published: false, aiDisclosure: 'unknown' }],
+          ['publish', { ready: true, published: true, aiDisclosure: 'not-ai' }], ['data', null]
+        ].map(([stage, publish], index) => ({
+          projectToken: `project-${index.toString(16).repeat(24)}`,
+          contentRef: `content-${index.toString(16).repeat(24)}`,
+          title: `项目 ${index}`, stage, stageLabel: '内部标签', status: null,
+          updated: null, decision: null, angles: [], hooks: [], canShoot: false,
+          publish,
+          actions: Array.from({ length: 6 }, (_unused, actionIndex) => ({
+            id: `action_${actionIndex}`, label: `动作 ${actionIndex}`, hint: `提示 ${actionIndex}`
+          }))
+        }))
+      }),
+      projectAction: async (input) => {
+        calls.push(['projectAction', input]);
+        if (!Object.prototype.hasOwnProperty.call(input, 'preflightToken')) {
+          return {
+            kind: 'preflight', preflightToken,
+            targetLabel: '目标会话', workspaceLabel: '视频工作区',
+            workspaceMatch: 'match', targetRunning: true,
+            eventTracking: 'ready', expiresAt: '2026-08-25T12:01:00.000Z'
+          };
+        }
+        return { state: 'accepted', reason: 'queued', target: '目标会话', receiptId };
+      },
+      verifyProject: (token) => {
+        calls.push(['verifyProject', token]);
+        return {
+          runtime: { rootIdentityKey },
+          record: { relativePath: sourceRelativePath }
+        };
+      },
+      receiptSnapshot: () => {
+        calls.push(['receiptSnapshot']);
+        const receipt = {
+          receiptId, anchorRef: `project-${'b'.repeat(24)}`,
+          targetLabel: '目标会话'.repeat(96),
+          tracking: 'ready', trackingText: '事件已接通'.repeat(96),
+          expectedStage: '写稿产出'.repeat(96),
+          status: 'completed', statusText: '已完成'.repeat(160),
+          createdAt: '2026-08-25T12:00:00.000Z',
+          updatedAt: '2026-08-25T12:00:02.000Z',
+          terminalAt: '2026-08-25T12:00:02.000Z', elapsedMs: 2000, durationMs: 2000,
+          resultCount: 1, resultToken,
+          pulseAt: '2026-08-25T12:00:02.000Z', pulseId,
+          relativePath: 'private/project.md', hash: 'f'.repeat(64),
+          sessionRef: `session-${'b'.repeat(64)}`, rawPrompt: 'SECRET PROMPT'
+        };
+        return {
+          receipts: Array.from({ length: 6 }, (_unused, index) => ({
+            ...receipt,
+            receiptId: index === 0 ? receiptId : `receipt-opaque-${index + 1}`,
+            resultToken: index === 0 ? resultToken : `result-opaque-${index + 1}`,
+            pulseId: index === 0 ? pulseId : `pulse-opaque-${index + 1}`,
+            anchorRef: index === 0 ? `project-${'b'.repeat(24)}`
+              : (index === 1 ? `block-${'c'.repeat(24)}`
+                : (index === 3 ? `block-${'d'.repeat(24)}` : projectToken))
+          }))
+        };
+      },
+      receiptProjectBinding: (id) => {
+        calls.push(['receiptProjectBinding', id]);
+        if (id === receiptId || id === blockReceiptId) {
+          return { relativePath: sourceRelativePath, rootIdentityKey };
+        }
+        if (id === unrelatedReceiptId) {
+          return { relativePath: '02_脚本/其他项目.md', rootIdentityKey };
+        }
+        if (id === otherWorkspaceReceiptId) {
+          return { relativePath: sourceRelativePath, rootIdentityKey: '303:404' };
+        }
+        return null;
+      },
+      ackReceipt: (input) => { calls.push(['ackReceipt', input]); return true; },
+      openReceipt: async (input) => { calls.push(['openReceipt', input]); return { kind: 'ok' }; }
+    });
+    assert.deepEqual(Object.keys(ops).sort(), [
+      'catalog.read', 'document.read', 'project.action.prepare', 'project.action.submit',
+      'receipts.ack', 'receipts.open', 'receipts.read', 'topic.choose'
+    ]);
+    const mainSource = source('main.js');
+    assert.equal((mainSource.match(
+      /projectRelativePath: (?:record|document)\.relativePath/g
+    ) || []).length >= 3, true,
+    '项目动作与两种块动作都必须把源文档绑定留在主进程');
+    assert.match(mainSource,
+      /projectRelativePath: context && typeof context\.projectRelativePath === 'string'/,
+      '创建回执时必须把私有文档绑定转存到 delivery binding');
+    assert.match(mainSource,
+      /projectRootIdentityKey: context && typeof context\.projectRootIdentityKey === 'string'/,
+      '回执必须同时绑定工作区实体身份');
+    assert.match(mainSource,
+      /videoContentRef\(runtime\.epoch, item\.relativePath\)/,
+      '真实工作区刷新必须按 runtime 与路径生成内容身份');
+
+    const stablePath = '02_脚本/同一项目.md';
+    const stableContentRef = main.videoContentRef(7, stablePath);
+    assert.match(stableContentRef, /^content-[a-f0-9]{24}$/);
+    assert.equal(main.videoContentRef(7, stablePath), stableContentRef,
+      '同 runtime 同路径修改内容后 contentRef 必须稳定');
+    assert.notEqual(main.videoContentRef(7, '02_脚本/另一项目.md'), stableContentRef,
+      '不同文件不得共用 contentRef');
+    assert.notEqual(main.videoContentRef(8, stablePath), stableContentRef,
+      '新 runtime 代际不得重用旧 capability');
+    assert.throws(() => main.videoContentRef(7, '../逃逸.md'));
+
+    let identityProjectToken = `project-${'1'.repeat(24)}`;
+    const identityOps = main.contextPocWorkspaceFileOperations({
+      catalog: () => ({
+        generation: 7,
+        projects: [{
+          projectToken: identityProjectToken,
+          contentRef: stableContentRef,
+          relativePath: stablePath,
+          title: '同一项目', stage: 'script', stageLabel: '写稿',
+          status: null, updated: null, decision: null, angles: [], hooks: [],
+          canShoot: false, publish: null, actions: []
+        }]
+      })
+    });
+    const readIdentityCard = async () => {
+      const raw = await identityOps['catalog.read'].handle({
+        input: { cursor: 0, limit: 1 }, context: { assertCurrent: () => true }
+      });
+      return identityOps['catalog.read'].redact(raw).projects[0];
+    };
+    const firstIdentity = await readIdentityCard();
+    identityProjectToken = `project-${'2'.repeat(24)}`;
+    const secondIdentity = await readIdentityCard();
+    assert.notEqual(firstIdentity.projectToken, secondIdentity.projectToken,
+      '内容版本改变后 projectToken 应变化');
+    assert.equal(firstIdentity.contentRef, secondIdentity.contentRef,
+      '新 projectToken 必须保留同一 contentRef');
+    assert.equal(JSON.stringify(secondIdentity).includes(stablePath), false,
+      'contentRef 投影不得夹带相对路径');
+    assert.throws(() => identityOps['catalog.read'].redact({
+      kind: 'catalog', generation: 7, projectCount: 1, cursor: 0, nextCursor: null,
+      projects: [{ ...secondIdentity, contentRef: 'content-not-opaque' }]
+    }));
+
+    const cards = [];
+    for (const cursor of [0, 4]) {
+      const raw = await ops['catalog.read'].handle({
+        input: { cursor, limit: 4 }, context: { assertCurrent: () => true }
+      });
+      cards.push(...ops['catalog.read'].redact(raw).projects);
+    }
+    assert.deepEqual(cards.map((card) => [card.workflowStatus, card.workflowLabel]), [
+      ['inspiration', '灵感'], ['topic', '选题'], ['script', '写稿'], ['shoot', '拍摄'],
+      ['shoot', '拍摄'], ['unpublished', '待发布'], ['published', '已发布'],
+      ['uncategorized', '未分类']
+    ]);
+    assert.equal(cards.every((card) => card.actions.length === 4), true);
+    assert.deepEqual(Object.keys(cards[0].actions[0]).sort(), ['hint', 'id', 'label']);
+
+    assert.deepEqual(ops['project.action.prepare'].validate({ projectToken, actionId }), {
+      projectToken, actionId
+    });
+    assert.throws(() => ops['project.action.prepare'].validate({
+      projectToken, actionId, extra: true
+    }));
+    const prepareRaw = await ops['project.action.prepare'].handle({
+      input: { projectToken, actionId }, context: { assertCurrent: () => true }
+    });
+    const prepared = ops['project.action.prepare'].redact(prepareRaw);
+    assert.equal(prepared.kind, 'preflight');
+    assert.equal(prepared.preflightToken, preflightToken);
+    assert.doesNotMatch(JSON.stringify(prepared), /(?:path|hash|session|prompt)/i);
+
+    const submitInput = { projectToken, actionId, preflightToken, override: false };
+    assert.deepEqual(ops['project.action.submit'].validate(submitInput), submitInput);
+    assert.throws(() => ops['project.action.submit'].validate({
+      projectToken, actionId, preflightToken
+    }));
+    assert.throws(() => ops['project.action.submit'].validate({
+      ...submitInput, extra: true
+    }));
+    const submitRaw = await ops['project.action.submit'].handle({
+      input: submitInput, context: { assertCurrent: () => true }
+    });
+    assert.deepEqual(ops['project.action.submit'].redact(submitRaw), {
+      state: 'accepted', reason: 'queued', target: '目标会话', receiptId
+    });
+    assert.throws(() => ops['project.action.submit'].redact({
+      ...submitRaw, sessionRef: `session-${'c'.repeat(64)}`
+    }));
+
+    assert.deepEqual(ops['receipts.read'].validate({ projectToken, limit: 6 }), {
+      projectToken, limit: 6
+    });
+    for (const invalid of [
+      { projectToken, limit: 0 }, { projectToken, limit: 7 },
+      { projectToken, limit: 1, extra: true }
+    ]) assert.throws(() => ops['receipts.read'].validate(invalid));
+    const receiptsRaw = await ops['receipts.read'].handle({
+      input: { projectToken, limit: 6 }, context: { assertCurrent: () => true }
+    });
+    const receipts = ops['receipts.read'].redact(receiptsRaw);
+    assert.equal(receipts.receipts.length >= 1 && receipts.receipts.length <= 6, true);
+    assert.equal(Buffer.byteLength(JSON.stringify(receipts), 'utf8') <= 5600, true,
+      '回执批次必须在 Host 6KiB 之前主动截断');
+    assert.equal(receipts.receipts.some((receipt) => receipt.receiptId === receiptId), true,
+      '旧 projectToken 回执必须按主进程私有路径绑定保留');
+    assert.equal(receipts.receipts.some((receipt) => receipt.receiptId === blockReceiptId), true,
+      'blockToken 回执必须归并到当前项目');
+    assert.equal(receipts.receipts.some((receipt) => receipt.receiptId === unrelatedReceiptId), false,
+      '其他项目回执不得串入');
+    assert.equal(receipts.receipts.some((receipt) => receipt.receiptId === otherWorkspaceReceiptId), false,
+      '同名相对路径的其他工作区回执不得串入');
+    assert.deepEqual(Object.keys(receipts.receipts[0]).sort(), [
+      'createdAt', 'durationMs', 'elapsedMs', 'expectedStage', 'pulseAt', 'pulseId',
+      'receiptId', 'resultCount', 'resultToken', 'status', 'statusText', 'targetLabel',
+      'terminalAt', 'tracking', 'trackingText', 'updatedAt'
+    ]);
+    assert.doesNotMatch(JSON.stringify(receipts),
+      /(?:relativePath|anchorRef|hash|sessionRef|rawPrompt|SECRET)/);
+
+    assert.throws(() => ops['receipts.ack'].validate({ receiptId, pulseId, extra: true }));
+    const ackRaw = await ops['receipts.ack'].handle({
+      input: { receiptId, pulseId }, context: { assertCurrent: () => true }
+    });
+    assert.deepEqual(ops['receipts.ack'].redact(ackRaw), { kind: 'ok' });
+    assert.throws(() => ops['receipts.open'].validate({ resultToken: 'bad token' }));
+    const openRaw = await ops['receipts.open'].handle({
+      input: { resultToken }, context: { assertCurrent: () => true }
+    });
+    assert.deepEqual(ops['receipts.open'].redact(openRaw), { kind: 'ok' });
+    assert.deepEqual(ops['receipts.open'].redact({ kind: 'error', text: '结果已过期' }), {
+      kind: 'error', message: '结果已过期'
+    });
+    assert.throws(() => ops['receipts.open'].redact({
+      kind: 'error', text: '打开失败', path: '/private/result.md'
+    }));
+    assert.deepEqual(calls.filter((call) => call[0] !== 'receiptProjectBinding')
+      .map((call) => call[0]), [
+      'projectAction', 'projectAction', 'verifyProject', 'receiptSnapshot',
+      'ackReceipt', 'openReceipt'
+    ]);
+
+    let staleSideEffects = 0;
+    const staleOps = main.contextPocWorkspaceFileOperations({
+      projectAction: async () => { staleSideEffects += 1; },
+      verifyProject: () => { staleSideEffects += 1; },
+      receiptSnapshot: () => { staleSideEffects += 1; return { receipts: [] }; },
+      ackReceipt: () => { staleSideEffects += 1; return true; },
+      openReceipt: async () => { staleSideEffects += 1; return { kind: 'ok' }; }
+    });
+    const staleContext = { assertCurrent: () => false };
+    await assert.rejects(staleOps['project.action.prepare'].handle({
+      input: { projectToken, actionId }, context: staleContext
+    }));
+    await assert.rejects(staleOps['project.action.submit'].handle({
+      input: submitInput, context: staleContext
+    }));
+    await assert.rejects(staleOps['receipts.read'].handle({
+      input: { projectToken, limit: 1 }, context: staleContext
+    }));
+    await assert.rejects(staleOps['receipts.ack'].handle({
+      input: { receiptId, pulseId }, context: staleContext
+    }));
+    await assert.rejects(staleOps['receipts.open'].handle({
+      input: { resultToken }, context: staleContext
+    }));
+    assert.equal(staleSideEffects, 0, '换绑后不得进入预检/提交/回执副作用');
   });
 
   await test('shell 公开面按当前 sessionRef 投影，不泄露 ref、路径或标题', async () => {

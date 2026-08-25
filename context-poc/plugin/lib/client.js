@@ -18,7 +18,9 @@ window.__ModuleLoader__.load({
     const MAX_PREFERENCE_LISTENERS = 64;
     const PREFERENCE_BOOTSTRAP_RETRY_MS = Object.freeze([50, 100, 200, 400, 800]);
     const WORKSPACE_FILE_OPERATIONS = new Set([
-      'catalog.read', 'document.read', 'topic.choose'
+      'catalog.read', 'document.read', 'topic.choose',
+      'project.action.prepare', 'project.action.submit',
+      'receipts.read', 'receipts.ack', 'receipts.open'
     ]);
     const WORKSPACE_FILE_STATES = new Set([
       'queued', 'running', 'fulfilled', 'rejected', 'cancelled', 'expired'
@@ -38,20 +40,17 @@ window.__ModuleLoader__.load({
     const WORKSPACE_FILE_POLL_MS = 120;
     const MAX_WORKSPACE_FILE_INPUT_BYTES = 4 * 1024;
     const MAX_WORKSPACE_FILE_RESULT_BYTES = 6 * 1024;
+    const PROJECT_TOKEN_RE = /^project-[a-f0-9]{24}$/;
+    const CONTENT_REF_RE = /^content-[a-f0-9]{24}$/;
+    const OPAQUE_VALUE_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,255}$/;
+    const ACTIVE_RECEIPT_STATES = new Set(['submitting', 'queued', 'running', 'waiting']);
     const SHELL_CONTRACT = 'whaledock.content-shell/v1';
     const inject = ['connection', 'sessions'];
 
-    const SHELL_CSS = `.wd10-left{background:var(--dsw-specific-sidebar-fill);border-right:1px solid var(--dsw-alias-border-l1);min-width:0;height:100%;display:flex;flex-direction:column;overflow:hidden}.wd10-switch{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:12px;padding:4px;border-radius:10px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1)}.wd10-switch button{border:0;border-radius:7px;padding:7px 10px;color:var(--dsw-alias-fg-secondary);background:transparent;font:inherit;font-size:13px;cursor:pointer}.wd10-switch button[aria-selected=true]{background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);box-shadow:0 1px 3px rgba(0,0,0,.08)}.wd10-library{min-height:0;overflow:auto;padding:0 10px 18px}.wd10-libraryHead{padding:8px 6px 10px}.wd10-eyebrow{font-size:11px;letter-spacing:.08em;color:var(--dsw-alias-fg-tertiary);text-transform:uppercase}.wd10-libraryHead h2{font-size:17px;line-height:1.35;margin:4px 0;color:var(--dsw-alias-fg-primary)}.wd10-libraryHead p{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-project{width:100%;text-align:left;border:1px solid transparent;border-radius:10px;padding:10px;margin:2px 0 6px;background:transparent;color:inherit;cursor:pointer}.wd10-project:hover{background:var(--dsw-alias-bg-layer-1)}.wd10-project[aria-current=true]{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l2)}.wd10-projectTitle{display:block;font-size:13px;font-weight:600;color:var(--dsw-alias-fg-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wd10-projectMeta{display:flex;align-items:center;gap:7px;margin-top:5px;font-size:11px;color:var(--dsw-alias-fg-tertiary)}.wd10-dot{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-fg-tertiary)}.wd10-dot[data-running=true]{background:#22a06b}.wd10-detail{min-width:0;height:100%;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base);border-right:1px solid var(--dsw-alias-border-l2);overflow:hidden}.wd10-detailHead{padding:26px 24px 14px}.wd10-detailHead h1{font-size:22px;line-height:1.25;margin:5px 0 7px;color:var(--dsw-alias-fg-primary)}.wd10-detailHead p{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-tabs{display:flex;gap:3px;padding:0 20px;border-bottom:1px solid var(--dsw-alias-border-l1);overflow:auto}.wd10-tabs button{border:0;border-bottom:2px solid transparent;padding:10px 8px 9px;background:transparent;color:var(--dsw-alias-fg-secondary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}.wd10-tabs button[aria-selected=true]{border-bottom-color:var(--dsw-alias-fg-primary);color:var(--dsw-alias-fg-primary)}.wd10-panel{min-height:0;overflow:auto;padding:20px 24px 28px}.wd10-card{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:16px;background:var(--dsw-alias-bg-layer-1);margin-bottom:12px}.wd10-card h3{font-size:14px;margin:0 0 7px;color:var(--dsw-alias-fg-primary)}.wd10-card p{font-size:12px;line-height:1.65;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:13px}.wd10-stat{padding:10px;border-radius:9px;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1)}.wd10-stat strong{display:block;font-size:18px;color:var(--dsw-alias-fg-primary)}.wd10-stat span{font-size:11px;color:var(--dsw-alias-fg-tertiary)}.wd10-action{width:100%;border:1px solid var(--dsw-alias-interactive-bg-hover);border-radius:9px;padding:10px 12px;margin-top:9px;background:var(--dsw-alias-state-business-tertiary);color:var(--dsw-alias-state-business-primary);font:inherit;font-size:12px;text-align:left;cursor:pointer}.wd10-action:hover{background:var(--dsw-alias-interactive-bg-hover)}.wd10-action small{display:block;margin-top:3px;color:var(--dsw-alias-fg-secondary)}.wd10-feedback{font-size:12px;line-height:1.5;margin:12px 1px 0;color:var(--dsw-alias-fg-secondary)}.wd10-chat{min-width:0;height:100%;display:flex;overflow:hidden}.wd10-chatMain{min-width:0;flex:1;display:flex;flex-direction:column;overflow:hidden}.wd10-empty{padding:24px;color:var(--dsw-alias-fg-secondary);font-size:13px;line-height:1.6}@media(max-width:1120px){.wd10-detailHead{padding:20px 18px 12px}.wd10-panel{padding:16px 18px}.wd10-detailHead h1{font-size:19px}.wd10-tabs{padding:0 14px}}.wd10-leftViews,.wd10-leftView,.wd10-nativeSidebar{min-height:0;flex:1;overflow:hidden}.wd10-leftView[hidden],.wd10-nativeSidebar[hidden]{display:none}.wd10-subSwitch{margin-top:0}.wd10-projectPath{display:block;margin-top:3px;font-size:10px;color:var(--dsw-alias-fg-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wd10-banner,.wd10-hint{display:flex;align-items:center;gap:8px;margin:10px 18px 0;padding:9px 10px;border:1px solid var(--dsw-alias-state-warn-primary);border-radius:9px;color:var(--dsw-alias-fg-primary);background:var(--dsw-alias-state-warn-tertiary);font-size:12px;line-height:1.45}.wd10-banner span,.wd10-hint span{min-width:0;flex:1}.wd10-banner button,.wd10-hint button{flex:none;border:1px solid currentColor;border-radius:7px;padding:4px 8px;background:transparent;color:inherit;cursor:pointer}.wd10-banner button:disabled,.wd10-action:disabled{opacity:.55;cursor:default}.wd10-prefStatus{margin:0 14px 8px;color:var(--dsw-alias-state-warn-primary);font-size:11px}.wd10-contentDetails{transition:width var(--ds-transition-duration-slow) var(--ds-ease-in-out);flex-shrink:0}`;
+    const SHELL_CSS = `.wd10-left{background:var(--dsw-specific-sidebar-fill);border-right:1px solid var(--dsw-alias-border-l1);min-width:0;height:100%;display:flex;flex-direction:column;overflow:hidden}.wd10-switch{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:12px;padding:4px;border-radius:10px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1)}.wd10-switch button{border:0;border-radius:7px;padding:7px 10px;color:var(--dsw-alias-fg-secondary);background:transparent;font:inherit;font-size:13px;cursor:pointer}.wd10-switch button[aria-selected=true]{background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);box-shadow:0 1px 3px rgba(0,0,0,.08)}.wd10-library{min-height:0;overflow:auto;padding:0 10px 18px}.wd10-libraryHead{padding:8px 6px 10px}.wd10-eyebrow{font-size:11px;letter-spacing:.08em;color:var(--dsw-alias-fg-tertiary);text-transform:uppercase}.wd10-libraryHead h2{font-size:17px;line-height:1.35;margin:4px 0;color:var(--dsw-alias-fg-primary)}.wd10-libraryHead p{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-refresh,.wd10-loadMore{margin-top:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;padding:5px 8px;background:transparent;color:var(--dsw-alias-fg-secondary);font:inherit;font-size:11px;cursor:pointer}.wd10-refresh:disabled,.wd10-loadMore:disabled{opacity:.55;cursor:default}.wd10-loadMore{width:100%;padding:8px}.wd10-workspaceList{margin:0 0 10px;padding:8px 6px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}.wd10-workspaceChoice{width:100%;text-align:left;border:1px solid transparent;border-radius:8px;padding:7px 8px;margin-top:4px;background:transparent;color:inherit;cursor:pointer}.wd10-workspaceChoice:hover,.wd10-workspaceChoice[aria-current=true]{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l1)}.wd10-projectPath{display:block;margin-top:3px;font-size:10px;color:var(--dsw-alias-fg-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wd10-project{width:100%;text-align:left;border:1px solid transparent;border-radius:10px;padding:10px;margin:2px 0 6px;background:transparent;color:inherit;cursor:pointer}.wd10-project:hover{background:var(--dsw-alias-bg-layer-1)}.wd10-project[aria-current=true]{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l2)}.wd10-projectTitle{display:block;font-size:13px;font-weight:600;color:var(--dsw-alias-fg-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wd10-projectMeta{display:flex;align-items:center;gap:7px;margin-top:5px;font-size:11px;color:var(--dsw-alias-fg-tertiary)}.wd10-stageBadge{border-radius:999px;padding:1px 7px;background:var(--dsw-alias-state-business-tertiary);color:var(--dsw-alias-state-business-primary)}.wd10-detail{min-width:0;height:100%;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base);border-right:1px solid var(--dsw-alias-border-l2);overflow:hidden}.wd10-detailHead{padding:22px 24px 12px}.wd10-detailHead h1{font-size:22px;line-height:1.25;margin:5px 0 7px;color:var(--dsw-alias-fg-primary)}.wd10-detailHead p{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-projectActions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.wd10-projectActions button,.wd10-receipt button{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 9px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:11px;cursor:pointer}.wd10-projectActions button:disabled,.wd10-receipt button:disabled{opacity:.55;cursor:default}.wd10-tabs{display:flex;gap:3px;padding:0 20px;border-bottom:1px solid var(--dsw-alias-border-l1);overflow:auto}.wd10-tabs button{border:0;border-bottom:2px solid transparent;padding:10px 8px 9px;background:transparent;color:var(--dsw-alias-fg-secondary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}.wd10-tabs button[aria-selected=true]{border-bottom-color:var(--dsw-alias-fg-primary);color:var(--dsw-alias-fg-primary)}.wd10-receipts{flex:none;max-height:188px;overflow:auto;padding:10px 18px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}.wd10-receiptTitle{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-receipt{margin-top:7px;padding:8px 10px;border-radius:9px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-receiptHead,.wd10-receiptFoot{display:flex;align-items:center;justify-content:space-between;gap:8px}.wd10-receipt strong{color:var(--dsw-alias-fg-primary)}.wd10-receipt p{margin:5px 0 0;line-height:1.45}.wd10-preflight{border-color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-state-warn-tertiary)}.wd10-pulse{color:var(--dsw-alias-state-business-primary);font-weight:600}.wd10-panel{min-height:0;overflow:auto;padding:20px 24px 28px}.wd10-card{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:16px;background:var(--dsw-alias-bg-layer-1);margin-bottom:12px}.wd10-card h3{font-size:14px;margin:0 0 7px;color:var(--dsw-alias-fg-primary)}.wd10-card p{font-size:12px;line-height:1.65;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-unfinished strong{display:block;margin:8px 0;color:var(--dsw-alias-fg-primary)}.wd10-feedback{font-size:12px;line-height:1.5;margin:8px 0 0;color:var(--dsw-alias-fg-secondary)}.wd10-chat{min-width:0;height:100%;display:flex;overflow:hidden}.wd10-chatMain{min-width:0;flex:1;display:flex;flex-direction:column;overflow:hidden}.wd10-empty{padding:24px;color:var(--dsw-alias-fg-secondary);font-size:13px;line-height:1.6}@media(max-width:1120px){.wd10-detailHead{padding:18px 18px 10px}.wd10-panel{padding:16px 18px}.wd10-detailHead h1{font-size:19px}.wd10-tabs{padding:0 14px}.wd10-receipts{padding:9px 14px}}.wd10-leftViews,.wd10-leftView,.wd10-nativeSidebar{min-height:0;flex:1;overflow:hidden}.wd10-leftView[hidden],.wd10-nativeSidebar[hidden]{display:none}.wd10-subSwitch{margin-top:0}.wd10-banner,.wd10-hint{display:flex;align-items:center;gap:8px;margin:10px 18px 0;padding:9px 10px;border:1px solid var(--dsw-alias-state-warn-primary);border-radius:9px;color:var(--dsw-alias-fg-primary);background:var(--dsw-alias-state-warn-tertiary);font-size:12px;line-height:1.45}.wd10-banner span,.wd10-hint span{min-width:0;flex:1}.wd10-banner button,.wd10-hint button{flex:none;border:1px solid currentColor;border-radius:7px;padding:4px 8px;background:transparent;color:inherit;cursor:pointer}.wd10-banner button:disabled{opacity:.55;cursor:default}.wd10-prefStatus{margin:0 14px 8px;color:var(--dsw-alias-state-warn-primary);font-size:11px}.wd10-contentDetails{transition:width var(--ds-transition-duration-slow) var(--ds-ease-in-out);flex-shrink:0}`;
     const CREATOR_TABS = Object.freeze([
       ['overview', '概览'], ['script', '脚本'], ['shoot', '拍摄'],
       ['publish', '发布'], ['review', '复盘']
-    ]);
-    const STAGE_COPY = new Map([
-      ['overview', (title) => `请帮我梳理「${title}」当前进展，只列出下一个最值得推进的决策。`],
-      ['script', (title) => `请继续打磨「${title}」的脚本，先核对当前稿件，再给出可直接拍摄的改稿建议。`],
-      ['shoot', (title) => `请为「${title}」生成本次拍摄的最小清单：镜头、口播、素材和收工检查。`],
-      ['publish', (title) => `请检查「${title}」发布前还缺什么，区分本地准备、平台操作和人工确认。`],
-      ['review', (title) => `请带我复盘「${title}」，先问我一个最关键的结果问题，等我回答后再继续。`]
     ]);
 
     function installShellStyle() {
@@ -158,7 +157,107 @@ window.__ModuleLoader__.load({
         .sort((a, b) => b.updatedAt - a.updatedAt || a.key.localeCompare(b.key));
     }
 
-    function CreatorSidebar({ projects, activeKey, onSelect }) {
+    function boundedUiText(value, fallback, maximum = 240) {
+      if (typeof value !== 'string' || WORKSPACE_TEXT_CONTROL_RE.test(value)) return fallback;
+      const clean = Array.from(value.trim()).slice(0, maximum).join('');
+      return clean || fallback;
+    }
+
+    function contentCatalogProject(value) {
+      if (!plain(value) || !PROJECT_TOKEN_RE.test(String(value.projectToken || ''))
+          || !CONTENT_REF_RE.test(String(value.contentRef || ''))) return null;
+      const actions = (Array.isArray(value.actions) ? value.actions : []).slice(0, 4).map((action) => {
+        if (!plain(action) || typeof action.id !== 'string'
+            || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(action.id)) return null;
+        return Object.freeze({
+          id: action.id,
+          label: boundedUiText(action.label, '继续', 32),
+          hint: boundedUiText(action.hint, '', 100)
+        });
+      }).filter(Boolean);
+      return Object.freeze({
+        contentRef: value.contentRef,
+        projectToken: value.projectToken,
+        title: boundedUiText(value.title, '未命名内容', 120),
+        workflowLabel: boundedUiText(value.workflowLabel,
+          boundedUiText(value.stageLabel, '未分类', 24), 24),
+        updated: boundedUiText(value.updated, '', 64) || null,
+        actions: Object.freeze(actions)
+      });
+    }
+
+    function contentCatalogResult(snapshot) {
+      const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+      if (!plain(value) || value.kind !== 'catalog' || !Array.isArray(value.projects)
+          || value.projects.length > 4) return null;
+      const projects = value.projects.map(contentCatalogProject);
+      if (projects.some((project) => project === null)) return null;
+      return Object.freeze({
+        projects: Object.freeze(projects),
+        projectCount: Number.isSafeInteger(value.projectCount) && value.projectCount >= projects.length
+          ? value.projectCount : projects.length,
+        nextCursor: Number.isSafeInteger(value.nextCursor) ? value.nextCursor : null
+      });
+    }
+
+    function receiptView(value) {
+      if (!plain(value) || !OPAQUE_VALUE_RE.test(String(value.receiptId || ''))
+          || typeof value.status !== 'string') return null;
+      const resultToken = value.resultToken === undefined ? null : value.resultToken;
+      if (resultToken !== null && !OPAQUE_VALUE_RE.test(String(resultToken))) return null;
+      const pulseId = value.pulseId === undefined ? null : value.pulseId;
+      if (pulseId !== null && !OPAQUE_VALUE_RE.test(String(pulseId))) return null;
+      return Object.freeze({
+        receiptId: value.receiptId,
+        targetLabel: boundedUiText(value.targetLabel, '目标会话', 120),
+        tracking: value.tracking === 'ready' ? 'ready' : 'unavailable',
+        trackingText: boundedUiText(value.trackingText, '任务事件不可用，无法自动跟踪', 180),
+        expectedStage: boundedUiText(value.expectedStage, '', 120),
+        status: boundedUiText(value.status, 'unknown', 32),
+        statusText: boundedUiText(value.statusText, '任务状态未知', 180),
+        elapsedMs: Number.isFinite(value.elapsedMs) && value.elapsedMs >= 0 ? value.elapsedMs : 0,
+        resultCount: Number.isSafeInteger(value.resultCount) && value.resultCount >= 0
+          ? value.resultCount : 0,
+        resultToken,
+        pulseId
+      });
+    }
+
+    function receiptsResult(snapshot) {
+      const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+      if (!plain(value) || value.kind !== 'receipts' || !Array.isArray(value.receipts)
+          || value.receipts.length > 6) return null;
+      const receipts = value.receipts.map(receiptView);
+      return receipts.some((receipt) => receipt === null) ? null : Object.freeze(receipts);
+    }
+
+    function operationError(snapshot, fallback = '操作没有完成；没有推断结果。') {
+      const result = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+      if (plain(result) && (result.kind === 'action-error' || result.state === 'error')) {
+        return boundedUiText(result.message || result.text, fallback, 180);
+      }
+      if (snapshot?.code === 'outcome-unknown') return '操作结果未知；请先核对右栏和任务回执，不要重复点击。';
+      if (snapshot?.code === 'workspace-mismatch' || snapshot?.code === 'operation-stale') {
+        return '工作区或内容已变化，本次没有继续执行。';
+      }
+      return fallback;
+    }
+
+    function formatElapsed(milliseconds) {
+      const seconds = Math.max(0, Math.floor(Number(milliseconds) / 1000));
+      if (seconds < 60) return `${seconds} 秒`;
+      return `${Math.floor(seconds / 60)} 分 ${String(seconds % 60).padStart(2, '0')} 秒`;
+    }
+
+    function CreatorSidebar({ workspace, workspaces, activeWorkspaceKey, onWorkspaceSelect,
+      catalog, selectedToken, onSelect, onRefresh, onLoadMore }) {
+      const copy = catalog.status === 'loading' ? '正在读取当前工作区的 front matter…'
+        : catalog.status === 'error' ? '内容文件暂时读不到，没有使用旧数据。'
+          : catalog.status === 'ready' && catalog.projects.length === 0
+            ? '当前工作区没有受控内容文件。'
+            : (catalog.status === 'ready' || catalog.status === 'stale')
+              ? `已读取 ${catalog.projects.length} 张真实内容卡。`
+              : '请先让当前内容工作区与右栏会话对齐。';
       return react_jsx_runtime.jsxs('div', {
         className: 'wd10-library',
         children: [react_jsx_runtime.jsxs('div', {
@@ -166,139 +265,367 @@ window.__ModuleLoader__.load({
           children: [
             react_jsx_runtime.jsx('div', { className: 'wd10-eyebrow', children: 'WhaleDock' }),
             react_jsx_runtime.jsx('h2', { children: '内容库' }),
-            react_jsx_runtime.jsx('p', { children: projects.length === 0
-              ? '建立或打开一个会话后，项目会出现在这里。'
-              : `已聚合 ${projects.length} 个项目，可以跨项目切换。` })
+            workspace && react_jsx_runtime.jsx('p', { children: `当前工作区：${workspace.title}` }),
+            react_jsx_runtime.jsx('p', { role: 'status', children: catalog.status === 'stale'
+              ? `${copy} 自动刷新失败，以下是上次成功结果。` : copy }),
+            react_jsx_runtime.jsx('button', { type: 'button', className: 'wd10-refresh',
+              disabled: catalog.status === 'loading', onClick: onRefresh,
+              children: catalog.status === 'loading' ? '正在刷新…' : '刷新内容' })
           ]
-        }), ...projects.map((project) => react_jsx_runtime.jsxs('button', {
+        }), workspaces.length > 0 && react_jsx_runtime.jsxs('div', {
+          className: 'wd10-workspaceList', children: [
+            react_jsx_runtime.jsx('div', { className: 'wd10-eyebrow', children: '会话对齐工作区' }),
+            ...workspaces.map((item) => react_jsx_runtime.jsxs('button', {
+              type: 'button', className: 'wd10-workspaceChoice',
+              'aria-current': item.key === activeWorkspaceKey,
+              onClick: () => onWorkspaceSelect(item), children: [
+                react_jsx_runtime.jsx('span', { className: 'wd10-projectTitle', children: item.title }),
+                react_jsx_runtime.jsx('span', { className: 'wd10-projectPath', children: item.pathTail })
+              ]
+            }, item.key))
+          ]
+        }), ...catalog.projects.map((project) => react_jsx_runtime.jsxs('button', {
           className: 'wd10-project',
           type: 'button',
-          'aria-current': project.key === activeKey,
+          'aria-current': project.projectToken === selectedToken,
           onClick: () => onSelect(project),
           children: [
             react_jsx_runtime.jsx('span', { className: 'wd10-projectTitle', children: project.title }),
             react_jsx_runtime.jsxs('span', { className: 'wd10-projectMeta', children: [
-              react_jsx_runtime.jsx('span', { className: 'wd10-dot', 'data-running': project.running || undefined }),
-              react_jsx_runtime.jsx('span', { children: `${project.sessions.length} 个会话` }),
-              project.running && react_jsx_runtime.jsx('span', { children: '进行中' })
-            ] }),
-            project.pathTail && react_jsx_runtime.jsx('span', { className: 'wd10-projectPath', children: project.pathTail })
+              react_jsx_runtime.jsx('span', { className: 'wd10-stageBadge', children: project.workflowLabel }),
+              react_jsx_runtime.jsx('span', { children: project.updated
+                ? `更新 ${project.updated}` : '更新时间未写明' })
+            ] })
           ]
-        }, project.key))]
+        }, project.contentRef)), catalog.nextCursor !== null && catalog.nextCursor !== undefined
+          && react_jsx_runtime.jsx('button', { type: 'button', className: 'wd10-loadMore',
+            disabled: catalog.loadingMore === true, onClick: onLoadMore,
+            children: catalog.loadingMore ? '正在加载…' : '加载更多' }),
+        catalog.moreError && react_jsx_runtime.jsx('p', { className: 'wd10-feedback', role: 'status',
+          children: '下一页读取失败；已加载的内容卡仍保留。' })]
       });
     }
 
-    function stageCopy(tab, title) {
-      return (STAGE_COPY.get(tab) || STAGE_COPY.get('overview'))(title);
+    function TaskReceiptStrip({ projectToken, workspaceFiles, preflight, pending,
+      feedback, onConfirm, onCancel, refreshKey, onCatalogRefresh, preflightRemaining }) {
+      const [receiptState, setReceiptState] = react.useState({ status: 'idle', receipts: [] });
+      const [operationFeedback, setOperationFeedback] = react.useState('');
+      const pollAttempt = react.useRef(0);
+      const receiptCatalogSignal = react.useRef(null);
+      react.useEffect(() => {
+        const attempt = ++pollAttempt.current;
+        const controller = new AbortController();
+        let timer = null;
+        setReceiptState({ status: projectToken ? 'loading' : 'idle', receipts: [] });
+        setOperationFeedback('');
+        receiptCatalogSignal.current = null;
+        if (!projectToken || !workspaceFiles || typeof workspaceFiles.execute !== 'function') {
+          return () => controller.abort();
+        }
+        const poll = async () => {
+          let receipts = null;
+          try {
+            receipts = receiptsResult(await workspaceFiles.execute(
+              'receipts.read', { projectToken, limit: 6 }, controller.signal
+            ));
+          } catch (_error) { receipts = null; }
+          if (controller.signal.aborted || pollAttempt.current !== attempt) return;
+          if (!receipts) {
+            setReceiptState((current) => current.receipts.length > 0
+              ? { status: 'stale', receipts: current.receipts }
+              : { status: 'error', receipts: [] });
+          }
+          else {
+            setReceiptState({ status: 'ready', receipts });
+            const signal = receipts.map((receipt) => [
+              receipt.receiptId,
+              ACTIVE_RECEIPT_STATES.has(receipt.status) ? 'active' : receipt.status,
+              receipt.pulseId || '', receipt.resultCount, receipt.resultToken || ''
+            ].join(':')).join('|');
+            if (receiptCatalogSignal.current !== null
+                && receiptCatalogSignal.current !== signal) onCatalogRefresh?.();
+            receiptCatalogSignal.current = signal;
+          }
+          const active = receipts && receipts.some((receipt) => ACTIVE_RECEIPT_STATES.has(receipt.status));
+          timer = globalThis.setTimeout(poll, active ? 1000 : 4000);
+        };
+        void poll();
+        return () => {
+          controller.abort();
+          if (timer !== null) globalThis.clearTimeout(timer);
+        };
+      }, [projectToken, workspaceFiles, refreshKey, onCatalogRefresh]);
+      const acknowledge = async (receipt) => {
+        try {
+          const snapshot = await workspaceFiles.execute('receipts.ack', {
+            receiptId: receipt.receiptId, pulseId: receipt.pulseId
+          });
+          if (snapshot?.state !== 'fulfilled' || !['ok', 'stale'].includes(snapshot.result?.kind)) {
+            setOperationFeedback('“刚更新”确认未送达；徽标会按上限自行消退。');
+            return;
+          }
+          setReceiptState((current) => ({ ...current, receipts: current.receipts.map((item) => (
+            item.receiptId === receipt.receiptId ? Object.freeze({ ...item, pulseId: null }) : item
+          )) }));
+        } catch (_error) { setOperationFeedback('“刚更新”确认未送达；徽标会按上限自行消退。'); }
+      };
+      const openResult = async (receipt) => {
+        try {
+          const snapshot = await workspaceFiles.execute('receipts.open', {
+            resultToken: receipt.resultToken
+          });
+          if (snapshot?.state !== 'fulfilled' || snapshot.result?.kind !== 'ok') {
+            setOperationFeedback(boundedUiText(snapshot?.result?.message,
+              '结果暂时打不开；请从当前工作区核对。', 160));
+          }
+        } catch (_error) { setOperationFeedback('结果暂时打不开；请从当前工作区核对。'); }
+      };
+      const matchText = preflight?.workspaceMatch === 'match' ? '工作区匹配'
+        : preflight?.workspaceMatch === 'mismatch' ? '工作区不匹配'
+          : '工作区无法确认';
+      return react_jsx_runtime.jsxs('section', {
+        className: 'wd10-receipts', 'aria-label': '任务回执', children: [
+          react_jsx_runtime.jsxs('div', { className: 'wd10-receiptTitle', children: [
+            react_jsx_runtime.jsx('strong', { children: '任务回执' }),
+            react_jsx_runtime.jsx('span', { children: '预检、进度与结果都留在这里' })
+          ] }),
+          preflight && react_jsx_runtime.jsxs('div', {
+            className: 'wd10-receipt wd10-preflight', children: [
+              react_jsx_runtime.jsxs('div', { className: 'wd10-receiptHead', children: [
+                react_jsx_runtime.jsx('strong', { children: `将发往 ${preflight.targetLabel}` }),
+                react_jsx_runtime.jsx('span', { children: matchText })
+              ] }),
+              react_jsx_runtime.jsx('p', { children:
+                `${preflight.workspaceLabel} · ${preflight.targetRunning ? '会话正在运行' : '会话当前未运行'} · ${preflight.eventTracking === 'ready' ? '事件回执已接通' : '事件回执未接通'} · ${preflightRemaining ?? 0} 秒后过期` }),
+              react_jsx_runtime.jsxs('div', { className: 'wd10-receiptFoot', children: [
+                react_jsx_runtime.jsx('button', { type: 'button', disabled: pending,
+                  onClick: onCancel, children: '取消' }),
+                react_jsx_runtime.jsx('button', { type: 'button', disabled: pending,
+                  onClick: onConfirm, children: pending ? '正在提交…'
+                    : preflight.workspaceMatch === 'match' ? '确认发送' : '仍然发' })
+              ] })
+            ]
+          }),
+          receiptState.status === 'loading' && react_jsx_runtime.jsx('p', {
+            className: 'wd10-feedback', children: '正在读取任务回执…'
+          }),
+          receiptState.status === 'error' && react_jsx_runtime.jsx('p', {
+            className: 'wd10-feedback', children: '任务回执暂时不可用；没有推断任务状态。'
+          }),
+          receiptState.status === 'stale' && react_jsx_runtime.jsx('p', {
+            className: 'wd10-feedback', children: '回执刷新失败；以下保留上次成功结果，不代表当前状态。'
+          }),
+          receiptState.status === 'ready' && receiptState.receipts.length === 0
+            && react_jsx_runtime.jsx('p', { className: 'wd10-feedback', children: '还没有任务回执。' }),
+          ...receiptState.receipts.map((receipt) => react_jsx_runtime.jsxs('div', {
+            className: 'wd10-receipt', 'data-status': receipt.status, children: [
+              react_jsx_runtime.jsxs('div', { className: 'wd10-receiptHead', children: [
+                react_jsx_runtime.jsx('strong', { children: receipt.statusText }),
+                react_jsx_runtime.jsx('span', { children: receipt.targetLabel })
+              ] }),
+              react_jsx_runtime.jsx('p', { children: `${receipt.trackingText} · 已用 ${formatElapsed(receipt.elapsedMs)}` }),
+              react_jsx_runtime.jsxs('div', { className: 'wd10-receiptFoot', children: [
+                receipt.pulseId && react_jsx_runtime.jsx('button', { type: 'button', className: 'wd10-pulse',
+                  onClick: () => { void acknowledge(receipt); }, children: '刚更新' }),
+                receipt.resultCount === 1 && receipt.resultToken && react_jsx_runtime.jsx('button', {
+                  type: 'button', onClick: () => { void openResult(receipt); }, children: '打开 1 个结果'
+                }),
+                receipt.resultCount > 1 && react_jsx_runtime.jsx('span', { children: `${receipt.resultCount} 个结果` })
+              ] })
+            ]
+          }, receipt.receiptId)),
+          feedback && react_jsx_runtime.jsx('p', { className: 'wd10-feedback', role: 'status', children: feedback }),
+          operationFeedback && react_jsx_runtime.jsx('p', { className: 'wd10-feedback', role: 'status', children: operationFeedback })
+        ]
+      });
     }
 
-    function draftFeedback(result) {
-      if (result?.ok === true) return '已填入右侧输入框；确认后直接发送。';
-      if (result?.code === 'draft-not-empty') return '右侧已有未发送内容，为避免覆盖，本次没有填入。';
-      if (result?.code === 'workspace-unavailable') return '项目工作区暂时不可用，没有创建或切换会话。';
-      if (result?.code === 'session-unavailable' && result.reason === 'service') return '会话服务尚未就绪，请稍后重试。';
-      if (result?.code === 'session-unavailable' && result.reason === 'input') return '会话已建立，但输入框尚未挂载；本次没有写入或切换。';
-      if (result?.code === 'session-unavailable') return '这个项目没有可用的代表会话，或目标会话已经失效。';
-      return '操作没有完成，请稍后重试。';
-    }
-
-    function CreatorDetail({ project, tab, onTab, projectActions, alignment, onAlign }) {
+    function CreatorDetail({ routingProject, project, tab, onTab, workspaceFiles,
+      alignment, onAlign, onCatalogRefresh }) {
+      const [preflight, setPreflight] = react.useState(null);
       const [feedback, setFeedback] = react.useState('');
       const [pending, setPending] = react.useState(false);
+      const [receiptRefresh, setReceiptRefresh] = react.useState(0);
+      const [preflightRemaining, setPreflightRemaining] = react.useState(null);
       const pendingRef = react.useRef(false);
-      const feedbackAttempt = react.useRef(0);
-      const pendingAbort = react.useRef(null);
+      const actionAttempt = react.useRef(0);
+      const actionAbort = react.useRef(null);
       react.useEffect(() => {
-        feedbackAttempt.current += 1;
-        pendingAbort.current?.abort();
-        pendingAbort.current = null;
+        actionAttempt.current += 1;
+        actionAbort.current?.abort();
+        actionAbort.current = null;
         pendingRef.current = false;
         setPending(false);
+        setPreflight(null);
+        setPreflightRemaining(null);
         setFeedback('');
         return () => {
-          feedbackAttempt.current += 1;
-          pendingAbort.current?.abort();
-          pendingAbort.current = null;
+          actionAttempt.current += 1;
+          actionAbort.current?.abort();
+          actionAbort.current = null;
           pendingRef.current = false;
         };
-      }, [project?.key, tab]);
-      if (project === undefined) {
-        return react_jsx_runtime.jsx('div', { className: 'wd10-detail', children:
-          react_jsx_runtime.jsx('div', { className: 'wd10-empty', children:
-            '还没有可展示的项目。先在右侧建立一个会话，鲸坞会自动把它归入内容库。' }) });
-      }
-      const fillDraft = async () => {
-        if (pendingRef.current) return;
+      }, [project?.projectToken, workspaceFiles]);
+      react.useEffect(() => {
+        if (!preflight) {
+          setPreflightRemaining(null);
+          return undefined;
+        }
+        let timer = null;
+        const tick = () => {
+          const remaining = new Date(preflight.expiresAt).getTime() - Date.now();
+          if (!Number.isFinite(remaining) || remaining <= 0) {
+            setPreflight(null);
+            setPreflightRemaining(null);
+            setFeedback('预检已过期，请重新确认。');
+            return;
+          }
+          setPreflightRemaining(Math.ceil(remaining / 1000));
+          timer = globalThis.setTimeout(tick, Math.min(1000, remaining));
+        };
+        tick();
+        return () => { if (timer !== null) globalThis.clearTimeout(timer); };
+      }, [preflight]);
+      const runPrepare = async (action) => {
+        if (!project || pendingRef.current) return;
         pendingRef.current = true;
         setPending(true);
-        const operation = new AbortController();
-        pendingAbort.current = operation;
-        const attempt = ++feedbackAttempt.current;
-        setFeedback('正在对账项目与右侧会话…');
+        setPreflight(null);
+        setFeedback('正在确认投递去向…');
+        const controller = new AbortController();
+        actionAbort.current = controller;
+        const attempt = ++actionAttempt.current;
         try {
-          const result = await projectActions.fillDraft(
-            project.representativeId, stageCopy(tab, project.title),
-            project.workspaceId, operation.signal
-          );
-          if (feedbackAttempt.current === attempt) setFeedback(draftFeedback(result));
-        } catch (_error) {
-          if (feedbackAttempt.current === attempt) {
-            setFeedback('操作意外中断，请重试；本次没有自动发送。');
+          const snapshot = await workspaceFiles.execute('project.action.prepare', {
+            projectToken: project.projectToken, actionId: action.id
+          }, controller.signal);
+          if (actionAttempt.current !== attempt) return;
+          const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+          const expiresMs = Date.parse(value?.expiresAt);
+          if (!plain(value) || value.kind !== 'preflight'
+              || !OPAQUE_VALUE_RE.test(String(value.preflightToken || ''))
+              || !Number.isFinite(expiresMs)) {
+            setFeedback(operationError(snapshot, '无法确认投递去向；没有发送。'));
+            return;
           }
-        } finally {
-          if (pendingAbort.current === operation) {
-            pendingAbort.current = null;
-            pendingRef.current = false;
-            setPending(false);
+          if (expiresMs <= Date.now()) {
+            setFeedback('预检已过期，请重新确认。');
+            return;
           }
+          setPreflight(Object.freeze({
+            preflightToken: value.preflightToken,
+            projectToken: project.projectToken,
+            actionId: action.id,
+            targetLabel: boundedUiText(value.targetLabel, '目标会话', 120),
+            workspaceLabel: boundedUiText(value.workspaceLabel, '当前工作区', 120),
+            workspaceMatch: ['match', 'mismatch', 'unknown'].includes(value.workspaceMatch)
+              ? value.workspaceMatch : 'unknown',
+            targetRunning: value.targetRunning === true,
+            eventTracking: value.eventTracking === 'ready' ? 'ready' : 'unavailable',
+            expiresAt: value.expiresAt
+          }));
+          setFeedback('');
+        } catch (_error) { if (actionAttempt.current === attempt) setFeedback('无法确认投递去向；没有发送。'); }
+        finally {
+          if (actionAbort.current === controller) actionAbort.current = null;
+          if (actionAttempt.current === attempt) { pendingRef.current = false; setPending(false); }
         }
       };
+      const cancelPreflight = () => {
+        if (pendingRef.current) return;
+        setPreflight(null);
+        setFeedback('已取消，没有发送。');
+      };
+      const confirmPreflight = async () => {
+        if (!preflight || pendingRef.current) return;
+        if (Date.parse(preflight.expiresAt) <= Date.now()) {
+          setPreflight(null);
+          setPreflightRemaining(null);
+          setFeedback('预检已过期，请重新确认。');
+          return;
+        }
+        const frozen = preflight;
+        pendingRef.current = true;
+        setPending(true);
+        setFeedback('正在提交到已确认的目标会话…');
+        const controller = new AbortController();
+        actionAbort.current = controller;
+        const attempt = ++actionAttempt.current;
+        try {
+          const snapshot = await workspaceFiles.execute('project.action.submit', {
+            projectToken: frozen.projectToken,
+            actionId: frozen.actionId,
+            preflightToken: frozen.preflightToken,
+            override: frozen.workspaceMatch !== 'match'
+          }, controller.signal);
+          if (actionAttempt.current !== attempt) return;
+          const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+          setPreflight(null);
+          if (!plain(value) || !['accepted', 'rejected', 'unknown'].includes(value.state)) {
+            setFeedback(operationError(snapshot));
+            return;
+          }
+          setFeedback(value.state === 'accepted'
+            ? `已提交到 ${boundedUiText(value.target, '目标会话', 96)}；任务回执会继续更新。`
+            : value.state === 'rejected'
+              ? `目标拒绝投递（${boundedUiText(value.reason, '原因未说明', 64)}）；没有重复发送。`
+              : '提交结果未知；请核对任务回执，不要重复点击。');
+          setReceiptRefresh((current) => current + 1);
+          onCatalogRefresh?.();
+        } catch (_error) {
+          if (actionAttempt.current === attempt) {
+            setPreflight(null);
+            setFeedback('提交结果未知；请核对右栏和任务回执，不要重复点击。');
+          }
+        } finally {
+          if (actionAbort.current === controller) actionAbort.current = null;
+          if (actionAttempt.current === attempt) { pendingRef.current = false; setPending(false); }
+        }
+      };
+      const title = project?.title || routingProject?.title || '未选择内容';
       return react_jsx_runtime.jsxs('div', { className: 'wd10-detail', children: [
         alignment && react_jsx_runtime.jsxs('div', { className: 'wd10-banner', role: 'alert', children: [
           react_jsx_runtime.jsxs('span', { children: [
-            '右栏当前在《', alignment.currentTitle, '》，不是你选的《', project.title, '》。',
+            '右栏当前在《', alignment.currentTitle, '》，不是你选的《', routingProject?.title || title, '》。',
             alignment.error || ''
           ] }),
           react_jsx_runtime.jsx('button', { type: 'button', disabled: alignment.pending,
             onClick: onAlign, children: alignment.pending ? '正在对齐…' : '一键对齐' })
         ] }),
         react_jsx_runtime.jsxs('header', { className: 'wd10-detailHead', children: [
-          react_jsx_runtime.jsx('div', { className: 'wd10-eyebrow', children: '当前项目' }),
-          react_jsx_runtime.jsx('h1', { children: project.title }),
-          react_jsx_runtime.jsx('p', { children:
-            `${project.sessions.length} 个会话已聚合 · ${project.running ? '有任务正在进行' : '可继续推进'}` })
+          react_jsx_runtime.jsx('div', { className: 'wd10-eyebrow', children: '当前内容' }),
+          react_jsx_runtime.jsx('h1', { children: title }),
+          react_jsx_runtime.jsx('p', { children: project
+            ? `${project.workflowLabel} · ${project.updated ? `更新 ${project.updated}` : '更新时间未写明'}`
+            : '请从左侧选择一张真实内容卡。' }),
+          project && project.actions.length > 0 && react_jsx_runtime.jsx('div', {
+            className: 'wd10-projectActions', children: project.actions.map((action) => (
+              react_jsx_runtime.jsx('button', { type: 'button', disabled: pending,
+                title: action.hint || undefined, onClick: () => { void runPrepare(action); },
+                children: action.label }, action.id)
+            ))
+          })
         ] }),
         react_jsx_runtime.jsx('nav', { className: 'wd10-tabs', 'aria-label': '项目阶段', children:
           CREATOR_TABS.map(([id, label]) => react_jsx_runtime.jsx('button', {
             type: 'button', 'aria-selected': tab === id, onClick: () => onTab(id), children: label
           }, id)) }),
-        react_jsx_runtime.jsxs('main', { className: 'wd10-panel', children: [
-          react_jsx_runtime.jsxs('section', { className: 'wd10-card', children: [
-            react_jsx_runtime.jsx('h3', { children:
-              CREATOR_TABS.find(([id]) => id === tab)?.[1] || '概览' }),
-            react_jsx_runtime.jsx('p', { children:
-              '工作台和原生对话同屏。点击下方操作会先对账项目会话，再把任务放入右侧草稿，不覆盖已有草稿。' }),
-            react_jsx_runtime.jsxs('div', { className: 'wd10-stats', children: [
-              react_jsx_runtime.jsxs('div', { className: 'wd10-stat', children: [
-                react_jsx_runtime.jsx('strong', { children: project.sessions.length }),
-                react_jsx_runtime.jsx('span', { children: '项目会话' })
-              ] }),
-              react_jsx_runtime.jsxs('div', { className: 'wd10-stat', children: [
-                react_jsx_runtime.jsx('strong', { children: project.running ? '1' : '0' }),
-                react_jsx_runtime.jsx('span', { children: '进行中' })
-              ] })
-            ] })
-          ] }),
-          react_jsx_runtime.jsxs('section', { className: 'wd10-card', children: [
-            react_jsx_runtime.jsx('h3', { children: '与 AI 继续' }),
-            react_jsx_runtime.jsxs('button', { className: 'wd10-action', type: 'button',
-              disabled: pending, 'aria-busy': pending || undefined, onClick: fillDraft, children: [
-                pending ? '正在填入…' : '填入右侧草稿',
-                react_jsx_runtime.jsx('small', { children: '你确认后才会发送，不会自动投递' })
-              ] }),
-            feedback && react_jsx_runtime.jsx('p', { className: 'wd10-feedback', role: 'status', children: feedback })
-          ] })
-        ] })
+        react_jsx_runtime.jsx(TaskReceiptStrip, {
+          projectToken: project?.projectToken || null,
+          workspaceFiles, preflight, pending, feedback,
+          onConfirm: () => { void confirmPreflight(); }, onCancel: cancelPreflight,
+          refreshKey: receiptRefresh, onCatalogRefresh, preflightRemaining
+        }),
+        react_jsx_runtime.jsx('main', { className: 'wd10-panel', children:
+          react_jsx_runtime.jsxs('section', {
+            className: 'wd10-card wd10-unfinished', 'data-whaledock-unfinished': true, children: [
+              react_jsx_runtime.jsx('h3', { children:
+                CREATOR_TABS.find(([id]) => id === tab)?.[1] || '概览' }),
+              react_jsx_runtime.jsx('strong', { children: '这一格还没做' }),
+              react_jsx_runtime.jsx('p', { children: '这一批只接通真实内容卡与任务回执；这里不会用静态卡冒充已实现。' })
+            ]
+          })
+        })
       ] });
     }
 
@@ -400,7 +727,7 @@ window.__ModuleLoader__.load({
       const projects = react.useMemo(
         () => creatorProjects(sessionState, workspaceState), [sessionState, workspaceState]
       );
-      const { preferences, projectActions } = integration;
+      const { preferences, projectActions, workspaceFiles } = integration;
       const [mode, setMode] = react.useState('sessions');
       const [hintSeen, setHintSeen] = react.useState(false);
       const [preferenceError, setPreferenceError] = react.useState('');
@@ -409,11 +736,29 @@ window.__ModuleLoader__.load({
       const [creatorTab, setCreatorTab] = react.useState('overview');
       const [alignmentPending, setAlignmentPending] = react.useState(false);
       const [alignmentError, setAlignmentError] = react.useState('');
+      const [catalog, setCatalog] = react.useState({ status: 'idle', projects: [] });
+      const [selectedContentToken, setSelectedContentToken] = react.useState(null);
+      const [catalogRefreshKey, setCatalogRefreshKey] = react.useState(0);
       const alignmentAttempt = react.useRef(0);
+      const catalogAttempt = react.useRef(0);
+      const catalogIdentity = react.useRef(null);
+      const catalogPages = react.useRef(1);
+      const catalogBusy = react.useRef(false);
+      const catalogLoadMoreAttempt = react.useRef(0);
+      const catalogLoadMoreAbort = react.useRef(null);
+      const selectedContentRef = react.useRef(null);
       const alignmentCurrent = react.useRef(sessionState.current);
       const currentProject = sessionState.current === undefined ? undefined
         : projects.find((project) => project.sessionIds.includes(sessionState.current));
       const currentProjectKey = currentProject?.key || null;
+      const activeRoutingProject = projects.find((project) => project.key === activeProjectKey)
+        || projects[0];
+      const routingMismatch = activeRoutingProject !== undefined
+        && activeRoutingProject.key !== currentProjectKey;
+      const currentCatalogIdentity = mode === 'content' && !routingMismatch && activeRoutingProject
+        && sessionState.current !== undefined
+        ? `${activeRoutingProject.key}\u0000${activeRoutingProject.pathTail}\u0000${sessionState.current}`
+        : null;
 
       react.useLayoutEffect(() => {
         if (Object.is(alignmentCurrent.current, sessionState.current)) return;
@@ -458,6 +803,129 @@ window.__ModuleLoader__.load({
             || projects[0]?.key || null
         );
       }, [projects, activeProjectKey, currentProjectKey]);
+      const refreshCatalog = react.useCallback(() => {
+        setCatalogRefreshKey((current) => current + 1);
+      }, []);
+      react.useLayoutEffect(() => {
+        const identity = currentCatalogIdentity;
+        const identityChanged = catalogIdentity.current !== identity;
+        catalogIdentity.current = identity;
+        const attempt = ++catalogAttempt.current;
+        catalogLoadMoreAttempt.current += 1;
+        catalogLoadMoreAbort.current?.abort();
+        catalogLoadMoreAbort.current = null;
+        catalogBusy.current = false;
+        const controller = new AbortController();
+        let timer = null;
+        if (identityChanged) {
+          catalogPages.current = 1;
+          selectedContentRef.current = null;
+          setSelectedContentToken(null);
+          setCatalog({ status: identity ? 'loading' : 'idle', projects: [], nextCursor: null });
+        }
+        if (!identity || !workspaceFiles || typeof workspaceFiles.execute !== 'function') {
+          if (identity && (!workspaceFiles || typeof workspaceFiles.execute !== 'function')) {
+            setCatalog({ status: 'error', projects: [], nextCursor: null });
+          }
+          return () => controller.abort();
+        }
+        const readPages = async () => {
+          if (catalogBusy.current || controller.signal.aborted) return;
+          catalogBusy.current = true;
+          const pageTarget = Math.max(1, catalogPages.current);
+          let cursor = 0;
+          let result = null;
+          const merged = [];
+          try {
+            for (let page = 0; page < pageTarget && cursor !== null; page += 1) {
+              const snapshot = await workspaceFiles.execute(
+                'catalog.read', { cursor, limit: 4 }, controller.signal
+              );
+              result = contentCatalogResult(snapshot);
+              if (!result) throw new Error('catalog-invalid');
+              for (const project of result.projects) {
+                if (!merged.some((item) => item.contentRef === project.contentRef)) merged.push(project);
+              }
+              cursor = result.nextCursor;
+            }
+          } catch (_error) { result = null; }
+          catalogBusy.current = false;
+          if (controller.signal.aborted || catalogAttempt.current !== attempt) return;
+          if (!result) {
+            setCatalog((current) => current.projects.length > 0
+              ? { ...current, status: 'stale', loadingMore: false }
+              : { status: 'error', projects: [], nextCursor: null });
+          } else {
+            const prior = selectedContentRef.current;
+            const selected = merged.find((project) => project.contentRef === prior?.contentRef)
+              || merged[0] || null;
+            selectedContentRef.current = selected ? {
+              contentRef: selected.contentRef, token: selected.projectToken
+            } : null;
+            setSelectedContentToken(selected?.projectToken || null);
+            setCatalog({ status: 'ready', projects: merged,
+              projectCount: result.projectCount, nextCursor: cursor,
+              loadingMore: false, moreError: false });
+          }
+          timer = globalThis.setTimeout(readPages, 4000);
+        };
+        void readPages();
+        return () => {
+          controller.abort();
+          catalogBusy.current = false;
+          catalogLoadMoreAttempt.current += 1;
+          catalogLoadMoreAbort.current?.abort();
+          catalogLoadMoreAbort.current = null;
+          if (timer !== null) globalThis.clearTimeout(timer);
+        };
+      }, [currentCatalogIdentity, workspaceFiles, catalogRefreshKey]);
+
+      const selectContent = (project) => {
+        selectedContentRef.current = {
+          contentRef: project.contentRef, token: project.projectToken
+        };
+        setSelectedContentToken(project.projectToken);
+      };
+      const loadMoreCatalog = async () => {
+        if (!catalogIdentity.current || catalog.loadingMore || catalogLoadMoreAbort.current
+            || catalog.nextCursor === null
+            || catalog.nextCursor === undefined || !workspaceFiles
+            || typeof workspaceFiles.execute !== 'function') return;
+        const identity = catalogIdentity.current;
+        const attempt = ++catalogLoadMoreAttempt.current;
+        const controller = new AbortController();
+        catalogLoadMoreAbort.current?.abort();
+        catalogLoadMoreAbort.current = controller;
+        setCatalog((current) => ({ ...current, loadingMore: true, moreError: false }));
+        try {
+          const snapshot = await workspaceFiles.execute('catalog.read', {
+            cursor: catalog.nextCursor, limit: 4
+          }, controller.signal);
+          const result = contentCatalogResult(snapshot);
+          if (controller.signal.aborted || catalogLoadMoreAttempt.current !== attempt
+              || catalogIdentity.current !== identity) return;
+          if (!result) {
+            setCatalog((current) => ({ ...current, loadingMore: false, moreError: true }));
+            return;
+          }
+          catalogPages.current += 1;
+          setCatalog((current) => {
+            const projects = [...current.projects];
+            for (const project of result.projects) {
+              if (!projects.some((item) => item.contentRef === project.contentRef)) projects.push(project);
+            }
+            return { status: 'ready', projects, projectCount: result.projectCount,
+              nextCursor: result.nextCursor, loadingMore: false, moreError: false };
+          });
+        } catch (_error) {
+          if (!controller.signal.aborted && catalogLoadMoreAttempt.current === attempt
+              && catalogIdentity.current === identity) {
+            setCatalog((current) => ({ ...current, loadingMore: false, moreError: true }));
+          }
+        } finally {
+          if (catalogLoadMoreAbort.current === controller) catalogLoadMoreAbort.current = null;
+        }
+      };
 
       const writePreference = async (patch) => {
         if (preferences === undefined || typeof preferences.write !== 'function') {
@@ -518,9 +986,14 @@ window.__ModuleLoader__.load({
         const left = mount.viewport < 1120 ? 232 : 272;
         const detail = Math.min(440, Math.max(mount.viewport < 1120 ? 300 : 340,
           Math.round(mount.viewport * 0.31)));
-        const activeProject = projects.find((project) => project.key === activeProjectKey)
-          || projects[0];
-        const mismatch = activeProject !== undefined && activeProject.key !== currentProjectKey;
+        const activeProject = activeRoutingProject;
+        const mismatch = routingMismatch;
+        const visibleCatalog = catalogIdentity.current === currentCatalogIdentity ? catalog : {
+          status: currentCatalogIdentity ? 'loading' : 'idle', projects: [], nextCursor: null
+        };
+        const selectedContent = visibleCatalog.projects.find((project) => (
+          project.projectToken === selectedContentToken
+        )) || visibleCatalog.projects[0];
         const contentSwitch = react_jsx_runtime.jsxs('div', {
           className: 'wd10-switch wd10-subSwitch', role: 'tablist',
           'aria-label': '内容态左栏', children: [
@@ -558,24 +1031,33 @@ window.__ModuleLoader__.load({
               react_jsx_runtime.jsx('div', { className: 'wd10-leftView',
                 hidden: contentLeftView !== 'library', children:
                   react_jsx_runtime.jsx(CreatorSidebar, {
-                    projects, activeKey: activeProject?.key,
-                    onSelect: (project) => { void alignProject(project, false); }
+                    workspace: activeProject,
+                    workspaces: projects,
+                    activeWorkspaceKey: activeProject?.key || null,
+                    onWorkspaceSelect: (project) => { void alignProject(project, false); },
+                    catalog: visibleCatalog,
+                    selectedToken: selectedContent?.projectToken || null,
+                    onSelect: selectContent,
+                    onRefresh: refreshCatalog,
+                    onLoadMore: () => { void loadMoreCatalog(); }
                   }) }),
               react_jsx_runtime.jsx('div', { className: 'wd10-nativeSidebar',
                 hidden: contentLeftView !== 'native', children: mount.renderSidebar(left) })
             ] }),
             react_jsx_runtime.jsx(CreatorDetail, {
-              project: activeProject,
+              routingProject: activeProject,
+              project: selectedContent,
               tab: creatorTab,
               onTab: setCreatorTab,
-              projectActions,
+              workspaceFiles,
               alignment: mismatch ? {
                 currentTitle: currentProject?.title
                   || sessionState.byId[sessionState.current]?.displayTitle || '未选择会话',
                 pending: alignmentPending,
                 error: alignmentError
               } : null,
-              onAlign: () => { void alignProject(activeProject, true); }
+              onAlign: () => { void alignProject(activeProject, true); },
+              onCatalogRefresh: refreshCatalog
             }),
             react_jsx_runtime.jsxs('section', { className: 'wd10-chat',
               'aria-label': '原生对话', children: [
