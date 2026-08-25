@@ -433,6 +433,29 @@ function publishSurface(project, extra = {}) {
   };
 }
 
+function tactic(hex, title, extra = {}) {
+  return {
+    contentRef: `content-${hex.repeat(24).slice(0, 24)}`,
+    projectToken: `project-${hex.repeat(24).slice(0, 24)}`,
+    title, summary: `${title} 的本地摘要`, summaryTruncated: false,
+    sourceTitle: '真实本地复盘', updated: '2026-08-25 12:00', ...extra
+  };
+}
+
+function tacticsPage(project, tactics = [], extra = {}) {
+  const cursor = extra.cursor || 0;
+  const itemCount = Object.prototype.hasOwnProperty.call(extra, 'itemCount')
+    ? extra.itemCount : cursor + tactics.length;
+  return fulfilled({
+    kind: 'tactics', contentRef: project.contentRef, projectToken: project.projectToken,
+    collectionToken: extra.collectionToken || `collection-${'a'.repeat(24)}`,
+    itemCount, complete: extra.complete ?? true, cursor,
+    nextCursor: Object.prototype.hasOwnProperty.call(extra, 'nextCursor')
+      ? extra.nextCursor : null,
+    tactics
+  });
+}
+
 function scriptBlock(hex, text, extra = {}) {
   return {
     blockToken: `block-${hex.repeat(24).slice(0, 24)}`,
@@ -908,7 +931,7 @@ async function main() {
     assert(calls.some((call) => call.operation === 'catalog.read' && call.input.cursor === 4));
   });
 
-  await test('概览、脚本、发布接通真实文件且拍摄复盘诚实标未完成，TaskReceiptStrip 不卸载', async () => {
+  await test('概览、脚本、发布与复盘接通真实能力且拍摄诚实标未完成，TaskReceiptStrip 不卸载', async () => {
     const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
     const project = contentProject('8', '回执项目', '拍摄中');
     project.contentRef = `content-${'8'.repeat(24)}`;
@@ -924,6 +947,7 @@ async function main() {
       if (operation === 'publish.read') return fulfilled(publishSurface(project, {
         stage: 'shoot', stageLabel: '拍摄', checklist: null
       }));
+      if (operation === 'review.tactics.read') return tacticsPage(project);
       if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
         projectToken: input.projectToken, receipts: [{
           receiptId: 'receipt-opaque-01', targetLabel: '右栏会话', tracking: 'ready',
@@ -955,13 +979,21 @@ async function main() {
     assert.match(textOf(tree), /真实脚本文本/u);
     assert.doesNotMatch(textOf(tree), /这一格还没做/u);
     assert.equal(harness.renderer.fiberIds('TaskReceiptStrip')[0], receiptFiber);
-    for (const label of ['拍摄', '复盘']) {
-      button(tree, label).props.onClick();
-      tree = harness.renderer.render(harness.AppFrame, props);
-      assert.match(textOf(tree), /这一格还没做/u);
-      assert.match(textOf(tree), /投递中/u);
-      assert.equal(harness.renderer.fiberIds('TaskReceiptStrip')[0], receiptFiber);
-    }
+    button(tree, '拍摄').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.match(textOf(tree), /这一格还没做/u);
+    assert.match(textOf(tree), /投递中/u);
+    assert.equal(harness.renderer.fiberIds('TaskReceiptStrip')[0], receiptFiber);
+    button(tree, '复盘').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.doesNotMatch(textOf(tree), /这一格还没做/u);
+    assert.match(textOf(tree), /当前“写稿”阶段不能固化/u);
+    assert.match(textOf(tree), /打法只能由你从真实复盘显式固化/u);
+    assert.equal(button(tree, '显式固化进打法库').props.disabled, true);
+    assert.match(textOf(tree), /投递中/u);
+    assert.equal(harness.renderer.fiberIds('TaskReceiptStrip')[0], receiptFiber);
     button(tree, '发布').props.onClick();
     tree = harness.renderer.render(harness.AppFrame, props);
     tree = await settle(harness, props);
@@ -973,6 +1005,437 @@ async function main() {
     button(tree, '刚更新').props.onClick();
     tree = await settle(harness, props);
     assert.doesNotMatch(textOf(tree), /刚更新/u);
+  });
+
+  await test('复盘正文与打法墙自动分页，后页失败保留真实 partial 且不开放固化', async () => {
+    const project = contentProject('9', '真实复盘项目', '复盘');
+    const blocks = [
+      scriptBlock('1', '复盘结论第一块', { kind: 'heading', startLine: 5, endLine: 5 }),
+      scriptBlock('2', '复盘结论第二块', { startLine: 6, endLine: 7 }),
+      scriptBlock('3', '复盘结论第三块', { startLine: 8, endLine: 9 })
+    ];
+    const tactics = [
+      tactic('a', '打法一'), tactic('b', '打法二'), tactic('c', '打法三'),
+      tactic('d', '打法四'), tactic('e', '打法五', { summary: null })
+    ];
+    const makeHarness = (failTail) => {
+      const calls = [];
+      const workspaceFiles = { async execute(operation, input) {
+        calls.push({ operation, input: { ...input } });
+        if (operation === 'catalog.read') return catalog([project]);
+        if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+          projectToken: input.projectToken, receipts: [] });
+        if (operation === 'document.read' && input.cursor === 0) {
+          return documentPage(project, blocks.slice(0, 2), {
+            stage: 'review', stageLabel: '复盘', blockCount: 3, nextCursor: 2
+          });
+        }
+        if (operation === 'document.read' && input.cursor === 2) {
+          return documentPage(project, blocks.slice(2), {
+            stage: 'review', stageLabel: '复盘', blockCount: 3, cursor: 2
+          });
+        }
+        if (operation === 'review.tactics.read' && input.cursor === 0) {
+          return tacticsPage(project, tactics.slice(0, 4), {
+            itemCount: 5, nextCursor: 4, complete: !failTail,
+            collectionToken: `collection-${'b'.repeat(24)}`
+          });
+        }
+        if (operation === 'review.tactics.read' && input.cursor === 4) {
+          if (failTail) throw new Error('tactic tail unavailable');
+          return tacticsPage(project, tactics.slice(4), {
+            itemCount: 5, cursor: 4, collectionToken: `collection-${'b'.repeat(24)}`
+          });
+        }
+        throw new Error(operation);
+      } };
+      const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+      return { calls, harness: loadBundle({ whaledockShellPreferences: pref,
+        whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+        creatorTab: 'review'
+      }) };
+    };
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const full = makeHarness(false);
+    const props = uiProps(state, full.harness.integration, []);
+    let tree = full.harness.renderer.render(full.harness.AppFrame, props);
+    tree = await settle(full.harness, props);
+    tree = await settle(full.harness, props);
+    tree = await settle(full.harness, props);
+    assert.match(textOf(tree), /复盘结论第一块/u);
+    assert.match(textOf(tree), /复盘结论第三块/u);
+    assert.match(textOf(tree), /打法一/u);
+    assert.match(textOf(tree), /打法五/u);
+    assert.match(textOf(tree), /这条本地打法没有可显示的摘要/u);
+    assert.match(textOf(tree), /打法只能由你从真实复盘显式固化。/u);
+    assert.match(textOf(tree), /一期没有平台数据通道；以下都是本地文件，不显示播放量、评论聚类、使用次数或胜率。/u);
+    assert.equal(button(tree, '显式固化进打法库').props.disabled, false);
+    assert.deepEqual(full.calls.filter((call) => call.operation === 'document.read')
+      .map((call) => call.input), [
+      { projectToken: project.projectToken, cursor: 0, limit: 2 },
+      { projectToken: project.projectToken, cursor: 2, limit: 2 }
+    ]);
+    assert.deepEqual(full.calls.filter((call) => call.operation === 'review.tactics.read')
+      .map((call) => call.input), [
+      { contentRef: project.contentRef, projectToken: project.projectToken,
+        cursor: 0, limit: 4, collectionToken: null },
+      { contentRef: project.contentRef, projectToken: project.projectToken,
+        cursor: 4, limit: 4, collectionToken: `collection-${'b'.repeat(24)}` }
+    ]);
+
+    const partial = makeHarness(true);
+    const partialProps = uiProps(state, partial.harness.integration, []);
+    tree = partial.harness.renderer.render(partial.harness.AppFrame, partialProps);
+    tree = await settle(partial.harness, partialProps);
+    tree = await settle(partial.harness, partialProps);
+    tree = await settle(partial.harness, partialProps);
+    assert.match(textOf(tree), /打法一/u);
+    assert.doesNotMatch(textOf(tree), /打法五/u);
+    assert.match(textOf(tree), /打法库读取不完整；只显示已成功读取的 4 条本地条目/u);
+    assert.equal(button(tree, '显式固化进打法库').props.disabled, true);
+  });
+
+  await test('复盘固化双击单飞，返回打法立即 upsert 高亮且 created:false 不伪造新增', async () => {
+    const project = contentProject('1', '待固化复盘', '复盘');
+    const existing = tactic('2', '既有打法');
+    const returned = tactic('3', '刚固化的打法');
+    const creation = deferred();
+    const freshWall = deferred();
+    let wallReads = 0;
+    let solidifyCalls = 0;
+    const calls = [];
+    const workspaceFiles = { async execute(operation, input) {
+      calls.push({ operation, input: { ...input } });
+      if (operation === 'catalog.read') return catalog([project]);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'document.read') return documentPage(project, [
+        scriptBlock('4', '这是真实复盘正文')
+      ], { stage: 'review', stageLabel: '复盘' });
+      if (operation === 'review.tactics.read') {
+        wallReads += 1;
+        if (wallReads === 1) return tacticsPage(project, [existing], {
+          collectionToken: `collection-${'a'.repeat(24)}`
+        });
+        if (wallReads === 2) return freshWall.promise;
+        return tacticsPage(project, [returned, existing], {
+          collectionToken: `collection-${'c'.repeat(24)}`
+        });
+      }
+      if (operation === 'review.solidify') {
+        solidifyCalls += 1;
+        if (solidifyCalls === 1) return creation.promise;
+        return fulfilled({
+          kind: 'review-solidify', created: false,
+          sourceContentRef: project.contentRef, sourceProjectToken: project.projectToken,
+          tactic: returned, message: '已找到同一复盘修订对应的本地打法。'
+        });
+      }
+      throw new Error(operation);
+    } };
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+      creatorTab: 'review'
+    });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    const solidify = button(tree, '显式固化进打法库');
+    solidify.props.onClick();
+    solidify.props.onClick();
+    assert.equal(solidifyCalls, 1, 'pendingRef 必须在首个 await 前锁住复盘固化');
+    creation.resolve(fulfilled({
+      kind: 'review-solidify', created: true,
+      sourceContentRef: project.contentRef, sourceProjectToken: project.projectToken,
+      tactic: returned, message: '已显式固化进本地打法库。'
+    }));
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /刚固化的打法/u,
+      '必须使用 mutation 返回 tactic 立即 upsert，不能等待分页刷新');
+    let returnedCard = findAll(tree, (node) => node.props?.['data-tactic-ref']
+      === returned.contentRef)[0];
+    assert(returnedCard);
+    assert.equal(returnedCard.props['data-highlight'], true);
+    assert.equal(button(tree, '显式固化进打法库').props.disabled, true,
+      'fresh page0 对账完成前不得再次写入');
+    const selected = findAll(tree, (node) => node.props?.className === 'wd10-project'
+      && node.props['aria-current'] === true)[0];
+    assert.match(textOf(selected), /待固化复盘/u, '固化后必须保持 review 源卡选中');
+    freshWall.resolve(tacticsPage(project, [returned, existing], {
+      collectionToken: `collection-${'c'.repeat(24)}`
+    }));
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.equal(button(tree, '显式固化进打法库').props.disabled, false);
+    returnedCard = findAll(tree, (node) => node.props?.['data-tactic-ref']
+      === returned.contentRef)[0];
+    assert.equal(returnedCard.props['data-highlight'], true);
+
+    button(tree, '显式固化进打法库').props.onClick();
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.equal(solidifyCalls, 2);
+    assert.match(textOf(tree), /已定位既有打法；没有重复创建/u);
+    assert.equal(findAll(tree, (node) => node.props?.className === 'wd10-tactic').length, 2,
+      'created:false 只能定位并 upsert 既有打法，不能伪造第三张卡');
+    assert.deepEqual(calls.filter((call) => call.operation === 'review.solidify')
+      .map((call) => call.input), [
+      { contentRef: project.contentRef, projectToken: project.projectToken },
+      { contentRef: project.contentRef, projectToken: project.projectToken }
+    ]);
+    assert.equal(calls.some((call) => call.operation === 'receipts.ack'), false,
+      '本地固化不得伪造 agent receipt');
+  });
+
+  await test('复盘页 A→B→A 与 workspace 变化立即清旧视图并丢弃迟到响应', async () => {
+    const projectA = contentProject('4', '复盘 A', '复盘');
+    const projectB = contentProject('5', '复盘 B', '复盘');
+    const delayedTacticsA = deferred();
+    let documentAReads = 0;
+    let tacticsAReads = 0;
+    const workspaceFiles = { async execute(operation, input) {
+      if (operation === 'catalog.read') return catalog([projectA, projectB]);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'document.read' && input.projectToken === projectA.projectToken) {
+        documentAReads += 1;
+        return documentPage(projectA, [scriptBlock('6', documentAReads === 1
+          ? 'A 初始复盘正文' : 'A 最新复盘正文')], {
+          stage: 'review', stageLabel: '复盘'
+        });
+      }
+      if (operation === 'document.read') return documentPage(projectB, [
+        scriptBlock('7', 'B 当前复盘正文')
+      ], { stage: 'review', stageLabel: '复盘' });
+      if (operation === 'review.tactics.read' && input.contentRef === projectA.contentRef) {
+        tacticsAReads += 1;
+        return tacticsAReads === 1 ? delayedTacticsA.promise
+          : tacticsPage(projectA, [tactic('8', 'A 最新打法')], {
+            collectionToken: `collection-${'d'.repeat(24)}`
+          });
+      }
+      if (operation === 'review.tactics.read') return tacticsPage(projectB, [
+        tactic('9', 'B 当前打法')
+      ], { collectionToken: `collection-${'e'.repeat(24)}` });
+      throw new Error(operation);
+    } };
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+      creatorTab: 'review'
+    });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    const card = (title) => findAll(tree, (node) => node.props?.className === 'wd10-project'
+      && textOf(node).includes(title))[0];
+    card('复盘 B').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.doesNotMatch(textOf(tree), /A 最新|A 迟到/u);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /B 当前复盘正文/u);
+    assert.match(textOf(tree), /B 当前打法/u);
+    card('复盘 A').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.doesNotMatch(textOf(tree), /B 当前复盘正文|B 当前打法/u,
+      '切回同一 contentRef 前缀的 A 也必须立即清 B');
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.equal(documentAReads, 2);
+    assert.equal(tacticsAReads, 2);
+    assert.match(textOf(tree), /A 最新复盘正文/u);
+    assert.match(textOf(tree), /A 最新打法/u);
+    delayedTacticsA.resolve(tacticsPage(projectA, [tactic('b', 'A 迟到打法')], {
+      collectionToken: `collection-${'f'.repeat(24)}`
+    }));
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /A 最新复盘正文/u);
+    assert.match(textOf(tree), /A 最新打法/u);
+    assert.doesNotMatch(textOf(tree), /A 迟到打法/u);
+
+    state.sessions = {
+      ids: ['a', 'z'], current: 'z', byId: {
+        ...state.sessions.byId, z: session('z', '/projects/other-workspace')
+      }
+    };
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.doesNotMatch(textOf(tree), /A 最新复盘正文|A 最新打法/u,
+      'workspace identity 变化必须在新读取前清空旧复盘与打法墙');
+  });
+
+  await test('复盘 solidify outcome-unknown 保留旧视图并锁写，stale 清空且刷新', async () => {
+    const project = contentProject('6', '不确定复盘', '复盘');
+    const oldTactic = tactic('7', '已验证旧打法');
+    const makeHarness = (mode) => {
+      let solidifyCalls = 0;
+      let catalogReads = 0;
+      const workspaceFiles = { async execute(operation, input) {
+        if (operation === 'catalog.read') {
+          catalogReads += 1;
+          return catalog([project]);
+        }
+        if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+          projectToken: input.projectToken, receipts: [] });
+        if (operation === 'document.read') return documentPage(project, [
+          scriptBlock('8', '保留的真实复盘正文')
+        ], { stage: 'review', stageLabel: '复盘' });
+        if (operation === 'review.tactics.read') return tacticsPage(project, [oldTactic], {
+          collectionToken: `collection-${'8'.repeat(24)}`
+        });
+        if (operation === 'review.solidify') {
+          solidifyCalls += 1;
+          return { state: 'rejected', code: mode === 'unknown'
+            ? 'outcome-unknown' : 'operation-stale', result: null };
+        }
+        throw new Error(operation);
+      } };
+      const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+      return {
+        get solidifyCalls() { return solidifyCalls; },
+        get catalogReads() { return catalogReads; },
+        harness: loadBundle({ whaledockShellPreferences: pref,
+          whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+          creatorTab: 'review'
+        })
+      };
+    };
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const unknown = makeHarness('unknown');
+    const props = uiProps(state, unknown.harness.integration, []);
+    let tree = unknown.harness.renderer.render(unknown.harness.AppFrame, props);
+    tree = await settle(unknown.harness, props);
+    tree = await settle(unknown.harness, props);
+    button(tree, '显式固化进打法库').props.onClick();
+    tree = await settle(unknown.harness, props);
+    assert.match(textOf(tree), /固化结果未知/u);
+    assert.match(textOf(tree), /核对 07_打法库 文件，不要重复点击/u);
+    assert.match(textOf(tree), /保留的真实复盘正文/u);
+    assert.match(textOf(tree), /已验证旧打法/u);
+    assert.equal(button(tree, '显式固化进打法库').props.disabled, true);
+    button(tree, '显式固化进打法库').props.onClick();
+    assert.equal(unknown.solidifyCalls, 1, 'outcome-unknown 后不得允许重复写');
+    button(tree, '重新读取复盘与打法库').props.onClick();
+    tree = unknown.harness.renderer.render(unknown.harness.AppFrame, props);
+    assert.equal(button(tree, '显式固化进打法库').props.disabled, true,
+      'fresh read 完成前仍须锁写');
+    tree = await settle(unknown.harness, props);
+    tree = await settle(unknown.harness, props);
+    assert.equal(button(tree, '显式固化进打法库').props.disabled, false,
+      '只读 fresh read 成功后才恢复写入');
+    assert.equal(unknown.solidifyCalls, 1, '重新读取不得伪装成 solidify 重试');
+
+    const stale = makeHarness('stale');
+    const staleProps = uiProps(state, stale.harness.integration, []);
+    tree = stale.harness.renderer.render(stale.harness.AppFrame, staleProps);
+    tree = await settle(stale.harness, staleProps);
+    tree = await settle(stale.harness, staleProps);
+    button(tree, '显式固化进打法库').props.onClick();
+    tree = await settle(stale.harness, staleProps);
+    tree = await settle(stale.harness, staleProps);
+    assert.match(textOf(tree), /已清空旧视图并刷新内容库/u);
+    assert.doesNotMatch(textOf(tree), /保留的真实复盘正文|已验证旧打法/u);
+    assert(stale.catalogReads >= 2, 'operation-stale 必须触发 catalog refresh');
+  });
+
+  await test('复盘 tactics parser 拒绝路径字段、token 漂移与跨页身份重复，不泄漏假墙数据', async () => {
+    const project = contentProject('a', '严格复盘', '复盘');
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const makeHarness = (mode) => {
+      const workspaceFiles = { async execute(operation, input) {
+        if (operation === 'catalog.read') return catalog([project]);
+        if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+          projectToken: input.projectToken, receipts: [] });
+        if (operation === 'document.read') return documentPage(project, [
+          scriptBlock('b', '严格复盘正文')
+        ], { stage: 'review', stageLabel: '复盘' });
+        if (operation === 'review.tactics.read' && mode === 'path') {
+          return tacticsPage(project, [{
+            ...tactic('c', '不得显示的路径打法'), relativePath: '07_打法库/private-secret.md'
+          }], { collectionToken: `collection-${'1'.repeat(24)}` });
+        }
+        if (operation === 'review.tactics.read' && input.cursor === 0) {
+          return tacticsPage(project, [
+            tactic('1', '安全打法一'), tactic('2', '安全打法二'),
+            tactic('3', '安全打法三'), tactic('4', '安全打法四')
+          ], { itemCount: 5, nextCursor: 4,
+            collectionToken: `collection-${'2'.repeat(24)}` });
+        }
+        if (operation === 'review.tactics.read' && mode === 'duplicate-project-token') {
+          return tacticsPage(project, [
+            tactic('5', '重复身份不得显示', { projectToken: tactic('1', '').projectToken })
+          ], { itemCount: 5, cursor: 4,
+            collectionToken: `collection-${'2'.repeat(24)}` });
+        }
+        if (operation === 'review.tactics.read') return tacticsPage(project, [
+          tactic('5', '漂移后不得显示')
+        ], { itemCount: 5, cursor: 4,
+          collectionToken: `collection-${'3'.repeat(24)}` });
+        throw new Error(operation);
+      } };
+      const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+      return loadBundle({ whaledockShellPreferences: pref,
+        whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+        creatorTab: 'review'
+      });
+    };
+    const pathHarness = makeHarness('path');
+    const pathProps = uiProps(state, pathHarness.integration, []);
+    let tree = pathHarness.renderer.render(pathHarness.AppFrame, pathProps);
+    tree = await settle(pathHarness, pathProps);
+    tree = await settle(pathHarness, pathProps);
+    tree = await settle(pathHarness, pathProps);
+    assert.match(textOf(tree), /打法库暂时读不到/u);
+    assert.doesNotMatch(textOf(tree), /private-secret|不得显示的路径打法/u);
+    assert.equal(button(tree, '显式固化进打法库').props.disabled, true);
+
+    const driftHarness = makeHarness('drift');
+    const driftProps = uiProps(state, driftHarness.integration, []);
+    tree = driftHarness.renderer.render(driftHarness.AppFrame, driftProps);
+    tree = await settle(driftHarness, driftProps);
+    tree = await settle(driftHarness, driftProps);
+    tree = await settle(driftHarness, driftProps);
+    assert.match(textOf(tree), /安全打法一/u);
+    assert.doesNotMatch(textOf(tree), /漂移后不得显示/u);
+    assert.match(textOf(tree), /打法库读取不完整；只显示已成功读取的 4 条本地条目/u);
+    assert.equal(button(tree, '显式固化进打法库').props.disabled, true);
+
+    const duplicateHarness = makeHarness('duplicate-project-token');
+    const duplicateProps = uiProps(state, duplicateHarness.integration, []);
+    tree = duplicateHarness.renderer.render(duplicateHarness.AppFrame, duplicateProps);
+    tree = await settle(duplicateHarness, duplicateProps);
+    tree = await settle(duplicateHarness, duplicateProps);
+    tree = await settle(duplicateHarness, duplicateProps);
+    assert.match(textOf(tree), /安全打法一/u);
+    assert.doesNotMatch(textOf(tree), /重复身份不得显示/u);
+    assert.match(textOf(tree), /打法库读取不完整；只显示已成功读取的 4 条本地条目/u);
+    assert.equal(button(tree, '显式固化进打法库').props.disabled, true);
   });
 
   await test('概览自动读完全部候选，后页失败时保留已读项并明确不完整', async () => {

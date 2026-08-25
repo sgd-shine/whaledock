@@ -994,7 +994,7 @@ async function mainTest() {
       'overview.read', 'project.action.prepare', 'project.action.submit',
       'proposal.decide', 'proposal.read', 'proposal.undo', 'publish.create',
       'publish.read', 'publish.update', 'receipts.ack', 'receipts.open',
-      'receipts.read', 'topic.choose'
+      'receipts.read', 'review.solidify', 'review.tactics.read', 'topic.choose'
     ]);
     const mainSource = source('main.js');
     assert.equal((mainSource.match(
@@ -2257,7 +2257,7 @@ async function mainTest() {
       '创建 claim 不得依赖可变 title');
     const publishTargetFlow = mainSource.slice(
       mainSource.indexOf('function videoPublishChecklistRelativePath'),
-      mainSource.indexOf('function patchVideoPublishDocument')
+      mainSource.indexOf('function videoTacticRevisionKey')
     );
     assert.match(publishTargetFlow,
       /safeRelativePath\(sourceRelativePath\)[\s\S]*createHash\('sha256'\)[\s\S]*digest\('hex'\)/);
@@ -2272,6 +2272,373 @@ async function mainTest() {
     );
     assert.match(dedupeFlow, /scanned\.truncated/);
     assert.match(dedupeFlow, /08_发布检查/);
+  });
+
+  await test('复盘打法库分页绑定 collection，固化终态与安全投影 fail-closed', async () => {
+    const reviewContentRef = `content-${'a'.repeat(24)}`;
+    const reviewProjectToken = `project-${'b'.repeat(24)}`;
+    const changedReviewToken = `project-${'c'.repeat(24)}`;
+    const collectionA = `collection-${'d'.repeat(24)}`;
+    const collectionB = `collection-${'e'.repeat(24)}`;
+    const current = { assertCurrent: () => true };
+    const tactic = (index, override = {}) => ({
+      contentRef: `content-${String(index + 1).repeat(24).slice(0, 24)}`,
+      projectToken: `project-${String(index + 4).repeat(24).slice(0, 24)}`,
+      title: `打法 ${index + 1}`,
+      summary: index === 0 ? '鲸'.repeat(80) : `已验证的第 ${index + 1} 条经验。`,
+      summaryTruncated: index === 0,
+      sourceTitle: '复盘来源',
+      updated: '2026-08-25T12:00:00.000Z',
+      ...override
+    });
+    const tactics = Array.from({ length: 5 }, (_unused, index) => tactic(index));
+    let activeReviewToken = reviewProjectToken;
+    let activeReviewStage = 'review';
+    let activeCollectionToken = collectionA;
+    let activeComplete = true;
+    let collectionCalls = 0;
+    let solidifyCalls = 0;
+    let solidifyCreated = true;
+    const catalog = () => ({
+      generation: 81,
+      projects: [
+        {
+          contentRef: reviewContentRef, projectToken: activeReviewToken,
+          title: '真实复盘', stage: activeReviewStage, stageLabel: '复盘'
+        },
+        ...tactics.map((item) => ({
+          contentRef: item.contentRef, projectToken: item.projectToken,
+          title: item.title, stage: 'asset', stageLabel: '打法资产'
+        }))
+      ]
+    });
+    const tacticsCollection = () => {
+      collectionCalls += 1;
+      return {
+        collectionToken: activeCollectionToken,
+        complete: activeComplete,
+        tactics
+      };
+    };
+    const solidifyAction = async () => {
+      solidifyCalls += 1;
+      return {
+        kind: 'ok', created: solidifyCreated,
+        contentRef: tactics[0].contentRef,
+        projectToken: tactics[0].projectToken,
+        text: '底层已完成唯一固化'
+      };
+    };
+    const tacticSurface = (identity) => {
+      const result = tactics.find((item) => item.contentRef === identity.contentRef
+        && item.projectToken === identity.projectToken);
+      if (!result) throw new Error('打法已变化');
+      return result;
+    };
+    const ops = main.contextPocWorkspaceFileOperations({
+      catalog, tacticsCollection, solidifyAction, tacticSurface
+    });
+    const identity = {
+      contentRef: reviewContentRef, projectToken: reviewProjectToken
+    };
+    const page0Input = {
+      ...identity, cursor: 0, limit: 4, collectionToken: null
+    };
+    assert.deepEqual(ops['review.tactics.read'].validate(page0Input), page0Input);
+    assert.deepEqual(ops['review.solidify'].validate(identity), identity);
+    for (const invalid of [
+      { ...page0Input, cursor: -1 },
+      { ...page0Input, cursor: 513 },
+      { ...page0Input, limit: 0 },
+      { ...page0Input, limit: 5 },
+      { ...page0Input, collectionToken: collectionA },
+      { ...page0Input, cursor: 1, collectionToken: null },
+      { ...page0Input, cursor: 1, collectionToken: 'collection-not-opaque' },
+      { ...page0Input, relativePath: '07_打法库/私有.md' }
+    ]) assert.throws(() => ops['review.tactics.read'].validate(invalid));
+    assert.throws(() => ops['review.solidify'].validate({
+      ...identity, sourceHash: 'f'.repeat(64)
+    }));
+
+    const first = ops['review.tactics.read'].redact(
+      await ops['review.tactics.read'].handle({ input: page0Input, context: current })
+    );
+    assert.deepEqual(Object.keys(first).sort(), [
+      'collectionToken', 'complete', 'contentRef', 'cursor', 'itemCount',
+      'kind', 'nextCursor', 'projectToken', 'tactics'
+    ]);
+    assert.equal(first.kind, 'tactics');
+    assert.equal(first.contentRef, reviewContentRef);
+    assert.equal(first.projectToken, reviewProjectToken);
+    assert.equal(first.collectionToken, collectionA);
+    assert.equal(first.itemCount, 5);
+    assert.equal(first.complete, true);
+    assert.equal(first.cursor, 0);
+    assert.equal(first.nextCursor, 4);
+    assert.equal(first.tactics.length, 4);
+    assert.equal(Buffer.byteLength(first.tactics[0].summary, 'utf8'), 240,
+      '中文摘要上限按 UTF-8 bytes 计算');
+    for (const item of first.tactics) {
+      assert.deepEqual(Object.keys(item).sort(), [
+        'contentRef', 'projectToken', 'sourceTitle', 'summary',
+        'summaryTruncated', 'title', 'updated'
+      ]);
+    }
+    assert.equal(Buffer.byteLength(JSON.stringify(first), 'utf8') <= 5600, true);
+    assert.doesNotMatch(JSON.stringify(first),
+      /relativePath|absolutePath|sourceHash|topicId|frontmatter|\"body\"|metrics|rawPrompt|\/private/i);
+
+    const second = ops['review.tactics.read'].redact(
+      await ops['review.tactics.read'].handle({
+        input: {
+          ...identity, cursor: 4, limit: 4, collectionToken: collectionA
+        }, context: current
+      })
+    );
+    assert.equal(second.collectionToken, collectionA);
+    assert.equal(second.cursor, 4);
+    assert.equal(second.tactics.length, 1);
+    assert.equal(second.nextCursor, null);
+    const terminalEmpty = ops['review.tactics.read'].redact(
+      await ops['review.tactics.read'].handle({
+        input: {
+          ...identity, cursor: 5, limit: 4, collectionToken: collectionA
+        }, context: current
+      })
+    );
+    assert.equal(terminalEmpty.collectionToken, collectionA);
+    assert.deepEqual(terminalEmpty.tactics, []);
+    assert.equal(terminalEmpty.nextCursor, null);
+
+    const emptyOps = main.contextPocWorkspaceFileOperations({
+      catalog,
+      tacticsCollection: () => ({
+        collectionToken: collectionA, complete: true, tactics: []
+      })
+    });
+    const empty = emptyOps['review.tactics.read'].redact(
+      await emptyOps['review.tactics.read'].handle({ input: page0Input, context: current })
+    );
+    assert.equal(empty.collectionToken, collectionA,
+      '空打法库也必须返回合法 collection token');
+    assert.deepEqual(empty.tactics, []);
+    assert.equal(empty.itemCount, 0);
+    assert.equal(empty.complete, true);
+
+    activeComplete = false;
+    const partial = ops['review.tactics.read'].redact(
+      await ops['review.tactics.read'].handle({ input: page0Input, context: current })
+    );
+    assert.equal(partial.complete, false);
+    assert.equal(partial.itemCount, 5,
+      'partial 时 itemCount 只表示本次安全可见资产');
+    activeComplete = true;
+
+    activeCollectionToken = collectionB;
+    let collectionDrift;
+    try {
+      await ops['review.tactics.read'].handle({
+        input: {
+          ...identity, cursor: 4, limit: 4, collectionToken: collectionA
+        }, context: current
+      });
+    } catch (error) { collectionDrift = error; }
+    assert.equal(ops['review.tactics.read'].errorCode(collectionDrift), 'operation-stale');
+    activeCollectionToken = collectionA;
+
+    const duplicateAcrossPages = tactics.map((item) => ({ ...item }));
+    duplicateAcrossPages[4].projectToken = duplicateAcrossPages[0].projectToken;
+    const duplicateOps = main.contextPocWorkspaceFileOperations({
+      catalog,
+      tacticsCollection: () => ({
+        collectionToken: collectionA, complete: true, tactics: duplicateAcrossPages
+      })
+    });
+    let duplicateError;
+    try {
+      await duplicateOps['review.tactics.read'].handle({
+        input: page0Input, context: current
+      });
+    } catch (error) { duplicateError = error; }
+    assert.equal(duplicateOps['review.tactics.read'].errorCode(duplicateError),
+      'operation-failed');
+
+    const tooManyOps = main.contextPocWorkspaceFileOperations({
+      catalog,
+      tacticsCollection: () => ({
+        collectionToken: collectionA, complete: false,
+        tactics: Array.from({ length: 513 }, (_unused, index) => tactic(index))
+      })
+    });
+    let tooManyError;
+    try {
+      await tooManyOps['review.tactics.read'].handle({
+        input: page0Input, context: current
+      });
+    } catch (error) { tooManyError = error; }
+    assert.equal(tooManyOps['review.tactics.read'].errorCode(tooManyError),
+      'operation-failed');
+
+    const solidified = ops['review.solidify'].redact(
+      await ops['review.solidify'].handle({ input: identity, context: current })
+    );
+    assert.deepEqual(Object.keys(solidified).sort(), [
+      'created', 'kind', 'message', 'sourceContentRef',
+      'sourceProjectToken', 'tactic'
+    ]);
+    assert.equal(solidified.kind, 'review-solidify');
+    assert.equal(solidified.created, true);
+    assert.equal(solidified.sourceContentRef, reviewContentRef);
+    assert.equal(solidified.sourceProjectToken, reviewProjectToken);
+    assert.notEqual(solidified.tactic.contentRef, reviewContentRef);
+    assert.notEqual(solidified.tactic.projectToken, reviewProjectToken);
+    assert.equal(typeof solidified.message, 'string');
+    assert.equal(Boolean(solidified.message), true);
+    assert.equal(Buffer.byteLength(solidified.message, 'utf8') <= 240, true);
+    assert.equal(Buffer.byteLength(JSON.stringify(solidified), 'utf8') <= 5600, true);
+    solidifyCreated = false;
+    const reused = ops['review.solidify'].redact(
+      await ops['review.solidify'].handle({ input: identity, context: current })
+    );
+    assert.equal(reused.created, false);
+    assert.equal(solidifyCalls, 2);
+
+    for (const malformed of [
+      { ...first, relativePath: '07_打法库/泄漏.md' },
+      { ...first, tactics: [{ ...first.tactics[0], body: 'SECRET' }] },
+      { ...first, tactics: [{ ...first.tactics[0], title: 'x'.repeat(121) }] },
+      { ...first, tactics: [{ ...first.tactics[0], summary: '鲸'.repeat(81) }] }
+    ]) assert.throws(() => ops['review.tactics.read'].redact(malformed));
+    for (const malformed of [
+      { ...solidified, sourceHash: 'f'.repeat(64) },
+      { ...solidified, message: '' },
+      { ...solidified, message: '鲸'.repeat(81) },
+      { ...solidified, tactic: {
+        ...solidified.tactic, contentRef: reviewContentRef
+      } },
+      { ...solidified, tactic: {
+        ...solidified.tactic, projectToken: reviewProjectToken
+      } }
+    ]) assert.throws(() => ops['review.solidify'].redact(malformed));
+
+    let drifted = false;
+    const sourceDriftOps = main.contextPocWorkspaceFileOperations({
+      catalog: () => ({
+        projects: [
+          {
+            contentRef: reviewContentRef,
+            projectToken: drifted ? changedReviewToken : reviewProjectToken,
+            stage: 'review'
+          },
+          {
+            contentRef: tactics[0].contentRef,
+            projectToken: tactics[0].projectToken,
+            stage: 'asset'
+          }
+        ]
+      }),
+      solidifyAction: async () => {
+        drifted = true;
+        return {
+          kind: 'ok', created: true,
+          contentRef: tactics[0].contentRef,
+          projectToken: tactics[0].projectToken,
+          text: '已可能写入'
+        };
+      },
+      tacticSurface
+    });
+    let sourceDriftError;
+    try {
+      await sourceDriftOps['review.solidify'].handle({ input: identity, context: current });
+    } catch (error) { sourceDriftError = error; }
+    assert.equal(sourceDriftOps['review.solidify'].errorCode(sourceDriftError),
+      'outcome-unknown');
+
+    const malformedActionOps = main.contextPocWorkspaceFileOperations({
+      catalog,
+      solidifyAction: async () => ({
+        kind: 'ok', created: true,
+        contentRef: tactics[0].contentRef,
+        projectToken: tactics[0].projectToken,
+        text: '已可能写入', relativePath: '07_打法库/泄漏.md'
+      })
+    });
+    let malformedActionError;
+    try {
+      await malformedActionOps['review.solidify'].handle({
+        input: identity, context: current
+      });
+    } catch (error) { malformedActionError = error; }
+    assert.equal(malformedActionOps['review.solidify'].errorCode(malformedActionError),
+      'outcome-unknown');
+
+    const unknownOps = main.contextPocWorkspaceFileOperations({
+      catalog,
+      solidifyAction: async () => {
+        const error = new Error('写后无法确认');
+        error.code = 'ERR_OPERATION_OUTCOME_UNKNOWN';
+        throw error;
+      }
+    });
+    let unknownError;
+    try {
+      await unknownOps['review.solidify'].handle({ input: identity, context: current });
+    } catch (error) { unknownError = error; }
+    assert.equal(unknownOps['review.solidify'].errorCode(unknownError), 'outcome-unknown');
+
+    activeReviewStage = 'script';
+    const beforeWrongStage = solidifyCalls;
+    let wrongStageError;
+    try {
+      await ops['review.solidify'].handle({ input: identity, context: current });
+    } catch (error) { wrongStageError = error; }
+    assert.equal(ops['review.solidify'].errorCode(wrongStageError), 'operation-failed');
+    assert.equal(solidifyCalls, beforeWrongStage,
+      '非 review 卡不得进入底层固化');
+    activeReviewStage = 'review';
+
+    let staleSideEffects = 0;
+    const staleOps = main.contextPocWorkspaceFileOperations({
+      catalog: () => { staleSideEffects += 1; return catalog(); },
+      tacticsCollection: () => { staleSideEffects += 1; return {}; },
+      solidifyAction: () => { staleSideEffects += 1; return {}; }
+    });
+    await assert.rejects(staleOps['review.tactics.read'].handle({
+      input: page0Input, context: { assertCurrent: () => false }
+    }));
+    await assert.rejects(staleOps['review.solidify'].handle({
+      input: identity, context: { assertCurrent: () => false }
+    }));
+    assert.equal(staleSideEffects, 0);
+
+    for (const code of ['ERR_ROOT_CHANGED', 'ERR_ROOT_UNREADABLE',
+      'ERR_PATH_SYMLINK', 'ERR_PATH_OUTSIDE', 'ERR_PATH_NOT_FILE',
+      'ERR_CONTEXT_PROJECT_STALE']) {
+      assert.equal(ops['review.tactics.read'].errorCode({ code }), 'operation-stale', code);
+    }
+    assert.equal(ops['review.solidify'].errorCode({
+      code: 'ERR_VIDEO_RECOVERY_REQUIRED'
+    }), 'outcome-unknown');
+    assert.equal(collectionCalls >= 5, true);
+
+    const mainSource = source('main.js');
+    const sceneActionStart = mainSource.indexOf('async function runVideoSceneAction');
+    const solidifyScene = mainSource.slice(
+      mainSource.indexOf("if (request.action === 'solidify-tactic')", sceneActionStart),
+      mainSource.indexOf("throw new Error('视频现场动作未实现')", sceneActionStart)
+    );
+    assert.match(solidifyScene, /solidifyVideoTactic\(runtime, document, request\.projectToken\)/,
+      '旧 scene action 也必须共用确定性固化 helper');
+    assert.doesNotMatch(solidifyScene, /randomBytes|Date\.now|writeFile/);
+    const collectionFlow = mainSource.slice(
+      mainSource.indexOf('function videoTacticCollection'),
+      mainSource.indexOf('function videoTacticWorkspaceSurface')
+    );
+    assert.match(collectionFlow,
+      /records\.map\(\(record\) => \[record\.relativePath, record\.hash\]\)/,
+      'collection token 只能绑定 epoch + ordered asset\(path,hash\)');
+    assert.doesNotMatch(collectionFlow, /sourceTitleChanged|complete\s*,\s*records/);
   });
 
   await test('shell 公开面按当前 sessionRef 投影，不泄露 ref、路径或标题', async () => {

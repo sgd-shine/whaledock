@@ -5,6 +5,7 @@
 process.env.WHALEDOCK_MAIN_HELPER_TEST = '1';
 
 const assert = require('assert/strict');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -302,6 +303,372 @@ async function run() {
       stage: 'script', relativePath: lossyWhitespaceSource, title: '空白路径'
     }), /无法无损写入/,
     'source 不能 front matter 无损往返时必须在创建前拒绝');
+  });
+
+  await test('复盘打法 revision key、确定性正文与 UTF-8 摘要精确收口', async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-tactic-pure-')));
+    const relativePath = '02_脚本/复盘  two---spaces.md';
+    const target = path.join(root, relativePath);
+    try {
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, [
+        '---', 'title: 真实复盘', 'stage: review',
+        'updated: 2026-08-25T12:00:00.000Z', '---', '',
+        '第一段是实际可复用经验。', '', '第二段不应进入首屏摘要。', ''
+      ].join('\n'), 'utf8');
+      const document = cockpit.readDocument(root, relativePath);
+      const expected = crypto.createHash('sha256')
+        .update(`review-tactic/v1\0${relativePath}\0${document.hash}`, 'utf8')
+        .digest('hex');
+      assert.equal(main.videoTacticRevisionKey(relativePath, document.hash), expected);
+      assert.equal(main.videoTacticRelativePath(relativePath, document.hash),
+        `07_打法库/打法-${expected}.md`);
+      assert.equal(main.videoTacticRelativePath(relativePath, document.hash),
+        main.videoTacticRelativePath(relativePath, document.hash),
+      '目标不得依赖时钟或 title');
+      const first = main.videoTacticText(document);
+      const second = main.videoTacticText({ ...document, title: document.title });
+      assert.equal(second, first, '同 source revision 必须字节级确定');
+      const parsed = cockpit.parseFrontMatter(first);
+      assert.equal(parsed.fields.source, relativePath);
+      assert.equal(parsed.fields.topicId, `tactic-${expected}`);
+      assert.equal(parsed.fields.updated, '2026-08-25T12:00:00.000Z');
+      const summary = main.videoTacticSummary(parsed.body);
+      assert.equal(summary.summary, '第一段是实际可复用经验。');
+      assert.equal(summary.summaryTruncated, false);
+      const clipped = main.videoTacticSummary(`\n# 标题\n\n${'鲸'.repeat(200)}\n`);
+      assert.equal(Buffer.byteLength(clipped.summary, 'utf8') <= 240, true);
+      assert.equal(clipped.summaryTruncated, true);
+      assert.deepEqual(main.videoTacticSummary('\n# 只有标题\n\n> 只有说明\n'), {
+        summary: null, summaryTruncated: false
+      });
+
+      const longUpdated = {
+        ...document,
+        fields: { ...document.fields, updated: 'u'.repeat(65) }
+      };
+      assert.equal(cockpit.parseFrontMatter(
+        main.videoTacticText(longUpdated)
+      ).fields.updated, undefined, '超过 64 字符的 source updated 必须省略');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await test('打法库 collection 只绑定有序 asset 版本，漂移与 A→B→A 可精确识别', async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-tactic-list-')));
+    const rootStat = fs.lstatSync(root);
+    const sourceRelativePath = '02_脚本/复盘源.md';
+    const sourcePath = path.join(root, sourceRelativePath);
+    const assetTexts = new Map([
+      ['07_打法库/z-last.md', [
+        '---', 'title: Z 打法', 'stage: asset', 'status: active',
+        `source: ${sourceRelativePath}`, '---', '', '# 标题', '', '第二条经验。', ''
+      ].join('\n')],
+      ['07_打法库/a-first.md', [
+        '---', 'title: A 打法', 'stage: asset', 'status: active',
+        `source: ${sourceRelativePath}`, '---', '', '# 标题', '', '第一条经验。', ''
+      ].join('\n')]
+    ]);
+    const runtime = {
+      root, epoch: 13, rootIdentity: { dev: rootStat.dev, ino: rootStat.ino },
+      closed: false, projectTokens: new Map(), recoveryIssues: []
+    };
+    const scan = () => {
+      const scanned = cockpit.scanWorkspace(root, { expectedRootIdentity: runtime.rootIdentity });
+      runtime.projectTokens = new Map(scanned.items.map((item) => [
+        main.videoProjectToken(runtime.epoch, item.relativePath, item.hash),
+        { relativePath: item.relativePath, hash: item.hash, stage: item.stage }
+      ]));
+      return scanned;
+    };
+    try {
+      fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+      fs.writeFileSync(sourcePath, [
+        '---', 'title: 复盘源 A', 'stage: review', '---', '', '真实复盘正文。', ''
+      ].join('\n'), 'utf8');
+      for (const [relativePath, text] of assetTexts) {
+        const target = path.join(root, relativePath);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, text, 'utf8');
+      }
+      let scanned = scan();
+      const initial = main.videoTacticCollection(runtime, { refresh: false, scanned });
+      assert.match(initial.collectionToken, /^collection-[a-f0-9]{24}$/);
+      assert.equal(initial.complete, true);
+      assert.deepEqual(initial.tactics.map((item) => item.title), ['A 打法', 'Z 打法'],
+        '页面资产必须按 canonical relativePath 稳定排序');
+      assert.deepEqual(initial.tactics.map((item) => item.sourceTitle), ['复盘源 A', '复盘源 A']);
+
+      fs.writeFileSync(sourcePath, [
+        '---', 'title: 复盘源 B', 'stage: review', '---', '', '真实复盘正文。', ''
+      ].join('\n'), 'utf8');
+      scanned = scan();
+      const sourceTitleChanged = main.videoTacticCollection(runtime, {
+        refresh: false, scanned
+      });
+      assert.equal(sourceTitleChanged.collectionToken, initial.collectionToken,
+        'authoritative token 只绑定 asset(path,hash)，不混入 sourceTitle');
+      assert.deepEqual(sourceTitleChanged.tactics.map((item) => item.sourceTitle),
+        ['复盘源 B', '复盘源 B']);
+
+      runtime.recoveryIssues = [{ relativePath: null }];
+      const partial = main.videoTacticCollection(runtime, { refresh: false, scanned });
+      assert.equal(partial.complete, false);
+      assert.equal(partial.collectionToken, initial.collectionToken,
+        'complete 由页面独立对账，不扩进 asset-only digest');
+      runtime.recoveryIssues = [];
+
+      const changedAsset = '07_打法库/a-first.md';
+      fs.writeFileSync(path.join(root, changedAsset), `${assetTexts.get(changedAsset)}\nB revision\n`,
+        'utf8');
+      scanned = scan();
+      const changed = main.videoTacticCollection(runtime, { refresh: false, scanned });
+      assert.notEqual(changed.collectionToken, initial.collectionToken,
+        '任一 asset hash 变化必须使后页 token 过期');
+
+      fs.writeFileSync(path.join(root, changedAsset), assetTexts.get(changedAsset), 'utf8');
+      scanned = scan();
+      const restored = main.videoTacticCollection(runtime, { refresh: false, scanned });
+      assert.equal(restored.collectionToken, initial.collectionToken,
+        'A→B→A 回到同一有序 asset 快照时 token 也回到 A');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await test('打法语义去重兼容唯一 legacy，重复、冲突与不完整扫描全部停写', async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-tactic-dedupe-')));
+    const sourceRelativePath = '02_脚本/复盘.md';
+    const sourcePath = path.join(root, sourceRelativePath);
+    const rootStat = fs.lstatSync(root);
+    const runtime = {
+      root, epoch: 12, rootIdentity: { dev: rootStat.dev, ino: rootStat.ino },
+      closed: false, projectTokens: new Map(), recoveryIssues: []
+    };
+    try {
+      fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+      fs.mkdirSync(path.join(root, '07_打法库'), { recursive: true });
+      fs.writeFileSync(sourcePath, [
+        '---', 'title: 复盘 A', 'stage: review', '---', '', '真实打法内容。', ''
+      ].join('\n'), 'utf8');
+      const sourceDocument = cockpit.readDocument(root, sourceRelativePath);
+      const deterministicText = main.videoTacticText(sourceDocument);
+      const legacyRelative = '07_打法库/旧随机打法.md';
+      const legacyText = deterministicText
+        .replace(/^topicId:.*\n/m, '')
+        .replace(/^---\n# 从复盘固化/m, '---\n\n# 从复盘固化');
+      fs.writeFileSync(path.join(root, legacyRelative), legacyText, 'utf8');
+      assert.equal(cockpit.readDocument(root, legacyRelative).body,
+        main.videoTacticLegacyBodyText(sourceDocument),
+      '旧随机 writer 的 closing --- 后精确多一个空行');
+      let matches = main.findVideoTacticDocumentsByRevision(runtime, sourceDocument);
+      assert.equal(matches.length, 1);
+      assert.equal(matches[0].classification, 'legacy');
+
+      const deterministicRelative = main.videoTacticRelativePath(
+        sourceRelativePath, sourceDocument.hash
+      );
+      fs.writeFileSync(path.join(root, deterministicRelative), deterministicText, 'utf8');
+      assert.throws(() => main.findVideoTacticDocumentsByRevision(runtime, sourceDocument),
+        /\u591a份打法/);
+      fs.unlinkSync(path.join(root, legacyRelative));
+      matches = main.findVideoTacticDocumentsByRevision(runtime, sourceDocument);
+      assert.equal(matches[0].classification, 'current');
+
+      fs.writeFileSync(path.join(root, deterministicRelative),
+        deterministicText.replace('真实打法内容。', '被外部改坏的内容。'), 'utf8');
+      assert.throws(() => main.findVideoTacticDocumentsByRevision(runtime, sourceDocument),
+        /\u6b63文冲突/);
+
+      assert.throws(() => main.findVideoTacticDocumentsByRevision(
+        runtime, sourceDocument, { scanned: { items: [], issues: [], truncated: true } }
+      ), /\u626b描不完整/);
+      assert.throws(() => main.findVideoTacticDocumentsByRevision(
+        runtime, sourceDocument, {
+          scanned: {
+            items: [], truncated: false,
+            issues: [{ relativePath: '07_打法库/坏链接.md', reason: 'path-symlink' }]
+          }
+        }
+      ), /\u626b描不完整/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await test('打法固化 0→1 与重试幂等，可能写入后 source 漂移只能 outcome-unknown', async () => {
+    const makeFixture = () => {
+      const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-tactic-write-')));
+      const sourceRelativePath = '02_脚本/复盘.md';
+      const sourcePath = path.join(root, sourceRelativePath);
+      fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+      fs.writeFileSync(sourcePath, [
+        '---', 'title: 复盘固化', 'stage: review',
+        'updated: 2026-08-25T12:30:00.000Z', '---', '', '已验证的打法正文。', ''
+      ].join('\n'), 'utf8');
+      const stat = fs.lstatSync(root);
+      const runtime = {
+        root, epoch: 21, rootIdentity: { dev: stat.dev, ino: stat.ino },
+        closed: false, projectTokens: new Map(), recoveryIssues: []
+      };
+      const sourceDocument = cockpit.readDocument(root, sourceRelativePath);
+      const sourceToken = main.videoProjectToken(
+        runtime.epoch, sourceRelativePath, sourceDocument.hash
+      );
+      const rebuild = () => {
+        const scanned = cockpit.scanWorkspace(root, { expectedRootIdentity: runtime.rootIdentity });
+        runtime.projectTokens = new Map(scanned.items.map((item) => [
+          main.videoProjectToken(runtime.epoch, item.relativePath, item.hash),
+          { relativePath: item.relativePath, hash: item.hash, stage: item.stage }
+        ]));
+      };
+      const readByToken = (token) => {
+        const record = runtime.projectTokens.get(token);
+        if (!record) {
+          const error = new Error('过期'); error.code = 'ERR_CONTEXT_PROJECT_STALE'; throw error;
+        }
+        return { runtime, record, document: cockpit.readDocument(root, record.relativePath) };
+      };
+      rebuild();
+      return { root, runtime, sourceDocument, sourceToken, rebuild, readByToken, sourcePath };
+    };
+
+    const fixture = makeFixture();
+    try {
+      const options = {
+        refresh: fixture.rebuild,
+        readSource: fixture.readByToken,
+        readTactic: fixture.readByToken
+      };
+      const first = main.solidifyVideoTactic(
+        fixture.runtime, fixture.sourceDocument, fixture.sourceToken, options
+      );
+      const second = main.solidifyVideoTactic(
+        fixture.runtime, fixture.sourceDocument, fixture.sourceToken, options
+      );
+      assert.deepEqual([first.created, second.created], [true, false]);
+      assert.equal(first.contentRef, second.contentRef);
+      assert.equal(first.projectToken, second.projectToken);
+      assert.equal(fs.readdirSync(path.join(fixture.root, '07_打法库')).length, 1);
+      const created = cockpit.readDocument(
+        fixture.root,
+        main.videoTacticRelativePath(
+          fixture.sourceDocument.relativePath, fixture.sourceDocument.hash
+        )
+      );
+      assert.equal(created.fields.source, fixture.sourceDocument.relativePath);
+      assert.equal(created.fields.topicId,
+        `tactic-${main.videoTacticRevisionKey(
+          fixture.sourceDocument.relativePath, fixture.sourceDocument.hash
+        )}`);
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+
+    const unknownFixture = makeFixture();
+    try {
+      let mutated = false;
+      const refreshAfterWrite = () => {
+        if (!mutated) {
+          mutated = true;
+          fs.appendFileSync(unknownFixture.sourcePath, '\n外部并发变化\n', 'utf8');
+        }
+        unknownFixture.rebuild();
+      };
+      assert.throws(() => main.solidifyVideoTactic(
+        unknownFixture.runtime, unknownFixture.sourceDocument,
+        unknownFixture.sourceToken, {
+          refresh: refreshAfterWrite,
+          readSource: unknownFixture.readByToken,
+          readTactic: unknownFixture.readByToken
+        }
+      ), (error) => error && error.code === 'ERR_OPERATION_OUTCOME_UNKNOWN');
+      assert.equal(fs.readdirSync(path.join(unknownFixture.root, '07_打法库')).length, 1,
+        '写后 source 漂移不得说成未执行，也不得重试');
+    } finally {
+      fs.rmSync(unknownFixture.root, { recursive: true, force: true });
+    }
+
+    const racedFixture = makeFixture();
+    try {
+      const won = main.solidifyVideoTactic(
+        racedFixture.runtime, racedFixture.sourceDocument,
+        racedFixture.sourceToken, {
+          refresh: racedFixture.rebuild,
+          readSource: racedFixture.readByToken,
+          readTactic: racedFixture.readByToken,
+          beforeTacticExclusiveWrite: ({ relativePath, content }) => {
+            const target = path.join(racedFixture.root, relativePath);
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            fs.writeFileSync(target, content, { flag: 'wx' });
+          }
+        }
+      );
+      assert.equal(won.created, false,
+        'EEXIST 只有精确同字节的当前 revision 才可复用');
+    } finally {
+      fs.rmSync(racedFixture.root, { recursive: true, force: true });
+    }
+
+    const conflictingRace = makeFixture();
+    try {
+      assert.throws(() => main.solidifyVideoTactic(
+        conflictingRace.runtime, conflictingRace.sourceDocument,
+        conflictingRace.sourceToken, {
+          refresh: conflictingRace.rebuild,
+          readSource: conflictingRace.readByToken,
+          readTactic: conflictingRace.readByToken,
+          beforeTacticExclusiveWrite: ({ relativePath, content }) => {
+            const target = path.join(conflictingRace.root, relativePath);
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            fs.writeFileSync(target, content.replace('status: active', 'status: archived'), {
+              flag: 'wx'
+            });
+          }
+        }
+      ), /并发创建冲突/,
+      'EEXIST 下即使 revision/source/body 相同，非 exact bytes 也必须冲突停写');
+    } finally {
+      fs.rmSync(conflictingRace.root, { recursive: true, force: true });
+    }
+
+    const guardedFixture = makeFixture();
+    try {
+      const emptySource = { ...guardedFixture.sourceDocument, body: '\n \t\n' };
+      assert.throws(() => main.solidifyVideoTactic(
+        guardedFixture.runtime, emptySource, guardedFixture.sourceToken, {
+          refresh: guardedFixture.rebuild,
+          readSource: guardedFixture.readByToken,
+          readTactic: guardedFixture.readByToken
+        }
+      ), /显式固化/);
+      assert.equal(fs.existsSync(path.join(guardedFixture.root, '07_打法库')), false,
+        '空复盘正文不得绕过 UI 直接创建打法');
+      guardedFixture.runtime.recoveryIssues = [{ relativePath: null }];
+      assert.throws(() => main.solidifyVideoTactic(
+        guardedFixture.runtime, guardedFixture.sourceDocument,
+        guardedFixture.sourceToken, {
+          refresh: guardedFixture.rebuild,
+          readSource: guardedFixture.readByToken,
+          readTactic: guardedFixture.readByToken
+        }
+      ), (error) => error && error.code === 'ERR_VIDEO_RECOVERY_REQUIRED');
+      assert.equal(fs.existsSync(path.join(guardedFixture.root, '07_打法库')), false,
+        '工作区恢复未裁决时底层也必须零写入');
+    } finally {
+      fs.rmSync(guardedFixture.root, { recursive: true, force: true });
+    }
+    const mainSource = source('main.js');
+    const solidifyBlock = mainSource.slice(
+      mainSource.indexOf('function solidifyVideoTactic'),
+      mainSource.indexOf('function videoIssueSummary')
+    );
+    assert.match(solidifyBlock,
+      /writeVideoExclusive\(runtime\.root, relativePath, content, \{[\s\S]*rootIdentity/,
+    '打法固化必须复用 root\/parent\/fd 绑定的独占写');
+    assert.doesNotMatch(solidifyBlock, /randomBytes|Date\.now/,
+      '同 source revision 不得保留随机或时钟文件语义');
   });
 
   await test('独占创建绑定父目录与新 fd，open 后失败一律 outcome-unknown', async () => {

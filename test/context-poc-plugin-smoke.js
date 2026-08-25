@@ -130,6 +130,7 @@ async function main() {
       'block.action.prepare', 'block.action.submit',
       'proposal.read', 'proposal.decide', 'proposal.undo',
       'publish.read', 'publish.create', 'publish.update',
+      'review.tactics.read', 'review.solidify',
       'receipts.read', 'receipts.ack', 'receipts.open'
     ];
     const operationSet = (source, name) => {
@@ -146,6 +147,12 @@ async function main() {
     assertOperationSet(operationSet(mainSource, 'CONTEXT_POC_WORKSPACE_FILE_OPERATIONS'),
       'Main/Host/Client 三处 operation exact set 必须同步');
     assert.match(pluginClient, /contentRef/);
+    assert.match(pluginClient, /function ReviewPanel/);
+    assert.match(pluginClient, /const MAX_TACTIC_PAGES = 512;/,
+      '打法分页必须覆盖 backend 最多 512 条且允许因响应体积每页少于 4 条');
+    assert.match(pluginClient, /打法只能由你从真实复盘显式固化。/);
+    assert.match(pluginClient,
+      /一期没有平台数据通道；以下都是本地文件，不显示播放量、评论聚类、使用次数或胜率。/);
     assert.match(pluginClient, /这一格还没做/);
     assert.match(pluginClient, /workspaces\.connectWorkspace\(workspaceId\)/);
     assert.match(pluginClient, /async fillDraft\(sessionId, text, workspaceId, signal\)/,

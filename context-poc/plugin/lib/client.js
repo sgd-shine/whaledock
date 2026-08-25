@@ -23,6 +23,7 @@ window.__ModuleLoader__.load({
       'block.action.prepare', 'block.action.submit',
       'proposal.read', 'proposal.decide', 'proposal.undo',
       'publish.read', 'publish.create', 'publish.update',
+      'review.tactics.read', 'review.solidify',
       'receipts.read', 'receipts.ack', 'receipts.open'
     ]);
     const WORKSPACE_FILE_STATES = new Set([
@@ -44,12 +45,14 @@ window.__ModuleLoader__.load({
     const MAX_WORKSPACE_FILE_INPUT_BYTES = 4 * 1024;
     const MAX_WORKSPACE_FILE_RESULT_BYTES = 6 * 1024;
     const MAX_CONTENT_CATALOG_PAGES = 128;
+    const MAX_TACTIC_PAGES = 512;
     const PROJECT_TOKEN_RE = /^project-[a-f0-9]{24}$/;
     const CONTENT_REF_RE = /^content-[a-f0-9]{24}$/;
     const BLOCK_TOKEN_RE = /^block-[a-f0-9]{24}$/;
     const PROPOSAL_TOKEN_RE = /^proposal-[A-Za-z0-9_-]{1,80}$/;
     const PROPOSAL_REVISION_TOKEN_RE = /^proposal-revision-[a-f0-9]{24}$/;
     const REVISION_TOKEN_RE = /^revision-[a-f0-9]{24}$/;
+    const COLLECTION_TOKEN_RE = /^collection-[a-f0-9]{24}$/;
     const BLOCK_ACTIONS = Object.freeze([
       ['revise', '改这段'], ['spoken', '更口语'],
       ['shorten', '压时长'], ['ask', '问一句']
@@ -75,6 +78,7 @@ window.__ModuleLoader__.load({
     const SHELL_CSS = `.wd10-left{background:var(--dsw-specific-sidebar-fill);border-right:1px solid var(--dsw-alias-border-l1);min-width:0;height:100%;display:flex;flex-direction:column;overflow:hidden}.wd10-switch{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:12px;padding:4px;border-radius:10px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1)}.wd10-switch button{border:0;border-radius:7px;padding:7px 10px;color:var(--dsw-alias-fg-secondary);background:transparent;font:inherit;font-size:13px;cursor:pointer}.wd10-switch button[aria-selected=true]{background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);box-shadow:0 1px 3px rgba(0,0,0,.08)}.wd10-library{min-height:0;overflow:auto;padding:0 10px 18px}.wd10-libraryHead{padding:8px 6px 10px}.wd10-eyebrow{font-size:11px;letter-spacing:.08em;color:var(--dsw-alias-fg-tertiary);text-transform:uppercase}.wd10-libraryHead h2{font-size:17px;line-height:1.35;margin:4px 0;color:var(--dsw-alias-fg-primary)}.wd10-libraryHead p{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-refresh,.wd10-loadMore{margin-top:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;padding:5px 8px;background:transparent;color:var(--dsw-alias-fg-secondary);font:inherit;font-size:11px;cursor:pointer}.wd10-refresh:disabled,.wd10-loadMore:disabled{opacity:.55;cursor:default}.wd10-loadMore{width:100%;padding:8px}.wd10-workspaceList{margin:0 0 10px;padding:8px 6px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}.wd10-workspaceChoice{width:100%;text-align:left;border:1px solid transparent;border-radius:8px;padding:7px 8px;margin-top:4px;background:transparent;color:inherit;cursor:pointer}.wd10-workspaceChoice:hover,.wd10-workspaceChoice[aria-current=true]{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l1)}.wd10-projectPath{display:block;margin-top:3px;font-size:10px;color:var(--dsw-alias-fg-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wd10-project{width:100%;text-align:left;border:1px solid transparent;border-radius:10px;padding:10px;margin:2px 0 6px;background:transparent;color:inherit;cursor:pointer}.wd10-project:hover{background:var(--dsw-alias-bg-layer-1)}.wd10-project[aria-current=true]{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l2)}.wd10-projectTitle{display:block;font-size:13px;font-weight:600;color:var(--dsw-alias-fg-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wd10-projectMeta{display:flex;align-items:center;gap:7px;margin-top:5px;font-size:11px;color:var(--dsw-alias-fg-tertiary)}.wd10-stageBadge{border-radius:999px;padding:1px 7px;background:var(--dsw-alias-state-business-tertiary);color:var(--dsw-alias-state-business-primary)}.wd10-detail{min-width:0;height:100%;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base);border-right:1px solid var(--dsw-alias-border-l2);overflow:hidden}.wd10-detailHead{padding:22px 24px 12px}.wd10-detailHead h1{font-size:22px;line-height:1.25;margin:5px 0 7px;color:var(--dsw-alias-fg-primary)}.wd10-detailHead p{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-projectActions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.wd10-projectActions button,.wd10-receipt button,.wd10-choice,.wd10-nextAction{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 9px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:11px;cursor:pointer}.wd10-projectActions button:disabled,.wd10-receipt button:disabled,.wd10-choice:disabled,.wd10-nextAction:disabled{opacity:.55;cursor:default}.wd10-tabs{display:flex;gap:3px;padding:0 20px;border-bottom:1px solid var(--dsw-alias-border-l1);overflow:auto}.wd10-tabs button{border:0;border-bottom:2px solid transparent;padding:10px 8px 9px;background:transparent;color:var(--dsw-alias-fg-secondary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}.wd10-tabs button[aria-selected=true]{border-bottom-color:var(--dsw-alias-fg-primary);color:var(--dsw-alias-fg-primary)}.wd10-receipts{flex:none;max-height:188px;overflow:auto;padding:10px 18px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}.wd10-receiptTitle{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-receipt{margin-top:7px;padding:8px 10px;border-radius:9px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-receiptHead,.wd10-receiptFoot{display:flex;align-items:center;justify-content:space-between;gap:8px}.wd10-receipt strong{color:var(--dsw-alias-fg-primary)}.wd10-receipt p{margin:5px 0 0;line-height:1.45}.wd10-preflight{border-color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-state-warn-tertiary)}.wd10-pulse{color:var(--dsw-alias-state-business-primary);font-weight:600}.wd10-panel{min-height:0;overflow:auto;padding:20px 24px 28px}.wd10-card{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:16px;background:var(--dsw-alias-bg-layer-1);margin-bottom:12px}.wd10-card h3{font-size:14px;margin:0 0 7px;color:var(--dsw-alias-fg-primary)}.wd10-card p{font-size:12px;line-height:1.65;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-overviewMeta{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}.wd10-overviewMeta div{border:1px solid var(--dsw-alias-border-l1);border-radius:9px;padding:9px;background:var(--dsw-alias-bg-base)}.wd10-overviewMeta span,.wd10-currentChoice span{display:block;font-size:10px;color:var(--dsw-alias-fg-tertiary);margin-bottom:3px}.wd10-overviewMeta strong,.wd10-currentChoice strong{font-size:12px;color:var(--dsw-alias-fg-primary)}.wd10-currentChoices{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}.wd10-currentChoice{border-left:3px solid var(--dsw-alias-state-business-primary);padding:7px 9px;background:var(--dsw-alias-bg-base);border-radius:0 8px 8px 0}.wd10-choiceGroup{margin-top:14px}.wd10-choiceGroup h4{font-size:11px;margin:0 0 7px;color:var(--dsw-alias-fg-secondary)}.wd10-choiceList{display:flex;flex-wrap:wrap;gap:6px}.wd10-choice[aria-pressed=true]{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-tertiary);font-weight:600}.wd10-incomplete{color:var(--dsw-alias-state-warn-primary)!important;margin-top:10px!important}.wd10-next{margin-top:16px;padding-top:14px;border-top:1px solid var(--dsw-alias-border-l1)}.wd10-nextAction{margin-top:8px;border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-bg-base);font-weight:600}.wd10-unfinished strong{display:block;margin:8px 0;color:var(--dsw-alias-fg-primary)}.wd10-feedback{font-size:12px;line-height:1.5;margin:8px 0 0;color:var(--dsw-alias-fg-secondary)}.wd10-chat{min-width:0;height:100%;display:flex;overflow:hidden}.wd10-chatMain{min-width:0;flex:1;display:flex;flex-direction:column;overflow:hidden}.wd10-empty{padding:24px;color:var(--dsw-alias-fg-secondary);font-size:13px;line-height:1.6}@media(max-width:1120px){.wd10-detailHead{padding:18px 18px 10px}.wd10-panel{padding:16px 18px}.wd10-detailHead h1{font-size:19px}.wd10-tabs{padding:0 14px}.wd10-receipts{padding:9px 14px}.wd10-overviewMeta,.wd10-currentChoices{grid-template-columns:1fr}}.wd10-leftViews,.wd10-leftView,.wd10-nativeSidebar{min-height:0;flex:1;overflow:hidden}.wd10-leftView[hidden],.wd10-nativeSidebar[hidden]{display:none}.wd10-subSwitch{margin-top:0}.wd10-banner,.wd10-hint{display:flex;align-items:center;gap:8px;margin:10px 18px 0;padding:9px 10px;border:1px solid var(--dsw-alias-state-warn-primary);border-radius:9px;color:var(--dsw-alias-fg-primary);background:var(--dsw-alias-state-warn-tertiary);font-size:12px;line-height:1.45}.wd10-banner span,.wd10-hint span{min-width:0;flex:1}.wd10-banner button,.wd10-hint button{flex:none;border:1px solid currentColor;border-radius:7px;padding:4px 8px;background:transparent;color:inherit;cursor:pointer}.wd10-banner button:disabled{opacity:.55;cursor:default}.wd10-prefStatus{margin:0 14px 8px;color:var(--dsw-alias-state-warn-primary);font-size:11px}.wd10-contentDetails{transition:width var(--ds-transition-duration-slow) var(--ds-ease-in-out);flex-shrink:0}`;
     const SCRIPT_CSS = `.wd10-script{display:flex;flex-direction:column;gap:10px}.wd10-scriptHead,.wd10-blockMeta{display:flex;align-items:center;justify-content:space-between;gap:8px}.wd10-scriptHead h3{margin:0;color:var(--dsw-alias-fg-primary);font-size:14px}.wd10-scriptHead span,.wd10-blockMeta span{font-size:10px;color:var(--dsw-alias-fg-tertiary)}.wd10-block{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:13px;background:var(--dsw-alias-bg-layer-1)}.wd10-blockMeta strong{font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-block pre,.wd10-compare pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:9px 0 0;font:inherit;font-size:12px;line-height:1.6;color:var(--dsw-alias-fg-primary)}.wd10-blockActions,.wd10-proposalActions{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}.wd10-blockActions button,.wd10-proposalActions button,.wd10-undo{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 9px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:11px;cursor:pointer}.wd10-blockActions button:disabled,.wd10-proposalActions button:disabled,.wd10-undo:disabled{opacity:.5;cursor:default}.wd10-proposal{border-color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-state-warn-tertiary)}.wd10-compare{margin-top:10px;border-radius:9px;padding:10px;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1)}.wd10-compare h4{margin:0;font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-proposalActions button:first-child,.wd10-undo{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);font-weight:600}.wd10-undo{margin-top:11px}`;
     const PUBLISH_CSS = `.wd10-publish{display:flex;flex-direction:column;gap:12px}.wd10-publishHead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.wd10-publishHead h3{margin:0 0 5px;font-size:14px;color:var(--dsw-alias-fg-primary)}.wd10-publishState{flex:none;border-radius:999px;padding:3px 8px;font-size:10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-secondary);border:1px solid var(--dsw-alias-border-l1)}.wd10-publishState[data-ready=true]{color:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary)}.wd10-publishLights{display:grid;gap:7px;margin-top:12px}.wd10-publishLight{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--dsw-alias-border-l1);border-radius:9px;padding:9px 10px;background:var(--dsw-alias-bg-base)}.wd10-publishLight span{font-size:12px;color:var(--dsw-alias-fg-primary)}.wd10-publishLight input{margin:0}.wd10-publishLight[data-satisfied=true]{border-color:var(--dsw-alias-state-business-primary)}.wd10-aiChoices{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}.wd10-aiChoices button,.wd10-createPublish{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:7px 10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:11px;cursor:pointer}.wd10-aiChoices button[aria-pressed=true]{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-tertiary);font-weight:600}.wd10-aiChoices button:disabled,.wd10-createPublish:disabled{opacity:.5;cursor:default}.wd10-createPublish{margin-top:12px;border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);font-weight:600}.wd10-publishInvalid{border-color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-state-warn-tertiary)}.wd10-publishNotice{border-left:3px solid var(--dsw-alias-state-warn-primary);padding:8px 10px;border-radius:0 8px 8px 0;background:var(--dsw-alias-state-warn-tertiary)}`;
+    const REVIEW_CSS = `.wd10-review{display:flex;flex-direction:column;gap:12px}.wd10-reviewHead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.wd10-reviewHead h3{margin:0 0 5px;font-size:14px;color:var(--dsw-alias-fg-primary)}.wd10-reviewBlocks,.wd10-tacticWall{display:grid;gap:9px;margin-top:11px}.wd10-reviewBlock,.wd10-tactic{border:1px solid var(--dsw-alias-border-l1);border-radius:10px;padding:11px;background:var(--dsw-alias-bg-base)}.wd10-reviewBlock pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:7px 0 0;font:inherit;font-size:12px;line-height:1.6;color:var(--dsw-alias-fg-primary)}.wd10-reviewMeta,.wd10-tacticMeta{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:10px;color:var(--dsw-alias-fg-tertiary)}.wd10-tactic[data-highlight=true]{border-color:var(--dsw-alias-state-business-primary);box-shadow:0 0 0 1px var(--dsw-alias-state-business-primary)}.wd10-tactic h4{margin:7px 0 5px;font-size:13px;color:var(--dsw-alias-fg-primary)}.wd10-tacticBadge{border-radius:999px;padding:2px 7px;color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-tertiary)}.wd10-solidify{border:1px solid var(--dsw-alias-state-business-primary);border-radius:8px;padding:7px 10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-state-business-primary);font:inherit;font-size:11px;font-weight:600;cursor:pointer}.wd10-solidify:disabled{opacity:.5;cursor:default}.wd10-reviewTruth{border-left:3px solid var(--dsw-alias-state-warn-primary);padding:8px 10px;border-radius:0 8px 8px 0;background:var(--dsw-alias-state-warn-tertiary)}`;
     const CREATOR_TABS = Object.freeze([
       ['overview', '概览'], ['script', '脚本'], ['shoot', '拍摄'],
       ['publish', '发布'], ['review', '复盘']
@@ -89,7 +93,7 @@ window.__ModuleLoader__.load({
       const tag = document.createElement('style');
       tag.dataset.plugin = '@whaledock/context-bridge-poc';
       tag.dataset.pluginCss = tagId;
-      tag.textContent = `${SHELL_CSS}${SCRIPT_CSS}${PUBLISH_CSS}`;
+      tag.textContent = `${SHELL_CSS}${SCRIPT_CSS}${PUBLISH_CSS}${REVIEW_CSS}`;
       document.head.appendChild(tag);
       return () => { tag.remove(); };
     }
@@ -232,6 +236,14 @@ window.__ModuleLoader__.load({
       if (typeof value !== 'string' || WORKSPACE_TEXT_CONTROL_RE.test(value)) return undefined;
       const clean = value.trim();
       if (!clean || Array.from(clean).length > maximum) return undefined;
+      return clean;
+    }
+
+    function strictUtf8Text(value, maximum, nullable = true) {
+      if (value === null && nullable) return null;
+      if (typeof value !== 'string' || CONTROL_RE.test(value)) return undefined;
+      const clean = value.trim();
+      if (!clean || utf8Bytes(clean) > maximum) return undefined;
       return clean;
     }
 
@@ -458,6 +470,90 @@ window.__ModuleLoader__.load({
       return left && right && [
         'projectToken', 'title', 'stage', 'stageLabel', 'blockCount'
       ].every((key) => Object.is(left[key], right[key]));
+    }
+
+    function tacticSurface(value) {
+      if (!exact(value, [
+        'contentRef', 'projectToken', 'title', 'summary', 'summaryTruncated',
+        'sourceTitle', 'updated'
+      ]) || !CONTENT_REF_RE.test(String(value.contentRef || ''))
+          || !PROJECT_TOKEN_RE.test(String(value.projectToken || ''))
+          || typeof value.summaryTruncated !== 'boolean'
+          || CONTROL_RE.test(String(value.title || ''))
+          || (value.sourceTitle !== null && CONTROL_RE.test(String(value.sourceTitle || '')))
+          || (value.updated !== null && (CONTROL_RE.test(String(value.updated || ''))
+            || String(value.updated).length > 64))) return null;
+      const title = strictOverviewText(value.title, 120, false);
+      const summary = strictUtf8Text(value.summary, 240);
+      const sourceTitle = strictOverviewText(value.sourceTitle, 120);
+      const updated = strictOverviewText(value.updated, 64);
+      if ([title, summary, sourceTitle, updated].includes(undefined)
+          || summary === null && value.summaryTruncated) return null;
+      return Object.freeze({
+        contentRef: value.contentRef, projectToken: value.projectToken,
+        title, summary, summaryTruncated: value.summaryTruncated, sourceTitle, updated
+      });
+    }
+
+    function tacticsPageResult(snapshot, expected) {
+      const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+      if (!exact(value, [
+        'kind', 'contentRef', 'projectToken', 'collectionToken', 'itemCount',
+        'complete', 'cursor', 'nextCursor', 'tactics'
+      ]) || value.kind !== 'tactics'
+          || value.contentRef !== expected.contentRef
+          || value.projectToken !== expected.projectToken
+          || !CONTENT_REF_RE.test(String(value.contentRef || ''))
+          || !PROJECT_TOKEN_RE.test(String(value.projectToken || ''))
+          || !COLLECTION_TOKEN_RE.test(String(value.collectionToken || ''))
+          || (expected.collectionToken !== null
+            && value.collectionToken !== expected.collectionToken)
+          || !Number.isSafeInteger(value.itemCount) || value.itemCount < 0
+          || value.itemCount > 512 || typeof value.complete !== 'boolean'
+          || !Number.isSafeInteger(value.cursor) || value.cursor !== expected.cursor
+          || !(value.nextCursor === null || Number.isSafeInteger(value.nextCursor))
+          || !Array.isArray(value.tactics) || value.tactics.length > 4
+          || value.cursor + value.tactics.length > value.itemCount) return null;
+      const tactics = value.tactics.map(tacticSurface);
+      const endCursor = value.cursor + tactics.length;
+      if (tactics.some((tactic) => tactic === null)
+          || new Set(tactics.map((tactic) => tactic.contentRef)).size !== tactics.length
+          || new Set(tactics.map((tactic) => tactic.projectToken)).size !== tactics.length
+          || (value.nextCursor === null
+            ? endCursor !== value.itemCount
+            : value.nextCursor !== endCursor || value.nextCursor <= value.cursor
+              || value.nextCursor >= value.itemCount)) return null;
+      return Object.freeze({
+        kind: 'tactics', contentRef: value.contentRef, projectToken: value.projectToken,
+        collectionToken: value.collectionToken, itemCount: value.itemCount,
+        complete: value.complete, cursor: value.cursor, nextCursor: value.nextCursor,
+        tactics: Object.freeze(tactics)
+      });
+    }
+
+    function sameTacticsHeader(left, right) {
+      return left && right && [
+        'contentRef', 'projectToken', 'collectionToken', 'itemCount', 'complete'
+      ].every((key) => Object.is(left[key], right[key]));
+    }
+
+    function reviewSolidifyResult(snapshot, expected) {
+      const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+      if (!exact(value, [
+        'kind', 'created', 'sourceContentRef', 'sourceProjectToken', 'tactic', 'message'
+      ]) || value.kind !== 'review-solidify' || typeof value.created !== 'boolean'
+          || value.sourceContentRef !== expected.contentRef
+          || value.sourceProjectToken !== expected.projectToken) return null;
+      const tactic = tacticSurface(value.tactic);
+      const message = strictUtf8Text(value.message, 240, false);
+      if (!tactic || message === undefined
+          || tactic.contentRef === expected.contentRef
+          || tactic.projectToken === expected.projectToken) return null;
+      return Object.freeze({
+        kind: 'review-solidify', created: value.created,
+        sourceContentRef: value.sourceContentRef,
+        sourceProjectToken: value.sourceProjectToken, tactic, message
+      });
     }
 
     function strictProposalBlock(value, nullable = true) {
@@ -1770,6 +1866,495 @@ window.__ModuleLoader__.load({
       });
     }
 
+    function ReviewPanel({ project, workspaceFiles, workspaceIdentity, onCatalogRefresh }) {
+      const [documentState, setDocumentState] = react.useState({ status: 'idle', document: null });
+      const [tacticsState, setTacticsState] = react.useState({
+        status: 'idle', header: null, tactics: [], highlight: null, readbackMissing: false
+      });
+      const [feedback, setFeedback] = react.useState('');
+      const [pending, setPending] = react.useState(false);
+      const [mutationBlocked, setMutationBlocked] = react.useState(false);
+      const [readRefreshKey, setReadRefreshKey] = react.useState(0);
+      const readAttempt = react.useRef(0);
+      const readAbort = react.useRef(null);
+      const mutationAttempt = react.useRef(0);
+      const mutationAbort = react.useRef(null);
+      const pendingRef = react.useRef(false);
+      const readIdentityRef = react.useRef(null);
+      const documentCacheRef = react.useRef(null);
+      const tacticsCacheRef = react.useRef(null);
+      const tacticReadbackRef = react.useRef(null);
+      const viewIdentity = project
+        ? `${String(workspaceIdentity || '')}\u0000${project.contentRef}\u0000${project.projectToken}`
+        : null;
+
+      const clearStale = (message) => {
+        readAttempt.current += 1;
+        readAbort.current?.abort();
+        readAbort.current = null;
+        documentCacheRef.current = null;
+        tacticsCacheRef.current = null;
+        tacticReadbackRef.current = null;
+        setDocumentState({ status: 'error', document: null });
+        setTacticsState({
+          status: 'error', header: null, tactics: [], highlight: null, readbackMissing: false
+        });
+        setMutationBlocked(true);
+        setFeedback(message);
+        onCatalogRefresh?.();
+      };
+
+      react.useLayoutEffect(() => {
+        const identityChanged = readIdentityRef.current !== viewIdentity;
+        readIdentityRef.current = viewIdentity;
+        const attempt = ++readAttempt.current;
+        readAbort.current?.abort();
+        const controller = new AbortController();
+        readAbort.current = controller;
+        mutationAttempt.current += 1;
+        mutationAbort.current?.abort();
+        mutationAbort.current = null;
+        pendingRef.current = false;
+        setPending(false);
+        setMutationBlocked(false);
+        if (identityChanged) {
+          documentCacheRef.current = null;
+          tacticsCacheRef.current = null;
+          tacticReadbackRef.current = null;
+          setFeedback('');
+        }
+        const priorDocument = !identityChanged
+          && documentCacheRef.current?.identity === viewIdentity
+          ? documentCacheRef.current.document : null;
+        const priorTactics = !identityChanged
+          && tacticsCacheRef.current?.identity === viewIdentity
+          ? tacticsCacheRef.current.value : null;
+        setDocumentState({
+          status: project ? 'loading' : 'idle', document: priorDocument
+        });
+        setTacticsState(priorTactics ? {
+          ...priorTactics, status: 'loading'
+        } : {
+          status: project ? 'loading' : 'idle', header: null,
+          tactics: [], highlight: null, readbackMissing: false
+        });
+        if (!project || !workspaceFiles || typeof workspaceFiles.execute !== 'function') {
+          if (project) {
+            setDocumentState({ status: 'error', document: null });
+            setTacticsState({
+              status: 'error', header: null, tactics: [], highlight: null, readbackMissing: false
+            });
+          }
+          return () => controller.abort();
+        }
+        const expected = Object.freeze({
+          contentRef: project.contentRef, projectToken: project.projectToken
+        });
+        const invalidateRead = (message) => {
+          if (controller.signal.aborted || readAttempt.current !== attempt) return;
+          readAttempt.current += 1;
+          controller.abort();
+          if (readAbort.current === controller) readAbort.current = null;
+          documentCacheRef.current = null;
+          tacticsCacheRef.current = null;
+          tacticReadbackRef.current = null;
+          setDocumentState({ status: 'error', document: null });
+          setTacticsState({
+            status: 'error', header: null, tactics: [], highlight: null, readbackMissing: false
+          });
+          setMutationBlocked(true);
+          setFeedback(message);
+          onCatalogRefresh?.();
+        };
+        const readDocument = async () => {
+          let cursor = 0;
+          let first = null;
+          let last = null;
+          let complete = false;
+          let failed = false;
+          const blocks = [];
+          const seen = new Set();
+          for (let pageIndex = 0; pageIndex < 2048; pageIndex += 1) {
+            let snapshot = null;
+            try {
+              snapshot = await workspaceFiles.execute('document.read', {
+                projectToken: expected.projectToken, cursor, limit: 2
+              }, controller.signal);
+            } catch (_error) { snapshot = null; }
+            if (controller.signal.aborted || readAttempt.current !== attempt) return;
+            if (snapshot?.code === 'operation-stale') {
+              invalidateRead('复盘文件已变化；已清空旧视图并刷新内容库。');
+              return null;
+            }
+            const page = documentPageResult(snapshot, expected.projectToken, cursor);
+            if (!page || first && !sameDocumentHeader(first, page)) {
+              failed = true;
+              break;
+            }
+            first ||= page;
+            last = page;
+            let duplicate = false;
+            for (const block of page.blocks) {
+              if (seen.has(block.blockToken)) { duplicate = true; break; }
+              seen.add(block.blockToken);
+              blocks.push(block);
+            }
+            if (duplicate) { failed = true; break; }
+            if (page.nextCursor === null) { complete = true; break; }
+            cursor = page.nextCursor;
+          }
+          if (controller.signal.aborted || readAttempt.current !== attempt) return null;
+          if (!first) {
+            if (priorDocument) setDocumentState({ status: 'stale-read', document: priorDocument });
+            else setDocumentState({ status: 'error', document: null });
+            return null;
+          }
+          const document = Object.freeze({
+            ...first,
+            blocks: Object.freeze(blocks),
+            truncated: last?.truncated === true || blocks.some((block) => block.textTruncated)
+          });
+          const value = { status: complete && !failed ? 'ready' : 'partial', document };
+          documentCacheRef.current = { identity: viewIdentity, document };
+          setDocumentState(value);
+          return document;
+        };
+        const readTactics = async () => {
+          let cursor = 0;
+          let collectionToken = null;
+          let first = null;
+          let completePages = false;
+          let failed = false;
+          const tactics = [];
+          const seenContentRefs = new Set();
+          const seenProjectTokens = new Set();
+          for (let pageIndex = 0; pageIndex < MAX_TACTIC_PAGES; pageIndex += 1) {
+            let snapshot = null;
+            try {
+              snapshot = await workspaceFiles.execute('review.tactics.read', {
+                ...expected, cursor, limit: 4, collectionToken
+              }, controller.signal);
+            } catch (_error) { snapshot = null; }
+            if (controller.signal.aborted || readAttempt.current !== attempt) return;
+            if (snapshot?.code === 'operation-stale') {
+              invalidateRead('打法库文件已变化；已清空旧视图并刷新内容库。');
+              return;
+            }
+            const page = tacticsPageResult(snapshot, {
+              ...expected, cursor, collectionToken
+            });
+            if (!page || first && !sameTacticsHeader(first, page)) {
+              failed = true;
+              break;
+            }
+            first ||= page;
+            collectionToken = page.collectionToken;
+            let duplicate = false;
+            for (const tactic of page.tactics) {
+              if (seenContentRefs.has(tactic.contentRef)
+                  || seenProjectTokens.has(tactic.projectToken)) {
+                duplicate = true;
+                break;
+              }
+              seenContentRefs.add(tactic.contentRef);
+              seenProjectTokens.add(tactic.projectToken);
+              tactics.push(tactic);
+            }
+            if (duplicate) { failed = true; break; }
+            if (page.nextCursor === null) { completePages = true; break; }
+            cursor = page.nextCursor;
+          }
+          if (controller.signal.aborted || readAttempt.current !== attempt) return;
+          if (!first) {
+            if (priorTactics) setTacticsState({ ...priorTactics, status: 'stale-read' });
+            else setTacticsState({
+              status: 'error', header: null, tactics: [], highlight: null, readbackMissing: false
+            });
+            return;
+          }
+          const readback = tacticReadbackRef.current?.identity === viewIdentity
+            ? tacticReadbackRef.current.tactic : null;
+          const foundReadback = readback
+            && tactics.some((tactic) => tactic.contentRef === readback.contentRef);
+          if (foundReadback) tacticReadbackRef.current = null;
+          else if (readback && !seenContentRefs.has(readback.contentRef)
+              && !seenProjectTokens.has(readback.projectToken)) tactics.unshift(readback);
+          const highlight = readback?.contentRef || priorTactics?.highlight || null;
+          const readbackMissing = Boolean(readback && !foundReadback);
+          const header = Object.freeze({
+            contentRef: first.contentRef, projectToken: first.projectToken,
+            collectionToken: first.collectionToken, itemCount: first.itemCount,
+            complete: first.complete
+          });
+          const value = Object.freeze({
+            status: completePages && !failed && first.complete && !readbackMissing
+              ? 'ready' : 'partial',
+            header, tactics: Object.freeze(tactics), highlight, readbackMissing
+          });
+          tacticsCacheRef.current = { identity: viewIdentity, value };
+          setTacticsState(value);
+        };
+        const read = async () => {
+          const currentDocument = await readDocument();
+          if (controller.signal.aborted || readAttempt.current !== attempt) return;
+          if (!currentDocument) {
+            if (priorTactics) setTacticsState({ ...priorTactics, status: 'stale-read' });
+            else setTacticsState({
+              status: 'error', header: null, tactics: [], highlight: null,
+              readbackMissing: false
+            });
+            return;
+          }
+          if (currentDocument.stage !== 'review') {
+            tacticsCacheRef.current = null;
+            tacticReadbackRef.current = null;
+            setTacticsState({
+              status: 'not-applicable', header: null, tactics: [], highlight: null,
+              readbackMissing: false
+            });
+            return;
+          }
+          await readTactics();
+        };
+        void read();
+        return () => {
+          controller.abort();
+          if (readAbort.current === controller) readAbort.current = null;
+        };
+      }, [project?.contentRef, project?.projectToken, workspaceIdentity,
+        workspaceFiles, readRefreshKey]);
+
+      react.useEffect(() => () => {
+        readAttempt.current += 1;
+        readAbort.current?.abort();
+        readAbort.current = null;
+        mutationAttempt.current += 1;
+        mutationAbort.current?.abort();
+        mutationAbort.current = null;
+        pendingRef.current = false;
+      }, []);
+
+      const solidify = async () => {
+        const document = documentState.document;
+        const wallReady = tacticsState.status === 'ready'
+          && tacticsState.header?.complete === true && !tacticsState.readbackMissing;
+        if (!project || documentState.status !== 'ready' || !document
+            || document.stage !== 'review' || document.truncated || document.blockCount === 0
+            || !wallReady || mutationBlocked || pendingRef.current) return;
+        pendingRef.current = true;
+        setPending(true);
+        setFeedback('正在显式固化到本地打法库…');
+        const controller = new AbortController();
+        mutationAbort.current = controller;
+        const attempt = ++mutationAttempt.current;
+        const expected = Object.freeze({
+          contentRef: project.contentRef, projectToken: project.projectToken
+        });
+        try {
+          const snapshot = await workspaceFiles.execute(
+            'review.solidify', expected, controller.signal
+          );
+          if (controller.signal.aborted || mutationAttempt.current !== attempt) return;
+          const result = reviewSolidifyResult(snapshot, expected);
+          if (!result) {
+            if (snapshot?.code === 'operation-stale') {
+              clearStale('复盘文件已变化；已清空旧视图并刷新内容库。');
+            } else if (snapshot?.code === 'outcome-unknown'
+                || snapshot?.state === 'fulfilled') {
+              setMutationBlocked(true);
+              setFeedback('固化结果未知；以下保留旧视图。请核对 07_打法库 文件，不要重复点击。');
+            } else setFeedback(operationError(snapshot,
+              '固化没有完成；本地复盘和打法库没有被推断为已变化。'));
+            return;
+          }
+          const readback = Object.freeze({ identity: viewIdentity, tactic: result.tactic });
+          tacticReadbackRef.current = readback;
+          setMutationBlocked(false);
+          setTacticsState((current) => {
+            const tactics = [result.tactic,
+              ...current.tactics.filter((tactic) => tactic.contentRef !== result.tactic.contentRef)];
+            const value = Object.freeze({
+              ...current, status: 'loading', tactics: Object.freeze(tactics),
+              highlight: result.tactic.contentRef, readbackMissing: true
+            });
+            tacticsCacheRef.current = { identity: viewIdentity, value };
+            return value;
+          });
+          setFeedback(result.created
+            ? result.message || '已显式固化进本地打法库。'
+            : `已定位既有打法；没有重复创建。${result.message ? ` ${result.message}` : ''}`);
+          onCatalogRefresh?.();
+          setReadRefreshKey((current) => current + 1);
+        } catch (_error) {
+          if (!controller.signal.aborted && mutationAttempt.current === attempt) {
+            setMutationBlocked(true);
+            setFeedback('固化结果未知；以下保留旧视图。请核对 07_打法库 文件，不要重复点击。');
+          }
+        } finally {
+          if (mutationAbort.current === controller) mutationAbort.current = null;
+          if (mutationAttempt.current === attempt) {
+            pendingRef.current = false;
+            setPending(false);
+          }
+        }
+      };
+
+      const document = documentState.document;
+      const isReview = document?.stage === 'review';
+      const wallReady = tacticsState.status === 'ready'
+        && tacticsState.header?.complete === true && !tacticsState.readbackMissing;
+      const canSolidify = documentState.status === 'ready' && isReview
+        && !document.truncated && document.blockCount > 0 && wallReady
+        && !mutationBlocked && !pending;
+      const refresh = () => {
+        setFeedback('');
+        setReadRefreshKey((current) => current + 1);
+      };
+      const documentCard = !project ? react_jsx_runtime.jsx('section', {
+        className: 'wd10-card', children: react_jsx_runtime.jsx('p', {
+          children: '请从左侧选择一张真实内容卡。'
+        })
+      }) : documentState.status === 'loading' && !document
+        ? react_jsx_runtime.jsx('section', { className: 'wd10-card', children:
+          react_jsx_runtime.jsx('p', { children: '正在读取本地复盘正文…' }) })
+        : !document ? react_jsx_runtime.jsxs('section', { className: 'wd10-card', children: [
+          react_jsx_runtime.jsx('p', { role: 'status', children:
+            '复盘正文暂时读不到；没有使用内容卡摘要冒充正文。' }),
+          react_jsx_runtime.jsx('button', { type: 'button', className: 'wd10-refresh',
+            onClick: refresh, children: '重新读取复盘与打法库' })
+        ] }) : !isReview ? react_jsx_runtime.jsxs('section', {
+          className: 'wd10-card', children: [
+            react_jsx_runtime.jsx('h3', { children: '当前内容不是复盘文件' }),
+            react_jsx_runtime.jsx('p', { role: 'status', children:
+              `当前“${document.stageLabel}”阶段不能固化；不会把其他正文冒充复盘。`
+            })
+          ]
+        }) : react_jsx_runtime.jsxs('section', { className: 'wd10-card', children: [
+          react_jsx_runtime.jsxs('div', { className: 'wd10-reviewHead', children: [
+            react_jsx_runtime.jsxs('div', { children: [
+              react_jsx_runtime.jsx('h3', { children: '真实本地复盘' }),
+              react_jsx_runtime.jsx('p', { children: `${document.title} · ${document.stageLabel}` })
+            ] }),
+            react_jsx_runtime.jsx('span', { children:
+              `${document.blocks.length}/${document.blockCount} 块` })
+          ] }),
+          ['partial', 'stale-read'].includes(documentState.status)
+            && react_jsx_runtime.jsx('p', { className: 'wd10-incomplete', role: 'status', children:
+              documentState.status === 'partial'
+                ? `复盘正文读取不完整；只显示已成功读取的 ${document.blocks.length}/${document.blockCount} 块。`
+                : '复盘正文刷新失败；以下保留上次成功结果，不代表当前文件状态。'
+            }),
+          document.truncated && react_jsx_runtime.jsx('p', {
+            className: 'wd10-incomplete', role: 'status', children:
+              '复盘正文投影含截断内容；当前不会开放固化。'
+          }),
+          document.blocks.length === 0 && react_jsx_runtime.jsx('p', {
+            className: 'wd10-feedback', children: '这份真实复盘没有可显示的正文块。'
+          }),
+          react_jsx_runtime.jsx('div', { className: 'wd10-reviewBlocks', children:
+            document.blocks.map((block) => react_jsx_runtime.jsxs('article', {
+              className: 'wd10-reviewBlock', 'data-review-block': block.kind, children: [
+                react_jsx_runtime.jsxs('div', { className: 'wd10-reviewMeta', children: [
+                  react_jsx_runtime.jsx('strong', { children: block.kind }),
+                  react_jsx_runtime.jsx('span', { children:
+                    `第 ${block.startLine}-${block.endLine} 行` })
+                ] }),
+                react_jsx_runtime.jsx('pre', { children: block.text }),
+                block.textTruncated && react_jsx_runtime.jsx('p', {
+                  className: 'wd10-incomplete', children: '这一块正文已截断。'
+                })
+              ]
+            }, block.blockToken)) })
+        ] });
+
+      const wall = react_jsx_runtime.jsxs('section', {
+        className: 'wd10-card', 'data-tactic-wall': true, children: [
+          react_jsx_runtime.jsx('h3', { children: '本地打法库墙' }),
+          react_jsx_runtime.jsx('p', { className: 'wd10-reviewTruth', children:
+            '一期没有平台数据通道；以下都是本地文件，不显示播放量、评论聚类、使用次数或胜率。'
+          }),
+          tacticsState.status === 'loading' && tacticsState.tactics.length === 0
+            && react_jsx_runtime.jsx('p', { children: '正在读取本地打法库…' }),
+          tacticsState.status === 'error' && tacticsState.tactics.length === 0
+            && react_jsx_runtime.jsx('p', { role: 'status', children:
+              '打法库暂时读不到；没有推断任何本地条目。'
+            }),
+          tacticsState.status === 'not-applicable'
+            && react_jsx_runtime.jsx('p', { role: 'status', children:
+              '选择真实复盘文件后，才会读取本地打法库。'
+            }),
+          tacticsState.status === 'stale-read' && react_jsx_runtime.jsx('p', {
+            className: 'wd10-incomplete', role: 'status', children:
+              '打法库刷新失败；以下保留上次成功结果，不代表当前文件状态。'
+          }),
+          tacticsState.status === 'partial' && react_jsx_runtime.jsx('p', {
+            className: 'wd10-incomplete', role: 'status', children:
+              tacticsState.readbackMissing
+                ? '刚返回的本地打法尚未在分页刷新中读回；已保留返回结果并标为不完整。'
+                : `打法库读取不完整；只显示已成功读取的 ${tacticsState.tactics.length} 条本地条目。`
+          }),
+          tacticsState.status === 'loading' && tacticsState.tactics.length > 0
+            && react_jsx_runtime.jsx('p', { className: 'wd10-incomplete', role: 'status', children:
+              '正在重新读取打法库；以下暂存上次已验证或刚返回的本地条目。'
+            }),
+          tacticsState.tactics.length === 0 && tacticsState.status === 'ready'
+            && react_jsx_runtime.jsx('p', { children: '本地打法库还没有条目。' }),
+          react_jsx_runtime.jsx('div', { className: 'wd10-tacticWall', children:
+            tacticsState.tactics.map((tactic) => react_jsx_runtime.jsxs('article', {
+              className: 'wd10-tactic', 'data-tactic-ref': tactic.contentRef,
+              'data-highlight': tacticsState.highlight === tactic.contentRef, children: [
+                react_jsx_runtime.jsxs('div', { className: 'wd10-tacticMeta', children: [
+                  react_jsx_runtime.jsx('span', { className: 'wd10-tacticBadge', children:
+                    '本地收录 · 待验证' }),
+                  react_jsx_runtime.jsx('span', { children:
+                    tactic.updated ? `更新 ${tactic.updated}` : '更新时间未写明' })
+                ] }),
+                react_jsx_runtime.jsx('h4', { children: tactic.title }),
+                react_jsx_runtime.jsx('p', { children:
+                  tactic.summary || '这条本地打法没有可显示的摘要。' }),
+                tactic.summaryTruncated && react_jsx_runtime.jsx('p', {
+                  className: 'wd10-incomplete', children: '摘要已截断。'
+                }),
+                react_jsx_runtime.jsx('p', { children:
+                  `来源：${tactic.sourceTitle || '本地来源未标明'}` })
+              ]
+            }, tactic.contentRef)) })
+        ]
+      });
+
+      return react_jsx_runtime.jsxs('section', {
+        className: 'wd10-review', 'data-whaledock-review': true, children: [
+          mutationBlocked && react_jsx_runtime.jsxs('div', { children: [
+            react_jsx_runtime.jsx('p', { className: 'wd10-incomplete', role: 'status', children:
+              feedback || '当前结果需要重新读取；本地固化已锁定。'
+            }),
+            react_jsx_runtime.jsx('button', { type: 'button', className: 'wd10-refresh',
+              onClick: refresh, children: '重新读取复盘与打法库' })
+          ] }),
+          documentCard,
+          react_jsx_runtime.jsxs('section', { className: 'wd10-card', children: [
+            react_jsx_runtime.jsx('h3', { children: '显式固化' }),
+            react_jsx_runtime.jsx('p', { children: '打法只能由你从真实复盘显式固化。' }),
+            react_jsx_runtime.jsx('button', { type: 'button', className: 'wd10-solidify',
+              disabled: !canSolidify, onClick: () => { void solidify(); },
+              children: pending ? '正在固化…' : '显式固化进打法库'
+            }),
+            !isReview && document && react_jsx_runtime.jsx('p', {
+              className: 'wd10-feedback', children: '只有真实复盘文件可以执行这一步。'
+            }),
+            isReview && !canSolidify && !pending && !mutationBlocked
+              && react_jsx_runtime.jsx('p', { className: 'wd10-feedback', children:
+                '请先完整读回复盘正文和本地打法库，再执行固化。'
+              }),
+            !mutationBlocked && feedback && react_jsx_runtime.jsx('p', {
+              className: 'wd10-feedback', role: 'status', children: feedback
+            })
+          ] }),
+          wall
+        ]
+      });
+    }
+
     function CreatorDetail({ routingProject, project, tab, onTab, workspaceFiles,
       workspaceIdentity, alignment, onAlign, onCatalogRefresh,
       onProjectMutation, onPublishCreated }) {
@@ -1990,6 +2575,8 @@ window.__ModuleLoader__.load({
           : tab === 'publish' ? react_jsx_runtime.jsx(PublishPanel, {
             project, workspaceFiles, workspaceIdentity,
             onProjectMutation, onPublishCreated, onCatalogRefresh
+          }) : tab === 'review' ? react_jsx_runtime.jsx(ReviewPanel, {
+            project, workspaceFiles, workspaceIdentity, onCatalogRefresh
           }) : react_jsx_runtime.jsxs('section', {
             className: 'wd10-card wd10-unfinished', 'data-whaledock-unfinished': true, children: [
               react_jsx_runtime.jsx('h3', { children:

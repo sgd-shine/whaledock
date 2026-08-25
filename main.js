@@ -900,6 +900,7 @@ const VIDEO_PUBLISH_LIGHTS = Object.freeze({
   cover: '封面', title: '标题', topics: '标签话题', timing: '发布时间',
   'pinned-comment': '置顶评论', 'ai-label': 'AI 内容标识', published: '已由本人发布'
 });
+const VIDEO_TACTIC_TOPIC_PREFIX = 'tactic-';
 let cockpitNativeMode = false;
 let cockpitChatOpen = false;
 let videoWorkspaceRuntime = null;
@@ -2807,6 +2808,15 @@ function videoContentRef(epoch, relativePath) {
   return videoToken('content', epoch, cleanPath);
 }
 
+function videoProjectToken(epoch, relativePath, hash) {
+  if (!Number.isSafeInteger(epoch) || epoch < 0
+      || videoCockpit.safeRelativePath(relativePath) !== relativePath
+      || !/^[a-f0-9]{64}$/.test(String(hash || ''))) {
+    throw new Error('项目版本 token 输入无效');
+  }
+  return videoToken('project', epoch, relativePath, hash);
+}
+
 const VIDEO_FILE_BINDING_KEYS = Object.freeze([
   'rootDev', 'rootIno', 'parentDev', 'parentIno', 'fileDev', 'fileIno'
 ]);
@@ -3019,6 +3029,92 @@ function videoPublishChecklistRelativePath(sourceRelativePath) {
   return `08_发布检查/发布检查-${sourceId}.md`;
 }
 
+function videoTacticRevisionKey(sourceRelativePath, sourceHash) {
+  const source = videoCockpit.safeRelativePath(sourceRelativePath);
+  if (!source || source !== sourceRelativePath
+      || !/^[a-f0-9]{64}$/.test(String(sourceHash || ''))) {
+    throw new Error('打法来源版本无效');
+  }
+  const digest = crypto.createHash('sha256')
+    .update('review-tactic/v1\0', 'utf8')
+    .update(source, 'utf8').update('\0', 'utf8')
+    .update(sourceHash, 'utf8').digest('hex');
+  return digest;
+}
+
+function videoTacticRelativePath(sourceRelativePath, sourceHash) {
+  const revisionKey = videoTacticRevisionKey(sourceRelativePath, sourceHash);
+  return `07_打法库/打法-${revisionKey}.md`;
+}
+
+function videoTacticBodyText(document) {
+  if (!document || document.stage !== 'review' || typeof document.body !== 'string'
+      || !document.body.trim()) {
+    throw new Error('只能从复盘文档生成打法正文');
+  }
+  return [
+    '# 从复盘固化的打法', '', document.body.trim(), '',
+    '> 本条由你显式固化；一期没有平台数据通道，不显示战绩。', ''
+  ].join('\n');
+}
+
+function videoTacticLegacyBodyText(document) {
+  return `\n${videoTacticBodyText(document)}`;
+}
+
+function videoTacticText(document) {
+  if (!document || document.stage !== 'review'
+      || typeof document.relativePath !== 'string'
+      || document.relativePath.startsWith('07_打法库/')
+      || videoCockpit.safeRelativePath(document.relativePath) !== document.relativePath
+      || !/^[a-f0-9]{64}$/.test(String(document.hash || ''))) {
+    throw new Error('打法来源文档无效');
+  }
+  const revisionKey = videoTacticRevisionKey(document.relativePath, document.hash);
+  const topicId = `${VIDEO_TACTIC_TOPIC_PREFIX}${revisionKey}`;
+  const body = videoTacticBodyText(document);
+  const sourceUpdated = document.fields && typeof document.fields.updated === 'string'
+    && document.fields.updated && document.fields.updated.length <= 64
+    && !/[\u0000-\u001f\u007f]/.test(document.fields.updated)
+    ? document.fields.updated : null;
+  const text = [
+    '---', `title: ${frontMatterText(document.title)}`, 'stage: asset', 'status: active',
+    `source: ${document.relativePath}`, `topicId: ${topicId}`,
+    ...(sourceUpdated ? [`updated: ${sourceUpdated}`] : []), '---'
+  ].join('\n') + `\n${body}`;
+  const parsed = videoCockpit.parseFrontMatter(text);
+  if (!parsed || !isPlainObject(parsed.fields)
+      || parsed.fields.source !== document.relativePath
+      || parsed.fields.topicId !== topicId
+      || (sourceUpdated !== null && parsed.fields.updated !== sourceUpdated)
+      || parsed.body !== body) {
+    throw new Error('打法来源身份无法无损写入');
+  }
+  return text;
+}
+
+function videoTacticSummary(body, maximumBytes = 240) {
+  const paragraphs = String(body || '').replace(/\r\n?/g, '\n').split(/\n[ \t]*\n/);
+  let value = null;
+  for (const paragraph of paragraphs) {
+    const lines = paragraph.split('\n').map((line) => line.trim()).filter(Boolean)
+      .filter((line) => !/^(?:#{1,6}(?:\s|$)|>|```|~~~|<!--)/.test(line));
+    const candidate = lines.join(' ').replace(/\s+/gu, ' ').trim();
+    if (candidate) { value = candidate; break; }
+  }
+  if (!value) return { summary: null, summaryTruncated: false };
+  const clipped = contextPocUtf8Clip(value, maximumBytes);
+  return { summary: clipped.text, summaryTruncated: clipped.truncated };
+}
+
+function videoTacticDisplayText(value, fallback, maximumChars) {
+  if (typeof value !== 'string') return fallback;
+  const clean = value.replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/gu, ' ').trim();
+  if (!clean) return fallback;
+  return Array.from(clean).slice(0, maximumChars).join('') || fallback;
+}
+
 function patchVideoPublishDocument(document, request, nowMs = Date.now()) {
   if (!document || document.stage !== 'publish' || typeof document.text !== 'string'
       || !isPlainObject(document.fields) || typeof document.hash !== 'string') {
@@ -3200,6 +3296,338 @@ function assertVideoPublishIdentitySource(
     );
   }
   return true;
+}
+
+function videoTacticIdentityIssue(document) {
+  return !document || !Array.isArray(document.issues) ? true : document.issues.some((issue) => (
+    issue && (issue.code === 'front-matter-unclosed'
+      || ['source', 'stage', 'topicId'].includes(issue.key))
+  ));
+}
+
+function videoTacticClassification(document, sourceDocument) {
+  if (!document || !sourceDocument
+      || typeof document.relativePath !== 'string'
+      || !document.relativePath.startsWith('07_打法库/')
+      || videoTacticIdentityIssue(document)) return 'unrelated';
+  const expectedRevisionKey = videoTacticRevisionKey(
+    sourceDocument.relativePath, sourceDocument.hash
+  );
+  const expectedTopicId = `${VIDEO_TACTIC_TOPIC_PREFIX}${expectedRevisionKey}`;
+  const rawSource = document.fields && document.fields.source;
+  const rawRevisionKey = document.fields && document.fields.topicId;
+  const sourceMatches = rawSource === sourceDocument.relativePath;
+  const bodyMatches = document.body === videoTacticBodyText(sourceDocument);
+  const legacyBodyMatches = document.body === videoTacticLegacyBodyText(sourceDocument);
+  if (rawRevisionKey === expectedTopicId) {
+    return document.stage === 'asset' && sourceMatches && bodyMatches
+      ? 'current' : 'conflict';
+  }
+  if (document.stage !== 'asset') return 'unrelated';
+  if ((rawRevisionKey === undefined || rawRevisionKey === null || rawRevisionKey === '')
+      && sourceMatches && legacyBodyMatches) return 'legacy';
+  return 'unrelated';
+}
+
+function videoTacticScanBlocked(scanned) {
+  return !scanned || scanned.truncated === true
+    || !Array.isArray(scanned.items) || !Array.isArray(scanned.issues)
+    || scanned.issues.some((issue) => (
+      !issue || issue.relativePath === null
+        || (typeof issue.relativePath === 'string'
+          && (issue.relativePath === '07_打法库'
+            || issue.relativePath.startsWith('07_打法库/')))
+    ));
+}
+
+function findVideoTacticDocumentsByRevision(runtime, sourceDocument, options = {}) {
+  assertVideoRuntimeIdentity(runtime);
+  if (!sourceDocument || sourceDocument.stage !== 'review'
+      || sourceDocument.relativePath.startsWith('07_打法库/')
+      || videoCockpit.safeRelativePath(sourceDocument.relativePath) !== sourceDocument.relativePath
+      || !/^[a-f0-9]{64}$/.test(String(sourceDocument.hash || ''))) {
+    throw new Error('打法来源版本无效');
+  }
+  const scanned = options.scanned || videoCockpit.scanWorkspace(runtime.root, {
+    expectedRootIdentity: runtime.rootIdentity
+  });
+  if (videoTacticScanBlocked(scanned)) {
+    throw new Error('打法库扫描不完整，已停止写入');
+  }
+  const matches = [];
+  for (const item of scanned.items) {
+    if (!item || typeof item.relativePath !== 'string'
+        || !item.relativePath.startsWith('07_打法库/')) continue;
+    const candidate = options.readDocument
+      ? options.readDocument(item.relativePath)
+      : videoCockpit.readDocument(runtime.root, item.relativePath);
+    if (candidate.hash !== item.hash) {
+      const error = new Error('打法库扫描期间已变化');
+      error.code = 'ERR_CONTEXT_PROJECT_STALE';
+      throw error;
+    }
+    if (videoTacticIdentityIssue(candidate)) {
+      throw new Error('打法库存在来源或版本歧义，已停止写入');
+    }
+    const classification = videoTacticClassification(candidate, sourceDocument);
+    if (classification === 'conflict') {
+      throw new Error('同一打法版本的来源或正文冲突，已停止写入');
+    }
+    if (classification === 'current' || classification === 'legacy') {
+      matches.push({ document: candidate, classification });
+    }
+  }
+  assertVideoRuntimeIdentity(runtime);
+  if (matches.length > 1) throw new Error('同一复盘版本对应多份打法，已停止写入');
+  return matches;
+}
+
+function videoTacticIdentityForRelativePath(runtime, relativePath) {
+  const contentRef = videoContentRef(runtime.epoch, relativePath);
+  const matches = [...runtime.projectTokens.entries()].filter(([, record]) => (
+    record && record.relativePath === relativePath
+  ));
+  if (matches.length !== 1) {
+    throw contextPocWorkspaceOperationError(
+      'ERR_OPERATION_OUTCOME_UNKNOWN', '打法写后身份无法确认'
+    );
+  }
+  return { contentRef, projectToken: matches[0][0] };
+}
+
+function videoTacticProjection(runtime, identity, document, sourceTitle = null) {
+  if (!runtime || !identity || !document || document.stage !== 'asset'
+      || !document.relativePath.startsWith('07_打法库/')
+      || videoContentRef(runtime.epoch, document.relativePath) !== identity.contentRef
+      || videoProjectToken(runtime.epoch, document.relativePath, document.hash)
+        !== identity.projectToken) {
+    throw new Error('打法投影身份无效');
+  }
+  const summary = videoTacticSummary(document.body);
+  const fields = isPlainObject(document.fields) ? document.fields : {};
+  return {
+    contentRef: identity.contentRef,
+    projectToken: identity.projectToken,
+    title: videoTacticDisplayText(document.title, '未命名打法', 120),
+    summary: summary.summary,
+    summaryTruncated: summary.summaryTruncated,
+    sourceTitle: typeof sourceTitle === 'string' && sourceTitle
+      ? videoTacticDisplayText(sourceTitle, '', 120) || null : null,
+    updated: typeof fields.updated === 'string' && fields.updated
+      ? safeText(fields.updated, '', 64) || null : null
+  };
+}
+
+function assertVideoTacticIdentitySource(
+  runtime, identity, sourceDocument, readDocument = readVideoDocumentByToken
+) {
+  let current;
+  try { current = readDocument(identity.projectToken); }
+  catch (_error) {
+    throw contextPocWorkspaceOperationError(
+      'ERR_OPERATION_OUTCOME_UNKNOWN', '打法写后无法回读'
+    );
+  }
+  const { record, document } = current;
+  const classification = videoTacticClassification(document, sourceDocument);
+  if (!record || videoContentRef(runtime.epoch, record.relativePath) !== identity.contentRef
+      || record.relativePath !== document.relativePath
+      || !['current', 'legacy'].includes(classification)) {
+    throw contextPocWorkspaceOperationError(
+      'ERR_OPERATION_OUTCOME_UNKNOWN', '打法写后来源绑定无法确认'
+    );
+  }
+  return videoTacticProjection(runtime, identity, document, sourceDocument.title);
+}
+
+function videoTacticCollection(runtime, options = {}) {
+  assertVideoRuntimeIdentity(runtime);
+  if (options.refresh !== false) {
+    const snapshot = refreshVideoWorkspaceSnapshot();
+    if (!snapshot || snapshot.status !== 'ready'
+        || currentVideoRuntime() !== runtime) {
+      throw new Error('打法库目录暂时不可用');
+    }
+  }
+  const scanned = options.scanned || videoCockpit.scanWorkspace(runtime.root, {
+    expectedRootIdentity: runtime.rootIdentity
+  });
+  if (!scanned || !Array.isArray(scanned.items) || !Array.isArray(scanned.issues)) {
+    throw new Error('打法库目录投影无效');
+  }
+  let complete = !videoTacticScanBlocked(scanned)
+    && !(Array.isArray(runtime.recoveryIssues) && runtime.recoveryIssues.length);
+  const sourceTitles = new Map(scanned.items.filter((item) => (
+    item && item.stage === 'review' && typeof item.relativePath === 'string'
+  )).map((item) => [item.relativePath, item.title]));
+  const records = [];
+  const items = scanned.items.filter((item) => (
+    item && item.stage === 'asset' && typeof item.relativePath === 'string'
+      && item.relativePath.startsWith('07_打法库/')
+  )).sort((left, right) => (
+    left.relativePath < right.relativePath ? -1 : (left.relativePath > right.relativePath ? 1 : 0)
+  ));
+  for (const item of items) {
+    let document;
+    try { document = videoCockpit.readDocument(runtime.root, item.relativePath); }
+    catch (error) {
+      if (error && ['ERR_ROOT_CHANGED', 'ERR_VIDEO_ROOT_CHANGED',
+        'ERR_PATH_CHANGED', 'ERR_PATH_NOT_FOUND', 'ERR_PATH_SYMLINK',
+        'ERR_PATH_OUTSIDE', 'ERR_PATH_NOT_FILE'].includes(error.code)) throw error;
+      complete = false;
+      continue;
+    }
+    if (document.hash !== item.hash) {
+      const error = new Error('打法库目录读取期间已变化');
+      error.code = 'ERR_CONTEXT_PROJECT_STALE';
+      throw error;
+    }
+    if (document.stage !== 'asset' || videoTacticIdentityIssue(document)) {
+      complete = false;
+      continue;
+    }
+    const identity = {
+      contentRef: videoContentRef(runtime.epoch, document.relativePath),
+      projectToken: videoProjectToken(
+        runtime.epoch, document.relativePath, document.hash
+      )
+    };
+    const bound = runtime.projectTokens.get(identity.projectToken);
+    if (!bound || bound.relativePath !== document.relativePath
+        || bound.hash !== document.hash || bound.stage !== 'asset') {
+      const error = new Error('打法库目录身份已变化');
+      error.code = 'ERR_CONTEXT_PROJECT_STALE';
+      throw error;
+    }
+    const rawSource = document.fields && document.fields.source;
+    const sourceTitle = typeof rawSource === 'string'
+      && videoCockpit.safeRelativePath(rawSource) === rawSource
+      ? sourceTitles.get(rawSource) || null : null;
+    records.push({
+      relativePath: document.relativePath,
+      hash: document.hash,
+      tactic: videoTacticProjection(runtime, identity, document, sourceTitle)
+    });
+  }
+  assertVideoRuntimeIdentity(runtime);
+  const digest = crypto.createHash('sha256')
+    .update(JSON.stringify(records.map((record) => [record.relativePath, record.hash])), 'utf8')
+    .digest('hex');
+  return {
+    collectionToken: videoToken('collection', runtime.epoch, digest),
+    complete,
+    tactics: records.map((record) => record.tactic)
+  };
+}
+
+function videoTacticWorkspaceSurface(tacticIdentity, sourceIdentity) {
+  const source = readVideoDocumentByToken(sourceIdentity.projectToken);
+  if (!source || !source.record || !source.document
+      || source.document.stage !== 'review'
+      || videoContentRef(source.runtime.epoch, source.record.relativePath)
+        !== sourceIdentity.contentRef) {
+    const error = new Error('复盘来源身份已变化');
+    error.code = 'ERR_CONTEXT_PROJECT_STALE';
+    throw error;
+  }
+  const tactic = assertVideoTacticIdentitySource(
+    source.runtime, tacticIdentity, source.document
+  );
+  const finalSource = readVideoDocumentByToken(sourceIdentity.projectToken);
+  if (!finalSource || !finalSource.record || !finalSource.document
+      || finalSource.document.stage !== 'review'
+      || finalSource.record.relativePath !== source.record.relativePath
+      || finalSource.document.relativePath !== source.document.relativePath
+      || finalSource.document.hash !== source.document.hash) {
+    const error = new Error('复盘来源在打法回读期间已变化');
+    error.code = 'ERR_CONTEXT_PROJECT_STALE';
+    throw error;
+  }
+  return tactic;
+}
+
+function solidifyVideoTactic(runtime, sourceDocument, sourceProjectToken, options = {}) {
+  assertVideoRuntimeIdentity(runtime);
+  if (Array.isArray(runtime.recoveryIssues) && runtime.recoveryIssues.length) {
+    const error = new Error('打法库存在未裁决的恢复状态');
+    error.code = 'ERR_VIDEO_RECOVERY_REQUIRED';
+    throw error;
+  }
+  if (!sourceDocument || sourceDocument.stage !== 'review'
+      || sourceDocument.relativePath.startsWith('07_打法库/')
+      || typeof sourceDocument.body !== 'string' || !sourceDocument.body.trim()) {
+    throw new Error('打法只能由你从复盘项目显式固化');
+  }
+  const readSource = options.readSource || readVideoDocumentByToken;
+  const readTactic = options.readTactic || readVideoDocumentByToken;
+  const refresh = options.refresh || refreshVideoWorkspaceSnapshot;
+  const assertSourceCurrent = () => {
+    const current = readSource(sourceProjectToken);
+    if (!current || !current.document || !current.record
+        || current.document.stage !== 'review'
+        || current.document.relativePath !== sourceDocument.relativePath
+        || current.document.hash !== sourceDocument.hash
+        || current.record.relativePath !== sourceDocument.relativePath) {
+      const error = new Error('复盘来源已变化');
+      error.code = 'ERR_CONTEXT_PROJECT_STALE';
+      throw error;
+    }
+    return current;
+  };
+  const finish = (match, created) => {
+    try {
+      refresh();
+      assertSourceCurrent();
+      const identity = videoTacticIdentityForRelativePath(
+        runtime, match.document.relativePath
+      );
+      assertVideoTacticIdentitySource(
+        runtime, identity, sourceDocument, readTactic
+      );
+      assertSourceCurrent();
+      return {
+        kind: 'ok', created, ...identity,
+        text: created
+          ? '已固化进打法库；没有伪造使用次数或胜率。'
+          : '已找到这一复盘版本的打法，没有重复创建。'
+      };
+    } catch (error) {
+      if (!created) throw error;
+      throw contextPocWorkspaceOperationError(
+        'ERR_OPERATION_OUTCOME_UNKNOWN', '打法已可能写入，但终态无法确认'
+      );
+    }
+  };
+  const existing = findVideoTacticDocumentsByRevision(runtime, sourceDocument);
+  if (existing.length === 1) return finish(existing[0], false);
+  assertSourceCurrent();
+  const confirmedExisting = findVideoTacticDocumentsByRevision(runtime, sourceDocument);
+  if (confirmedExisting.length === 1) return finish(confirmedExisting[0], false);
+  assertSourceCurrent();
+  const relativePath = videoTacticRelativePath(
+    sourceDocument.relativePath, sourceDocument.hash
+  );
+  const content = videoTacticText(sourceDocument);
+  if (MAIN_HELPER_TEST && typeof options.beforeTacticExclusiveWrite === 'function') {
+    options.beforeTacticExclusiveWrite({ relativePath, content });
+  }
+  try {
+    writeVideoExclusive(runtime.root, relativePath, content, {
+      rootIdentity: runtime.rootIdentity
+    });
+  } catch (error) {
+    if (!error || error.code !== 'EEXIST') throw error;
+    const raced = findVideoTacticDocumentsByRevision(runtime, sourceDocument);
+    if (raced.length !== 1 || raced[0].classification !== 'current'
+        || raced[0].document.relativePath !== relativePath
+        || raced[0].document.text !== content) {
+      throw new Error('打法同名或并发创建冲突，已停止写入');
+    }
+    return finish(raced[0], false);
+  }
+  return finish({
+    document: { relativePath }, classification: 'current'
+  }, true);
 }
 
 function videoIssueSummary(issues) {
@@ -5641,20 +6069,7 @@ async function runVideoSceneAction(raw) {
     return { kind: 'ok', text: request.value === 'unknown' ? 'AI 内容状态已恢复为待确认。' : '已记录你的 AI 内容选择。' };
   }
   if (request.action === 'solidify-tactic') {
-    if (document.stage !== 'review') throw new Error('打法只能由你从复盘项目显式固化');
-    const id = crypto.randomBytes(5).toString('hex');
-    const relativePath = `07_打法库/${videoFileStem(document.title)}-打法-${id}.md`;
-    const content = [
-      '---', `title: ${frontMatterText(document.title)}`, 'stage: asset', 'status: active',
-      `source: ${frontMatterText(document.relativePath, 400)}`, `updated: ${new Date().toISOString()}`,
-      '---', '', '# 从复盘固化的打法', '', document.body.trim(), '',
-      '> 本条由你显式固化；一期没有平台数据通道，不显示战绩。', ''
-    ].join('\n');
-    writeVideoExclusive(runtime.root, relativePath, content, {
-      rootIdentity: runtime.rootIdentity
-    });
-    refreshVideoWorkspaceSnapshot();
-    return { kind: 'ok', text: '已固化进打法库；没有伪造使用次数或胜率。' };
+    return solidifyVideoTactic(runtime, document, request.projectToken);
   }
   throw new Error('视频现场动作未实现');
 }
@@ -6243,6 +6658,7 @@ const CONTEXT_POC_WORKSPACE_FILE_OPERATIONS = new Set([
   'block.action.prepare', 'block.action.submit',
   'proposal.read', 'proposal.decide', 'proposal.undo',
   'publish.read', 'publish.create', 'publish.update',
+  'review.tactics.read', 'review.solidify',
   'project.action.prepare', 'project.action.submit',
   'receipts.read', 'receipts.ack', 'receipts.open'
 ]);
@@ -6526,6 +6942,39 @@ function contextPocWorkspaceFilePublishUpdateInput(value) {
     projectToken: value.projectToken,
     type: 'ai-disclosure', value: value.value
   });
+}
+
+function contextPocWorkspaceFileReviewIdentityInput(value) {
+  if (!contextPocExact(value, ['contentRef', 'projectToken'])
+      || typeof value.contentRef !== 'string'
+      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
+      || typeof value.projectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)) {
+    throw new Error('复盘页内容身份无效');
+  }
+  return Object.freeze({
+    contentRef: value.contentRef,
+    projectToken: value.projectToken
+  });
+}
+
+function contextPocWorkspaceFileTacticsInput(value) {
+  if (!contextPocExact(value, [
+    'contentRef', 'projectToken', 'cursor', 'limit', 'collectionToken'
+  ])) throw new Error('打法库分页请求无效');
+  contextPocWorkspaceFileReviewIdentityInput({
+    contentRef: value.contentRef,
+    projectToken: value.projectToken
+  });
+  if (!Number.isSafeInteger(value.cursor) || value.cursor < 0 || value.cursor > 512
+      || !Number.isSafeInteger(value.limit) || value.limit < 1 || value.limit > 4
+      || (value.cursor === 0 && value.collectionToken !== null)
+      || (value.cursor > 0 && !/^collection-[a-f0-9]{24}$/.test(
+        String(value.collectionToken || '')
+      ))) {
+    throw new Error('打法库分页身份无效');
+  }
+  return Object.freeze({ ...value });
 }
 
 function contextPocWorkspaceFileReceiptsInput(value) {
@@ -7144,6 +7593,109 @@ function contextPocWorkspacePublishMutationResult(value) {
   return result;
 }
 
+function contextPocWorkspaceTactic(value) {
+  if (!contextPocExact(value, [
+    'contentRef', 'projectToken', 'title', 'summary', 'summaryTruncated',
+    'sourceTitle', 'updated'
+  ]) || typeof value.contentRef !== 'string'
+      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
+      || typeof value.projectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
+      || typeof value.title !== 'string' || !value.title
+      || Array.from(value.title).length > 120
+      || /[\u0000-\u001f\u007f]/.test(value.title)
+      || !(value.summary === null || (typeof value.summary === 'string'
+        && value.summary
+        && Buffer.byteLength(value.summary, 'utf8') <= 240
+        && !/[\u0000-\u001f\u007f]/.test(value.summary)))
+      || typeof value.summaryTruncated !== 'boolean'
+      || (value.summary === null && value.summaryTruncated)
+      || !(value.sourceTitle === null || (typeof value.sourceTitle === 'string'
+        && value.sourceTitle && Array.from(value.sourceTitle).length <= 120
+        && !/[\u0000-\u001f\u007f]/.test(value.sourceTitle)))
+      || !(value.updated === null || (typeof value.updated === 'string'
+        && value.updated && value.updated.length <= 64
+        && !/[\u0000-\u001f\u007f]/.test(value.updated)))) {
+    throw new Error('打法卡投影无效');
+  }
+  return Object.freeze({ ...value });
+}
+
+function contextPocWorkspaceTacticsResult(value) {
+  if (!contextPocExact(value, [
+    'kind', 'contentRef', 'projectToken', 'collectionToken', 'itemCount',
+    'complete', 'cursor', 'nextCursor', 'tactics'
+  ]) || value.kind !== 'tactics'
+      || typeof value.contentRef !== 'string'
+      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
+      || typeof value.projectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
+      || typeof value.collectionToken !== 'string'
+      || !/^collection-[a-f0-9]{24}$/.test(value.collectionToken)
+      || !Number.isSafeInteger(value.itemCount)
+      || value.itemCount < 0 || value.itemCount > 512
+      || typeof value.complete !== 'boolean'
+      || !Number.isSafeInteger(value.cursor)
+      || value.cursor < 0 || value.cursor > value.itemCount
+      || !Array.isArray(value.tactics) || value.tactics.length > 4) {
+    throw new Error('打法库分页投影无效');
+  }
+  const tactics = value.tactics.map(contextPocWorkspaceTactic);
+  const next = value.cursor + tactics.length;
+  const expectedNextCursor = next < value.itemCount ? next : null;
+  if (value.nextCursor !== expectedNextCursor
+      || (expectedNextCursor !== null && tactics.length === 0)
+      || new Set(tactics.map((item) => item.contentRef)).size !== tactics.length
+      || new Set(tactics.map((item) => item.projectToken)).size !== tactics.length) {
+    throw new Error('打法库分页边界无效');
+  }
+  const result = Object.freeze({
+    kind: 'tactics', contentRef: value.contentRef,
+    projectToken: value.projectToken,
+    collectionToken: value.collectionToken,
+    itemCount: value.itemCount,
+    complete: value.complete,
+    cursor: value.cursor,
+    nextCursor: value.nextCursor,
+    tactics: Object.freeze(tactics)
+  });
+  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 5600) {
+    throw new Error('打法库分页投影超过安全上限');
+  }
+  return result;
+}
+
+function contextPocWorkspaceReviewSolidifyResult(value) {
+  if (!contextPocExact(value, [
+    'kind', 'created', 'sourceContentRef', 'sourceProjectToken', 'tactic', 'message'
+  ]) || value.kind !== 'review-solidify' || typeof value.created !== 'boolean'
+      || typeof value.sourceContentRef !== 'string'
+      || !/^content-[a-f0-9]{24}$/.test(value.sourceContentRef)
+      || typeof value.sourceProjectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(value.sourceProjectToken)
+      || typeof value.message !== 'string' || !value.message
+      || Buffer.byteLength(value.message, 'utf8') > 240
+      || /[\u0000-\u001f\u007f]/.test(value.message)) {
+    throw new Error('复盘固化结果投影无效');
+  }
+  const tactic = contextPocWorkspaceTactic(value.tactic);
+  if (tactic.contentRef === value.sourceContentRef
+      || tactic.projectToken === value.sourceProjectToken) {
+    throw new Error('复盘固化结果身份无效');
+  }
+  const result = Object.freeze({
+    kind: 'review-solidify', created: value.created,
+    sourceContentRef: value.sourceContentRef,
+    sourceProjectToken: value.sourceProjectToken,
+    tactic,
+    message: value.message
+  });
+  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 5600) {
+    throw new Error('复盘固化结果超过安全上限');
+  }
+  return result;
+}
+
 function contextPocWorkspaceReceipt(value) {
   if (!isPlainObject(value) || !deliveryToken(value.receiptId)
       || typeof value.targetLabel !== 'string'
@@ -7385,6 +7937,15 @@ function contextPocWorkspaceFileOperations(options = {}) {
       ? { lightId: input.lightId, checked: input.checked }
       : (input.type === 'ai-disclosure' ? { value: input.value } : {}))
   }));
+  const tacticsCollection = options.tacticsCollection || (() => (
+    videoTacticCollection(currentVideoRuntime())
+  ));
+  const solidifyAction = options.solidifyAction || ((input) => runVideoSceneAction({
+    action: 'solidify-tactic', projectToken: input.projectToken
+  }));
+  const tacticSurface = options.tacticSurface || ((tacticIdentity, sourceIdentity) => (
+    videoTacticWorkspaceSurface(tacticIdentity, sourceIdentity)
+  ));
   const verifyProject = options.verifyProject || readVideoDocumentByToken;
   const receiptSnapshot = options.receiptSnapshot || (() => (
     deliveryReceiptService.snapshot({ owner: VIDEO_DELIVERY_OWNER })
@@ -7411,6 +7972,17 @@ function contextPocWorkspaceFileOperations(options = {}) {
       );
     }
     return surface;
+  };
+  const reviewIdentity = (snapshot, selector) => {
+    const identity = contextPocWorkspaceProjectIdentity(snapshot, selector);
+    const projects = Array.isArray(snapshot && snapshot.projects) ? snapshot.projects : [];
+    const card = projects.find((project) => isPlainObject(project)
+      && project.contentRef === identity.contentRef
+      && project.projectToken === identity.projectToken);
+    if (!card || card.stage !== 'review') {
+      throw new Error('只能在复盘项目中读取或固化打法');
+    }
+    return identity;
   };
   return Object.freeze({
     'catalog.read': Object.freeze({
@@ -8014,6 +8586,135 @@ function contextPocWorkspaceFileOperations(options = {}) {
         };
       },
       redact: contextPocWorkspacePublishMutationResult,
+      errorCode: contextPocWorkspaceOperationErrorCode
+    }),
+    'review.tactics.read': Object.freeze({
+      validate: contextPocWorkspaceFileTacticsInput,
+      async handle({ input, context }) {
+        contextPocAssertWorkspaceOperationCurrent(context);
+        const identity = reviewIdentity(catalog(), {
+          contentRef: input.contentRef,
+          projectToken: input.projectToken
+        });
+        const rawCollection = await tacticsCollection();
+        if (!contextPocExact(rawCollection, [
+          'collectionToken', 'complete', 'tactics'
+        ]) || typeof rawCollection.collectionToken !== 'string'
+            || !/^collection-[a-f0-9]{24}$/.test(rawCollection.collectionToken)
+            || typeof rawCollection.complete !== 'boolean'
+            || !Array.isArray(rawCollection.tactics)
+            || rawCollection.tactics.length > 512) {
+          throw new Error('打法库目录结果无效');
+        }
+        const tactics = rawCollection.tactics.map(contextPocWorkspaceTactic);
+        if (new Set(tactics.map((item) => item.contentRef)).size !== tactics.length
+            || new Set(tactics.map((item) => item.projectToken)).size !== tactics.length) {
+          throw new Error('打法库跨页内容身份重复');
+        }
+        if (input.cursor > tactics.length
+            || (input.cursor > 0
+              && input.collectionToken !== rawCollection.collectionToken)) {
+          throw contextPocWorkspaceOperationError(
+            'ERR_CONTEXT_PROJECT_STALE', '打法库分页期间已变化'
+          );
+        }
+        const page = [];
+        for (let cursor = input.cursor;
+          cursor < tactics.length && page.length < input.limit; cursor += 1) {
+          const candidate = [...page, tactics[cursor]];
+          const next = input.cursor + candidate.length;
+          const projected = {
+            kind: 'tactics', ...identity,
+            collectionToken: rawCollection.collectionToken,
+            itemCount: tactics.length,
+            complete: rawCollection.complete,
+            cursor: input.cursor,
+            nextCursor: next < tactics.length ? next : null,
+            tactics: candidate
+          };
+          if (Buffer.byteLength(JSON.stringify(projected), 'utf8') > 5600
+              && page.length) break;
+          page.push(tactics[cursor]);
+        }
+        const latest = reviewIdentity(catalog(), {
+          contentRef: identity.contentRef,
+          projectToken: identity.projectToken
+        });
+        const next = input.cursor + page.length;
+        return {
+          kind: 'tactics', ...latest,
+          collectionToken: rawCollection.collectionToken,
+          itemCount: tactics.length,
+          complete: rawCollection.complete,
+          cursor: input.cursor,
+          nextCursor: next < tactics.length ? next : null,
+          tactics: page
+        };
+      },
+      redact: contextPocWorkspaceTacticsResult,
+      errorCode: contextPocWorkspaceOperationErrorCode
+    }),
+    'review.solidify': Object.freeze({
+      validate: contextPocWorkspaceFileReviewIdentityInput,
+      async handle({ input, context }) {
+        contextPocAssertWorkspaceOperationCurrent(context);
+        const sourceIdentity = reviewIdentity(catalog(), {
+          contentRef: input.contentRef,
+          projectToken: input.projectToken
+        });
+        const actionResult = await solidifyAction(sourceIdentity);
+        if (!contextPocExact(actionResult, [
+          'kind', 'created', 'contentRef', 'projectToken', 'text'
+        ]) || actionResult.kind !== 'ok' || typeof actionResult.created !== 'boolean'
+            || typeof actionResult.contentRef !== 'string'
+            || !/^content-[a-f0-9]{24}$/.test(actionResult.contentRef)
+            || typeof actionResult.projectToken !== 'string'
+            || !/^project-[a-f0-9]{24}$/.test(actionResult.projectToken)
+            || typeof actionResult.text !== 'string' || !actionResult.text) {
+          throw contextPocWorkspaceOperationError(
+            'ERR_OPERATION_OUTCOME_UNKNOWN', '打法固化后结果无法确认'
+          );
+        }
+        let latestSource;
+        let tacticIdentity;
+        let tactic;
+        try {
+          const after = catalog();
+          latestSource = reviewIdentity(after, {
+            contentRef: sourceIdentity.contentRef
+          });
+          tacticIdentity = contextPocWorkspaceProjectIdentity(after, {
+            contentRef: actionResult.contentRef,
+            projectToken: actionResult.projectToken
+          });
+          tactic = contextPocWorkspaceTactic(await tacticSurface(
+            tacticIdentity, sourceIdentity
+          ));
+        } catch (_error) {
+          throw contextPocWorkspaceOperationError(
+            'ERR_OPERATION_OUTCOME_UNKNOWN', '打法固化后身份无法确认'
+          );
+        }
+        if (latestSource.projectToken !== sourceIdentity.projectToken
+            || tacticIdentity.contentRef === sourceIdentity.contentRef
+            || tacticIdentity.projectToken === sourceIdentity.projectToken
+            || tactic.contentRef !== tacticIdentity.contentRef
+            || tactic.projectToken !== tacticIdentity.projectToken) {
+          throw contextPocWorkspaceOperationError(
+            'ERR_OPERATION_OUTCOME_UNKNOWN', '打法固化后来源绑定无法确认'
+          );
+        }
+        return {
+          kind: 'review-solidify', created: actionResult.created,
+          sourceContentRef: sourceIdentity.contentRef,
+          sourceProjectToken: latestSource.projectToken,
+          tactic,
+          message: actionResult.created
+            ? '已固化进打法库；没有伪造使用次数或胜率。'
+            : '已复用这一复盘版本的唯一打法。'
+        };
+      },
+      redact: contextPocWorkspaceReviewSolidifyResult,
       errorCode: contextPocWorkspaceOperationErrorCode
     }),
     'project.action.prepare': Object.freeze({
@@ -13212,6 +13913,7 @@ if (MAIN_HELPER_TEST) {
     videoProposalDecisionRequest,
     videoProposalRevisionToken,
     videoContentRef,
+    videoProjectToken,
     videoUndoRequest,
     videoSceneActionRequest,
     videoSceneDispatchRequest,
@@ -13224,6 +13926,19 @@ if (MAIN_HELPER_TEST) {
     patchPublishLight,
     videoPublishChecklistText,
     videoPublishChecklistRelativePath,
+    videoTacticRevisionKey,
+    videoTacticRelativePath,
+    videoTacticBodyText,
+    videoTacticLegacyBodyText,
+    videoTacticText,
+    videoTacticSummary,
+    videoTacticClassification,
+    findVideoTacticDocumentsByRevision,
+    videoTacticIdentityForRelativePath,
+    videoTacticProjection,
+    assertVideoTacticIdentitySource,
+    videoTacticCollection,
+    solidifyVideoTactic,
     patchVideoPublishDocument,
     assertVideoPublishIdentitySource,
     writeVideoExclusive,
