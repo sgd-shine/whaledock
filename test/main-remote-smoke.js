@@ -188,6 +188,21 @@ async function run() {
     assert.match(settingsWindow, /sandbox:\s*true/);
   });
 
+  await test('安全仓延迟不冒充不可用，保存与已存状态清除仍可显式触发', async () => {
+    const main = source('main.js');
+    const credentials = main.slice(
+      main.indexOf('function remoteCredentialsSnapshot()'),
+      main.indexOf('function activeFeishuAppId()')
+    );
+    assert.match(credentials, /remoteSecureStateStatus === 'deferred'/);
+    assert.match(credentials, /const storedStatePresent = fs\.existsSync\(remoteSecureStatePath\(\)\)/);
+    const html = source('settings.html');
+    const actions = html.slice(html.indexOf('function updateFeishuActions()'), html.indexOf('function renderWorkspace('));
+    assert.match(actions, /feishuCredentialStatus\.deferred/);
+    assert.match(actions, /feishuCredentialStatus\.storedStatePresent/);
+    assert.match(actions, /尚未读取钥匙串/);
+  });
+
   await test('远程生命周期从启动同步到退出，退出要等待 close 真正落定', async () => {
     const main = source('main.js');
     const ready = main.slice(main.indexOf('async function onReady()'), main.indexOf('function registerPetIpc()'));

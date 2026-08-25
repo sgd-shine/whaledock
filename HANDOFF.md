@@ -1,6 +1,20 @@
-# HANDOFF.md — WhaleDock v0.9.0 体验流畅度批次 2/3 交接
+# HANDOFF.md — WhaleDock v0.10 批次 0–2 交接
 
-更新：2026-08-23 · v0.9.0 已公开发布；自动、三平台 CI、全载体合规与官方 arm64 静态安装回读已闭环，人工体验仍为 `NEEDS-HUMAN`
+更新：2026-08-25 · SGD 已选择方案 B，P1 同屏多项目工作台与发送前闸门已在本地实验分支实现，并通过本地 macOS arm64 人工界面验收；v0.9.0 仍是公开稳定版
+
+## v0.10 当前交接
+
+- 工作分支：`codex/v010-native-ui-recon`。开发前的最近可运行 P0B 为 `5e8cfa318c0d7d8fd0a58ea3b2a9254f14fcfe51`；备份分支 `codex/backup-v010-p0b-runnable-20260824`、tag `backup/v010-p0b-runnable-20260824` 与仓库外 bundle 均已验证回读到该 commit。
+- 批次 0 的 stale external attach、可见 toast 与安全 remote 启动修复保持不变；旧批证据见 `docs/验收记录-v0.10-批次0修复与批次1侦察-2026-08-24.md`。
+- P0A/P0B 已提交为 `eb76fbf` / `5e8cfa3`：纯 Node 上下文合同、isolated static Host/Client bridge、opaque selection、turn freeze、delivery proof 和 managed bundled rc.2 限域均通过；外部 dsh 不接管、不停止。
+- P1 方案 B 只在 `WHALEDOCK_CONTEXT_POC=1`、鲸坞自行拉起、精确 bundled `0.1.1-rc.2` 时 shadow 两个 MIT 包：`ui-layout` 与 `ui-conversation`。根生产依赖未扩张，用户 `~/.dsh` 不读取、不写入、不迁移、不清理。
+- 当前体验：默认“内容”态三栏显示原生 workspace 项目库、阶段面板和原生 dsh 对话；“会话”可返回原界面。零会话项目可见，第一次操作才通过官方 `connectWorkspace()` 建立会话；阶段动作只填入原生草稿，不自动发送，已有草稿拒绝覆盖。
+- prompt admission 前新增 `context/preflight`；Client 等待最多 2.5 秒，Host 精确核对 page/controller/capability/revision/session/mode。未 ready 时发送被拦截、草稿保留，不产生伪 project-aware turn。
+- 真实 isolated rc.2 已证明 package shadow：served layout `35,763 B`，SHA-256 与 fork 源码同为 `b942a0020abe8e3e730995c520cf63c87c928a7b339cb78ec749299475e1a542`。受控 GUI 已走完多项目无预绑定、填草稿、拒绝覆盖、preflight 拦截和 960/1024/1280 宽度。
+- 定向回归为 P0B Host/Client `10/10`、资产/启动器 `8/8`、主进程 `12/12`；最终统一 `npm run smoke` 为 `688 PASS / 0 FAIL / 38 个 ALL PASS`，末行 `ALL PASS`。
+- 本地 arm64 ad-hoc 测试 App 已构建并从 no-index 归档拉起；SGD 在测试入口检查后明确回复“测试通过”，因此 P1 可见界面与基础交互人工门为 `PASS`。测试实例使用独立临时 userData 和 `31990`，验收后已停止、清理；稳定安装版与 `3080` 始终保留。
+- 本批 14 个隔离静态资产合计 `528,834 B`；本机 darwin/arm64 ignored runtime 约 `280 MiB`。本地 ZIP / DMG 为 `193,609,215 B` / `175,566,619 B`，归档内 `app.asar` 为 `19,577,756 B`，SHA-256 `5731ad898da481650b95876285e485f35ee2226077d06302f298a11ef87ad1d0`。这些文件沿用未升版的 0.9.0 名称，只是本分支测试包，不是公开或正式成品。
+- 真实远端模型、长时间物理键盘与 13 英寸专项手感、多项目连续 queue/steer，以及 Windows/Intel 真机、Developer ID 签名、公证、正式安装版和 Release 仍需单独补证。分支已推送并建立 [PR #16](https://github.com/sgd-shine/whaledock/pull/16)；功能 head `c918947` 的 [CI 32820818443](https://github.com/sgd-shine/whaledock/actions/runs/32820818443) 已在 macOS、Ubuntu、Windows 全绿。PR 当前可干净合并，但本批不自动合并、不打 tag、不发布。
 
 ## v0.9.0 已公开发布交接
 

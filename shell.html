@@ -123,10 +123,14 @@
     #drop .box .big { font-size:17px; font-weight:700; }
     #drop .box .small { color:var(--muted); font-size:12px; }
     #toast {
-      position:fixed; left:calc(var(--rail) + 14px); bottom:14px; z-index:40;
-      max-width:min(520px,60vw); padding:10px 13px; border:1px solid var(--line);
+      /* 经典台的 dsh WebContentsView 从 x=132 开始并永远压在 DOM 上方；
+         反馈必须留在鲸坞自己的左栏内，否则 z-index 再高也看不见。 */
+      position:fixed; left:10px; bottom:10px; z-index:40;
+      width:calc(var(--rail) - 20px); max-width:calc(var(--rail) - 20px);
+      max-height:min(280px,calc(100vh - 20px)); overflow-y:auto;
+      padding:9px 10px; border:1px solid var(--line);
       border-radius:10px; background:var(--panel); box-shadow:0 14px 40px #0009;
-      font-size:12px; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; display:none;
+      font-size:11px; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; display:none;
     }
     #toast.open { display:block; }
 
@@ -134,7 +138,10 @@
     #video-cockpit { display:none; position:fixed; inset:0; overflow:hidden; background:var(--bg); }
     body.cockpit-active #rail { display:none; }
     body.cockpit-active #video-cockpit { display:block; }
-    body.cockpit-active #toast { left:18px; max-width:min(640px,calc(100vw - 36px)); }
+    body.cockpit-active #toast {
+      left:18px; width:auto; max-width:min(640px,calc(100vw - 36px));
+      max-height:min(280px,calc(100vh - 36px));
+    }
     /* child WebContentsView 会覆盖 y=136 以下的 DOM；对话打开时把瞬时提示压成顶栏内单行，
        避免现场操作的成功/失败消息在切换后被完整对话视图挡住。 */
     body.cockpit-active.chat-open #toast {
@@ -531,7 +538,7 @@
     </div>
   </div>
 
-  <div id="toast"></div>
+  <div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <script src="shell.js"></script>
 </body>

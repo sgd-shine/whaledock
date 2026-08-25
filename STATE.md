@@ -1,10 +1,10 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-23（v0.9.0 已公开发布；自动与成品静态证据闭环，SGD 人工体验仍待完成）
+更新：2026-08-24（v0.10 批次 0 已修复；批次 1 精确蓝图判红，停在 HUMAN GATE；v0.9.0 仍是公开稳定版）
 
 ## 阶段结论
 
-**v0.9.0 已公开发布：tag 指向 `main@80009fed`，三平台 CI、Developer ID/公证、8 项资产、审批变量回收与官方 arm64 安装静态回读均已闭环；钥匙串确认后的成品 GUI 与真实会话体验仍为 `NEEDS-HUMAN`。**
+**v0.10 源码主线已完成切换无响应修复与 dsh 插件侦察：批次 0 自动/受控 GUI 全绿；批次 1 对“三栏同屏”精确验收判红，按提示词停在 SGD/Cowork 人工路线门。v0.9.0 仍是当前公开稳定版。**
 
 - v0.9.0 PR [#14](https://github.com/sgd-shine/whaledock/pull/14) 合入 `main@80009fed511a9345b0762fc564603b24d3361ff6`；[最终 PR CI 32634898329](https://github.com/sgd-shine/whaledock/actions/runs/32634898329) 与 [main CI 32634983004](https://github.com/sgd-shine/whaledock/actions/runs/32634983004) 均三平台全绿，本地最终 smoke 为 **606 PASS / 31 个 ALL PASS**。
 - [Release run 32635087823](https://github.com/sgd-shine/whaledock/actions/runs/32635087823) attempt 2 成功，[公开 v0.9.0 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.0) 为非 draft、非 prerelease且含 8 项资产，`releases/latest` 已命中；精确审批变量只存在于 publish 重跑窗口，发布回读后已删除。
@@ -12,6 +12,18 @@
 - **批次 2｜现场任务回执环**：项目动作、块动作和灵感拆条先显示目标会话/工作区预检；不匹配或无法确认时默认不发送，只有显式覆盖才继续。投递后回执分别绑定灵感区、项目卡、脚本块三类锚点，显示排队/进行中/等待/终态及运行用时；事件不可用或结果未知时使用诚实文案且不自动重试，watcher 落盘后自动刷新、「刚更新」并提供安全结果打开入口。
 - **批次 3｜工作区去糊**：驾驶舱头部和普通工作台左栏补充安全工作区标签与打开入口；首次引导及 README 解释“工作台 / 工作区 / 会话”三层概念，并明示全新用户的 `文稿（Documents）/鲸坞工作台/默认工作区` 与重工作台同父目录落点。默认台、电商客服行为不变；主 dsh `WebContentsView` 仍无 preload / `executeJavaScript`，未新增运行时依赖；lockfile 只随应用版本更新和合规身份重生成。
 - 受控 loopback 源码 App 已完成“灵感 → 选题 → 脚本 → 看到产出”14 帧程序化真实 DOM 操作审计，内部 MP4/GIF、事件时间线和落地脚本回读齐全；这不是上游模型或平台证据。SGD 亲手可见性、交互手感与真实会话体验继续标记 **NEEDS-HUMAN**。
+
+## v0.10 主线｜批次 0 修复与批次 1 侦察（等待 HUMAN GATE）
+
+- 分支为 `codex/v010-native-ui-recon`。正式安装 `/Applications/WhaleDock.app` 回读 v0.9.0/arm64，五个关键 ASAR 文件与 `v0.9.0@80009fed` 字节一致；现场根因是已离线 external attach 未退休，加上错误 toast 落在 dsh `WebContentsView` 下方。钥匙串另有真实启动门，但不是当次点击的直接原因。
+- 批次 0 仅在“端口明确关闭 + 端口配置未变 + await 后运行身份仍一致”时退休鲸坞自己的 stale attach；复核已进入 workspace coordinator 串行边界，并位于 target canonicalize、noop、预算门之后。只关闭只读事件层，不停止未知进程。主窗/设置页在 IPC 前立即显示进度，成功/取消/失败分立；toast 完整移入 132px 自有左栏。
+- remote safeStorage 改为 `deferred / available / unavailable` 三态：远程关闭或没有密文状态时启动零 safeStorage；deferred 不误封保存/清除入口；确需系统安全存储时先绘制可见启动面，失败只降级远程能力。早期关窗后不再触发钥匙串或重建 remote service。
+- 最终本地统一 smoke 为 **620 PASS / 32 个 ALL PASS**；focused 为 workspaces 35、v0.10 切换 10、remote main 17，`node --check` 与 `git diff --check` 通过。最新隔离源码 GUI 真实点击在 0.2ms 显示进行中、18ms 显示明确 external 拒绝，toast `x=10..122` 完整位于 132px rail；App 退出后 fake 外部服务仍 HTTP 200。该证据不等于正式安装版或真实上游模型。
+- hotfix 判定：v0.8 已有同一 stale-attach/toast 缺陷，没有证据支持 v0.9 新发布回归，因此不单独发 v0.9.1，修复留在 v0.10。
+- dsh `0.1.1-rc.2` 可读写 workspace、监听/发起会话，也支持 `conversation.view` 和 CLI plugin 安装；但没有 additive sidebar-tab/column-order slot，AppFrame 固定 `sidebar | conversation | details`。替换 `root` 技术上可绕，但上游明确 `DO NOT register here`，跟版成本接近局部 fork。因此精确蓝图判红。
+- Oil Creator 固定快照为 MIT 的 dsh Cordis 插件，身份路线为绿；但它整体替换官方 sidebar，并通过宿主 DOM `padding-left` compatibility seam 保住右侧对话，且只声明兼容 Harness `0.1.0-rc.6/rc.7`。只学习 IA/状态表达；不复制其宿主 DOM 绕法、品牌图标或未登记第三方素材。
+- 待 SGD/Cowork 选择：A）公开增量 slot，稳定但内容/聊天需切 tab，违反零切换验收；B）root-shell 插件 proof-of-contract，可能达到三栏，但高风险且接近局部 fork。选择前不实现插件、不改 dsh 锁、不写 `~/.dsh`。
+- 内部完整证据：`docs/验收记录-v0.10-批次0修复与批次1侦察-2026-08-24.md`（已 exclude）。本批未生成包、未跑 CI/Release，包/runtime 体积为 `N/A`。
 
 ## v0.9.0 体验流畅度批次 2/3（已公开发布）
 

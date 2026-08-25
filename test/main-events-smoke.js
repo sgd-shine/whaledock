@@ -431,7 +431,8 @@ async function run() {
     assert.match(viewOptions, /webPreferences:\s*\{\s*contextIsolation:\s*true,\s*nodeIntegration:\s*false\s*\}/);
     assert(!/preload\s*:/.test(viewOptions), 'dsh 视图不得有 preload');
     // 加载 dsh 的只能是这个视图，不能是主窗自己的 webContents。
-    assert.match(openMain, /view\.webContents\.loadURL\(baseUrl\(\)\)/);
+    assert.match(openMain, /view\.webContents\.loadURL\(harnessViewUrl\(\)\)/);
+    assert.match(source, /function harnessViewUrl\(origin = baseUrl\(\)\)/);
     assert(!/win\.loadURL\(baseUrl\(\)\)/.test(source), '主窗自己的 webContents 不得再加载 dsh');
     // 外壳页的 preload 只挂在本地 file:// 页上。
     assert.match(openMain, /preload: path\.join\(__dirname, 'preload-shell\.js'\)/);
@@ -506,7 +507,7 @@ async function run() {
       source.indexOf('async function activateEventLayerForBackend'),
       source.indexOf('function scheduleEventReconnect')
     );
-    assert.match(activation, /backend\.hasExactDshPackageProof\(\{[\s\S]*packageVersionProof: monitor\.identity\.state\.version/);
+    assert.match(activation, /backend\.hasExactDshPackageProof\(\{[\s\S]*packageVersionProof: monitor\.identity\.state\.packageVersionProof/);
     assert(!activation.includes('state.version !== config.DSH_CONTRACT.packageVersion'));
   });
 

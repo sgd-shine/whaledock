@@ -121,6 +121,7 @@ function coordinatorFixture(options = {}) {
     stopManaged,
     startAndConfirm,
     recoveryPortClear: options.recoveryPortClear || (async () => true),
+    beforeSwitch: options.beforeSwitch,
     onCommit: async () => { calls.push('commit-surface'); },
     onRollback: async () => { calls.push('rollback-surface'); }
   });
@@ -887,6 +888,54 @@ async function run() {
       assert.deepEqual(fixture.getConfig().recentWorkdirs.slice(0, 3), [
         '/workspace/C', '/workspace/B', '/workspace/A'
       ]);
+    });
+
+    await test('切换前复核与事务共用串行边界，并发请求不反转顺序', async () => {
+      const gate = deferred();
+      let preflights = 0;
+      const fixture = coordinatorFixture({
+        beforeSwitch: async (target) => {
+          preflights += 1;
+          fixture.calls.push(`preflight:${target}`);
+          if (preflights === 1) await gate.promise;
+        }
+      });
+      const first = fixture.coordinator.switchTo('/workspace/B');
+      const second = fixture.coordinator.switchTo('/workspace/C');
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(fixture.coordinator.busy, true);
+      assert.deepEqual(fixture.calls, ['preflight:/workspace/B']);
+      gate.resolve();
+      await Promise.all([first, second]);
+      const firstCommit = fixture.calls.indexOf('commit-surface');
+      const secondPreflight = fixture.calls.indexOf('preflight:/workspace/C');
+      assert(firstCommit >= 0 && secondPreflight > firstCommit,
+        '第二个 preflight 必须等第一笔 commit 后才进入');
+      assert.equal(fixture.getConfig().workdir, '/workspace/C');
+    });
+
+    await test('noop 与非法目标在有副作用的切换前复核之前收口', async () => {
+      let preflights = 0;
+      const fixture = coordinatorFixture({
+        beforeSwitch: async () => { preflights += 1; },
+        canonicalize: (value) => {
+          if (value === '/workspace/forbidden') {
+            const error = new Error('受保护目标');
+            error.code = 'ERR_WORKSPACE_PROTECTED';
+            throw error;
+          }
+          const resolved = path.posix.resolve(value);
+          return { path: resolved, key: resolved };
+        }
+      });
+      const noop = await fixture.coordinator.switchTo('/workspace/A');
+      assert.equal(noop.status, 'noop');
+      assert.equal(preflights, 0, 'noop 不得退休当前 attach');
+      await assert.rejects(
+        fixture.coordinator.switchTo('/workspace/forbidden'),
+        assertCode('ERR_WORKSPACE_PROTECTED')
+      );
+      assert.equal(preflights, 0, '非法目标不得先破坏当前 attach');
     });
 
     console.log(`\nWORKSPACES ALL PASS (${passed})`);
