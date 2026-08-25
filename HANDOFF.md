@@ -14,7 +14,7 @@
 - 定向回归为 P0B Host/Client `10/10`、资产/启动器 `8/8`、主进程 `12/12`；最终统一 `npm run smoke` 为 `688 PASS / 0 FAIL / 38 个 ALL PASS`，末行 `ALL PASS`。
 - 本地 arm64 ad-hoc 测试 App 已构建并从 no-index 归档拉起；SGD 在测试入口检查后明确回复“测试通过”，因此 P1 可见界面与基础交互人工门为 `PASS`。测试实例使用独立临时 userData 和 `31990`，验收后已停止、清理；稳定安装版与 `3080` 始终保留。
 - 本批 14 个隔离静态资产合计 `528,834 B`；本机 darwin/arm64 ignored runtime 约 `280 MiB`。本地 ZIP / DMG 为 `193,609,215 B` / `175,566,619 B`，归档内 `app.asar` 为 `19,577,756 B`，SHA-256 `5731ad898da481650b95876285e485f35ee2226077d06302f298a11ef87ad1d0`。这些文件沿用未升版的 0.9.0 名称，只是本分支测试包，不是公开或正式成品。
-- 仍需单独补证：真实远端模型、长时间物理键盘与 13 英寸专项手感、多项目连续 queue/steer，以及 Windows、Intel、Developer ID 签名、公证、CI、正式安装版和 Release；本批不推送、不合并、不发布。
+- 真实远端模型、长时间物理键盘与 13 英寸专项手感、多项目连续 queue/steer，以及 Windows/Intel 真机、Developer ID 签名、公证、正式安装版和 Release 仍需单独补证。分支已推送并建立 [PR #16](https://github.com/sgd-shine/whaledock/pull/16)；功能 head `c918947` 的 [CI 32820818443](https://github.com/sgd-shine/whaledock/actions/runs/32820818443) 已在 macOS、Ubuntu、Windows 全绿。PR 当前可干净合并，但本批不自动合并、不打 tag、不发布。
 
 ## v0.9.0 已公开发布交接
 
