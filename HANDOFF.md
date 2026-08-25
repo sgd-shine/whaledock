@@ -1,6 +1,6 @@
 # HANDOFF.md — WhaleDock v0.10 批次 0–2 交接
 
-更新：2026-08-24 · SGD 已选择方案 B，P1 同屏多项目工作台与发送前闸门已在本地实验分支实现；v0.9.0 仍是公开稳定版
+更新：2026-08-25 · SGD 已选择方案 B，P1 同屏多项目工作台与发送前闸门已在本地实验分支实现，并通过本地 macOS arm64 人工界面验收；v0.9.0 仍是公开稳定版
 
 ## v0.10 当前交接
 
@@ -12,8 +12,9 @@
 - prompt admission 前新增 `context/preflight`；Client 等待最多 2.5 秒，Host 精确核对 page/controller/capability/revision/session/mode。未 ready 时发送被拦截、草稿保留，不产生伪 project-aware turn。
 - 真实 isolated rc.2 已证明 package shadow：served layout `35,763 B`，SHA-256 与 fork 源码同为 `b942a0020abe8e3e730995c520cf63c87c928a7b339cb78ec749299475e1a542`。受控 GUI 已走完多项目无预绑定、填草稿、拒绝覆盖、preflight 拦截和 960/1024/1280 宽度。
 - 定向回归为 P0B Host/Client `10/10`、资产/启动器 `8/8`、主进程 `12/12`；最终统一 `npm run smoke` 为 `688 PASS / 0 FAIL / 38 个 ALL PASS`，末行 `ALL PASS`。
-- 本批 14 个隔离静态资产合计 `528,834 B`；本机 darwin/arm64 ignored runtime 约 `280 MiB`。没有打包、CI、Release、签名或公证，因此无新包体积或线上链接。
-- 仍需 SGD：真实会话/远端模型、物理键盘与 13 英寸主观手感、多项目连续 queue/steer、原生详情抽屉、会话态返回、拍摄窗往返。Windows、Intel 与正式安装版仍分别 `NEEDS-HUMAN`；本批不推送、不合并、不发布。
+- 本地 arm64 ad-hoc 测试 App 已构建并从 no-index 归档拉起；SGD 在测试入口检查后明确回复“测试通过”，因此 P1 可见界面与基础交互人工门为 `PASS`。测试实例使用独立临时 userData 和 `31990`，验收后已停止、清理；稳定安装版与 `3080` 始终保留。
+- 本批 14 个隔离静态资产合计 `528,834 B`；本机 darwin/arm64 ignored runtime 约 `280 MiB`。本地 ZIP / DMG 为 `193,609,215 B` / `175,566,619 B`，归档内 `app.asar` 为 `19,577,756 B`，SHA-256 `5731ad898da481650b95876285e485f35ee2226077d06302f298a11ef87ad1d0`。这些文件沿用未升版的 0.9.0 名称，只是本分支测试包，不是公开或正式成品。
+- 仍需单独补证：真实远端模型、长时间物理键盘与 13 英寸专项手感、多项目连续 queue/steer，以及 Windows、Intel、Developer ID 签名、公证、CI、正式安装版和 Release；本批不推送、不合并、不发布。
 
 ## v0.9.0 已公开发布交接
 
