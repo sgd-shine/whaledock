@@ -19,13 +19,13 @@
     },
     {
       "path": "plugin/lib/index.js",
-      "size": 53252,
-      "sha256": "b2ce5dffece7177c5bc178bd80005832ad1605d86682be755529fedb9d4e7730"
+      "size": 53269,
+      "sha256": "6d1d9ec37a75200b7037d63a2610bff26f652d8e109408151d9c89d456115254"
     },
     {
       "path": "plugin/lib/client.js",
-      "size": 88556,
-      "sha256": "a04f82591fa5ff657706cbf79671168ce40232e5c657f68a12c5a4b6bdbed29e"
+      "size": 106545,
+      "sha256": "49999f15129b52506849d33d87752810bc3419167864af8ebf0fc0b6f27b2002"
     },
     {
       "path": "forks/ui-layout/package.json",
@@ -78,6 +78,6 @@
       "sha256": "0190da000df07a64e55566e84dd8f57c8135f2eacd7f7a461bda33cc6c7150c2"
     }
   ],
-  "totalBytes": 628560,
-  "digest": "7981f0c071fc1be9f9e57a4cf238cfa076fec3e8a9ad037f4b42061232214b61"
+  "totalBytes": 646566,
+  "digest": "7878ef3af86c040bbf4ecfa2cdd510a8ceabd7bdb3ca8bca110ba0630dc1375e"
 }

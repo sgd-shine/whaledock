@@ -42,7 +42,7 @@ const MAX_PENDING_PREFERENCES = 64;
 const MAX_PREFERENCE_READ_BATCH = 16;
 const PREFERENCE_PENDING_MS = 3000;
 const WORKSPACE_FILE_OPERATIONS = new Set([
-  'catalog.read', 'document.read', 'topic.choose',
+  'catalog.read', 'overview.read', 'document.read', 'topic.choose',
   'project.action.prepare', 'project.action.submit',
   'receipts.read', 'receipts.ack', 'receipts.open'
 ]);

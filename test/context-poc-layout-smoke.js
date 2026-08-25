@@ -346,6 +346,16 @@ function contentProject(hex, title, workflowLabel = '进行中', extra = {}) {
   };
 }
 
+function overview(project, candidates = [], extra = {}) {
+  return fulfilled({
+    kind: 'overview', contentRef: project.contentRef, projectToken: project.projectToken,
+    title: project.title, stage: 'topic', stageLabel: '选题', status: 'needs-decision',
+    updated: '2026-08-25 12:00', decision: '请选择角度和钩子',
+    angle: null, hook: null, candidateCount: candidates.length,
+    cursor: 0, nextCursor: null, candidates, ...extra
+  });
+}
+
 async function main() {
   await test('cwd 归一化、路径尾段与代表会话选择确定', async () => {
     const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
@@ -792,6 +802,7 @@ async function main() {
     const props = uiProps(state, harness.integration, []);
     let tree = harness.renderer.render(harness.AppFrame, props);
     tree = await settle(harness, props);
+    tree = await settle(harness, props);
     assert.equal(findAll(tree, (node) => node.props?.className === 'wd10-project').length, 4,
       textOf(tree));
     assert.doesNotMatch(textOf(tree), /个会话/u);
@@ -812,12 +823,15 @@ async function main() {
     assert(calls.some((call) => call.operation === 'catalog.read' && call.input.cursor === 4));
   });
 
-  await test('五个阶段都诚实标未完成且 TaskReceiptStrip 切 tab 不卸载', async () => {
+  await test('概览接通真实选题且其余四阶段诚实标未完成，TaskReceiptStrip 切 tab 不卸载', async () => {
     const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
     const project = contentProject('8', '回执项目', '拍摄中');
     project.contentRef = `content-${'8'.repeat(24)}`;
     const workspaceFiles = { async execute(operation, input) {
       if (operation === 'catalog.read') return catalog([project]);
+      if (operation === 'overview.read') return overview(project, [{
+        field: 'angle', value: '先看完成结果', selected: false
+      }]);
       if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
         projectToken: input.projectToken, receipts: [{
           receiptId: 'receipt-opaque-01', targetLabel: '右栏会话', tracking: 'ready',
@@ -840,7 +854,10 @@ async function main() {
     tree = await settle(harness, props);
     tree = await settle(harness, props);
     const receiptFiber = harness.renderer.fiberIds('TaskReceiptStrip')[0];
-    for (const label of ['概览', '脚本', '拍摄', '发布', '复盘']) {
+    assert.match(textOf(tree), /选题拍板/u);
+    assert.match(textOf(tree), /先看完成结果/u);
+    assert.doesNotMatch(textOf(tree), /这一格还没做/u);
+    for (const label of ['脚本', '拍摄', '发布', '复盘']) {
       button(tree, label).props.onClick();
       tree = harness.renderer.render(harness.AppFrame, props);
       assert.match(textOf(tree), /这一格还没做/u);
@@ -851,6 +868,202 @@ async function main() {
     button(tree, '刚更新').props.onClick();
     tree = await settle(harness, props);
     assert.doesNotMatch(textOf(tree), /刚更新/u);
+  });
+
+  await test('概览自动读完全部候选，后页失败时保留已读项并明确不完整', async () => {
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const project = contentProject('a', '分页选题', '选题');
+    const firstCandidates = [
+      { field: 'angle', value: '角度一', selected: true },
+      { field: 'angle', value: '角度二', selected: false },
+      { field: 'angle', value: '角度三', selected: false },
+      { field: 'hook', value: '钩子一', selected: false }
+    ];
+    const tailCandidates = [
+      { field: 'hook', value: '钩子二', selected: true },
+      { field: 'hook', value: '钩子三', selected: false }
+    ];
+    let failTail = false;
+    const workspaceFiles = { async execute(operation, input) {
+      if (operation === 'catalog.read') return catalog([project]);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'overview.read' && input.cursor === 0) return overview(project,
+        firstCandidates, { angle: '角度一', hook: '钩子二', candidateCount: 6, nextCursor: 4 });
+      if (operation === 'overview.read' && input.cursor === 4) {
+        if (failTail) {
+          const invalid = overview(project, tailCandidates, {
+            angle: '角度一', hook: '钩子二', candidateCount: 6, cursor: 4
+          });
+          return fulfilled({ ...invalid.result, unexpected: 'must-reject' });
+        }
+        return overview(project, tailCandidates, {
+          angle: '角度一', hook: '钩子二', candidateCount: 6, cursor: 4
+        });
+      }
+      throw new Error(operation);
+    } };
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /当前状态needs-decision/u);
+    assert.match(textOf(tree), /当前角度角度一/u);
+    assert.match(textOf(tree), /当前钩子钩子二/u);
+    assert.match(textOf(tree), /角度三/u);
+    assert.match(textOf(tree), /钩子三/u);
+    assert.doesNotMatch(textOf(tree), /读取不完整/u);
+
+    failTail = true;
+    const secondHarness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } });
+    const secondProps = uiProps(state, secondHarness.integration, []);
+    tree = secondHarness.renderer.render(secondHarness.AppFrame, secondProps);
+    tree = await settle(secondHarness, secondProps);
+    tree = await settle(secondHarness, secondProps);
+    assert.match(textOf(tree), /角度三/u);
+    assert.doesNotMatch(textOf(tree), /钩子三/u);
+    assert.match(textOf(tree), /候选读取不完整；只显示已成功读取的 4\/6 项/u);
+  });
+
+  await test('概览 A→B→A 后丢弃迟到的旧 A 响应并立即清空旧内容', async () => {
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    let projectA = contentProject('1', '项目 A', '选题');
+    const projectB = contentProject('2', '项目 B', '选题');
+    const delayedA = deferred();
+    let refreshedAReads = 0;
+    const workspaceFiles = { async execute(operation, input) {
+      if (operation === 'catalog.read') return catalog([projectA, projectB]);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation !== 'overview.read') throw new Error(operation);
+      if (input.projectToken === `project-${'1'.repeat(24)}`) return overview(projectA, [{
+        field: 'angle', value: 'A 初始角度', selected: true
+      }], { angle: 'A 初始角度' });
+      if (input.projectToken === projectB.projectToken) return overview(projectB, [{
+        field: 'angle', value: 'B 当前角度', selected: true
+      }], { angle: 'B 当前角度' });
+      refreshedAReads += 1;
+      return refreshedAReads === 1 ? delayedA.promise : overview(projectA, [{
+        field: 'angle', value: 'A 最新角度', selected: true
+      }], { angle: 'A 最新角度' });
+    } };
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /A 初始角度/u);
+
+    projectA = { ...projectA, projectToken: `project-${'3'.repeat(24)}` };
+    button(tree, '刷新内容').props.onClick();
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /正在读取选题与状态/u);
+    assert.doesNotMatch(textOf(tree), /A 初始角度/u, 'token 更新后旧概览必须立即清空');
+
+    const card = (title) => findAll(tree, (node) => node.props?.className === 'wd10-project'
+      && textOf(node).includes(title))[0];
+    card('项目 B').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /B 当前角度/u);
+    assert.doesNotMatch(textOf(tree), /A 初始角度/u);
+
+    card('项目 A').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /A 最新角度/u);
+    delayedA.resolve(overview(projectA, [{
+      field: 'angle', value: 'A 迟到角度', selected: true
+    }], { angle: 'A 迟到角度' }));
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /A 最新角度/u);
+    assert.doesNotMatch(textOf(tree), /A 迟到角度/u,
+      '旧 attempt 的迟到响应不得覆盖 A 返回后的新概览');
+  });
+
+  await test('选题拍板单飞且连续角度到钩子使用服务端返回的新 token', async () => {
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    let project = contentProject('b', '连续拍板', '选题');
+    const contentRef = project.contentRef;
+    let selectedAngle = null;
+    let selectedHook = null;
+    const calls = [];
+    const firstWrite = deferred();
+    const tokenB = `project-${'c'.repeat(24)}`;
+    const tokenC = `project-${'d'.repeat(24)}`;
+    const candidates = () => [
+      { field: 'angle', value: '正面结果', selected: selectedAngle === '正面结果' },
+      { field: 'angle', value: '失败复盘', selected: selectedAngle === '失败复盘' },
+      { field: 'hook', value: '别再空想', selected: selectedHook === '别再空想' }
+    ];
+    const workspaceFiles = { async execute(operation, input) {
+      if (operation === 'catalog.read') return catalog([project]);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'overview.read') return overview(project, candidates(), {
+        angle: selectedAngle, hook: selectedHook, updated: project.updated
+      });
+      if (operation === 'topic.choose') {
+        calls.push({ ...input });
+        if (calls.length === 1) return firstWrite.promise;
+        assert.equal(input.projectToken, tokenB);
+        selectedHook = input.value;
+        project = { ...project, projectToken: tokenC, updated: '2026-08-25 12:02' };
+        return fulfilled({ kind: 'mutation', changed: true, contentRef,
+          projectToken: tokenC, field: input.field, value: input.value,
+          updated: project.updated, message: '钩子已写回。' });
+      }
+      throw new Error(operation);
+    } };
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    button(tree, '正面结果').props.onClick();
+    button(tree, '正面结果').props.onClick();
+    assert.equal(calls.length, 1, '同一写回未完成时双击必须只发一次');
+    selectedAngle = '正面结果';
+    project = { ...project, projectToken: tokenB, updated: '2026-08-25 12:01' };
+    firstWrite.resolve(fulfilled({ kind: 'mutation', changed: true, contentRef,
+      projectToken: tokenB, field: 'angle', value: '正面结果',
+      updated: project.updated, message: '角度已写回。' }));
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /当前角度正面结果/u);
+    assert.equal(findAll(tree, (node) => node.props?.className === 'wd10-project'
+      && node.props['aria-current'] === true).length, 1, 'token 轮换后仍应选中同一 contentRef');
+    button(tree, '别再空想').props.onClick();
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.equal(calls.length, 2);
+    assert.deepEqual(calls.map((call) => call.projectToken), [
+      `project-${'b'.repeat(24)}`, tokenB
+    ]);
+    assert.match(textOf(tree), /当前钩子别再空想/u);
   });
 
   await test('动作先预检再明确确认，双击只提交一次并刷新 catalog', async () => {
@@ -865,6 +1078,9 @@ async function main() {
     const overrides = [];
     const workspaceFiles = { async execute(operation, input) {
       if (operation === 'catalog.read') { catalogReads += 1; return catalog([project]); }
+      if (operation === 'overview.read') return overview(project, [{
+        field: 'angle', value: '动作角度', selected: false
+      }]);
       if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
         projectToken: input.projectToken, receipts: [] });
       if (operation === 'project.action.prepare') return fulfilled({ kind: 'preflight',
@@ -888,6 +1104,7 @@ async function main() {
       whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } });
     const props = uiProps(state, harness.integration, []);
     let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
     tree = await settle(harness, props);
     button(tree, '写脚本').props.onClick();
     tree = await settle(harness, props);

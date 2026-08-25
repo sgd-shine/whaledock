@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
     const MAX_PREFERENCE_LISTENERS = 64;
     const PREFERENCE_BOOTSTRAP_RETRY_MS = Object.freeze([50, 100, 200, 400, 800]);
     const WORKSPACE_FILE_OPERATIONS = new Set([
-      'catalog.read', 'document.read', 'topic.choose',
+      'catalog.read', 'overview.read', 'document.read', 'topic.choose',
       'project.action.prepare', 'project.action.submit',
       'receipts.read', 'receipts.ack', 'receipts.open'
     ]);
@@ -42,12 +42,16 @@ window.__ModuleLoader__.load({
     const MAX_WORKSPACE_FILE_RESULT_BYTES = 6 * 1024;
     const PROJECT_TOKEN_RE = /^project-[a-f0-9]{24}$/;
     const CONTENT_REF_RE = /^content-[a-f0-9]{24}$/;
+    const OVERVIEW_STAGES = new Set([
+      'inspiration', 'topic', 'script', 'shoot', 'edit',
+      'publish', 'data', 'review', 'asset'
+    ]);
     const OPAQUE_VALUE_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,255}$/;
     const ACTIVE_RECEIPT_STATES = new Set(['submitting', 'queued', 'running', 'waiting']);
     const SHELL_CONTRACT = 'whaledock.content-shell/v1';
     const inject = ['connection', 'sessions'];
 
-    const SHELL_CSS = `.wd10-left{background:var(--dsw-specific-sidebar-fill);border-right:1px solid var(--dsw-alias-border-l1);min-width:0;height:100%;display:flex;flex-direction:column;overflow:hidden}.wd10-switch{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:12px;padding:4px;border-radius:10px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1)}.wd10-switch button{border:0;border-radius:7px;padding:7px 10px;color:var(--dsw-alias-fg-secondary);background:transparent;font:inherit;font-size:13px;cursor:pointer}.wd10-switch button[aria-selected=true]{background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);box-shadow:0 1px 3px rgba(0,0,0,.08)}.wd10-library{min-height:0;overflow:auto;padding:0 10px 18px}.wd10-libraryHead{padding:8px 6px 10px}.wd10-eyebrow{font-size:11px;letter-spacing:.08em;color:var(--dsw-alias-fg-tertiary);text-transform:uppercase}.wd10-libraryHead h2{font-size:17px;line-height:1.35;margin:4px 0;color:var(--dsw-alias-fg-primary)}.wd10-libraryHead p{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-refresh,.wd10-loadMore{margin-top:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;padding:5px 8px;background:transparent;color:var(--dsw-alias-fg-secondary);font:inherit;font-size:11px;cursor:pointer}.wd10-refresh:disabled,.wd10-loadMore:disabled{opacity:.55;cursor:default}.wd10-loadMore{width:100%;padding:8px}.wd10-workspaceList{margin:0 0 10px;padding:8px 6px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}.wd10-workspaceChoice{width:100%;text-align:left;border:1px solid transparent;border-radius:8px;padding:7px 8px;margin-top:4px;background:transparent;color:inherit;cursor:pointer}.wd10-workspaceChoice:hover,.wd10-workspaceChoice[aria-current=true]{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l1)}.wd10-projectPath{display:block;margin-top:3px;font-size:10px;color:var(--dsw-alias-fg-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wd10-project{width:100%;text-align:left;border:1px solid transparent;border-radius:10px;padding:10px;margin:2px 0 6px;background:transparent;color:inherit;cursor:pointer}.wd10-project:hover{background:var(--dsw-alias-bg-layer-1)}.wd10-project[aria-current=true]{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l2)}.wd10-projectTitle{display:block;font-size:13px;font-weight:600;color:var(--dsw-alias-fg-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wd10-projectMeta{display:flex;align-items:center;gap:7px;margin-top:5px;font-size:11px;color:var(--dsw-alias-fg-tertiary)}.wd10-stageBadge{border-radius:999px;padding:1px 7px;background:var(--dsw-alias-state-business-tertiary);color:var(--dsw-alias-state-business-primary)}.wd10-detail{min-width:0;height:100%;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base);border-right:1px solid var(--dsw-alias-border-l2);overflow:hidden}.wd10-detailHead{padding:22px 24px 12px}.wd10-detailHead h1{font-size:22px;line-height:1.25;margin:5px 0 7px;color:var(--dsw-alias-fg-primary)}.wd10-detailHead p{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-projectActions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.wd10-projectActions button,.wd10-receipt button{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 9px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:11px;cursor:pointer}.wd10-projectActions button:disabled,.wd10-receipt button:disabled{opacity:.55;cursor:default}.wd10-tabs{display:flex;gap:3px;padding:0 20px;border-bottom:1px solid var(--dsw-alias-border-l1);overflow:auto}.wd10-tabs button{border:0;border-bottom:2px solid transparent;padding:10px 8px 9px;background:transparent;color:var(--dsw-alias-fg-secondary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}.wd10-tabs button[aria-selected=true]{border-bottom-color:var(--dsw-alias-fg-primary);color:var(--dsw-alias-fg-primary)}.wd10-receipts{flex:none;max-height:188px;overflow:auto;padding:10px 18px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}.wd10-receiptTitle{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-receipt{margin-top:7px;padding:8px 10px;border-radius:9px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-receiptHead,.wd10-receiptFoot{display:flex;align-items:center;justify-content:space-between;gap:8px}.wd10-receipt strong{color:var(--dsw-alias-fg-primary)}.wd10-receipt p{margin:5px 0 0;line-height:1.45}.wd10-preflight{border-color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-state-warn-tertiary)}.wd10-pulse{color:var(--dsw-alias-state-business-primary);font-weight:600}.wd10-panel{min-height:0;overflow:auto;padding:20px 24px 28px}.wd10-card{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:16px;background:var(--dsw-alias-bg-layer-1);margin-bottom:12px}.wd10-card h3{font-size:14px;margin:0 0 7px;color:var(--dsw-alias-fg-primary)}.wd10-card p{font-size:12px;line-height:1.65;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-unfinished strong{display:block;margin:8px 0;color:var(--dsw-alias-fg-primary)}.wd10-feedback{font-size:12px;line-height:1.5;margin:8px 0 0;color:var(--dsw-alias-fg-secondary)}.wd10-chat{min-width:0;height:100%;display:flex;overflow:hidden}.wd10-chatMain{min-width:0;flex:1;display:flex;flex-direction:column;overflow:hidden}.wd10-empty{padding:24px;color:var(--dsw-alias-fg-secondary);font-size:13px;line-height:1.6}@media(max-width:1120px){.wd10-detailHead{padding:18px 18px 10px}.wd10-panel{padding:16px 18px}.wd10-detailHead h1{font-size:19px}.wd10-tabs{padding:0 14px}.wd10-receipts{padding:9px 14px}}.wd10-leftViews,.wd10-leftView,.wd10-nativeSidebar{min-height:0;flex:1;overflow:hidden}.wd10-leftView[hidden],.wd10-nativeSidebar[hidden]{display:none}.wd10-subSwitch{margin-top:0}.wd10-banner,.wd10-hint{display:flex;align-items:center;gap:8px;margin:10px 18px 0;padding:9px 10px;border:1px solid var(--dsw-alias-state-warn-primary);border-radius:9px;color:var(--dsw-alias-fg-primary);background:var(--dsw-alias-state-warn-tertiary);font-size:12px;line-height:1.45}.wd10-banner span,.wd10-hint span{min-width:0;flex:1}.wd10-banner button,.wd10-hint button{flex:none;border:1px solid currentColor;border-radius:7px;padding:4px 8px;background:transparent;color:inherit;cursor:pointer}.wd10-banner button:disabled{opacity:.55;cursor:default}.wd10-prefStatus{margin:0 14px 8px;color:var(--dsw-alias-state-warn-primary);font-size:11px}.wd10-contentDetails{transition:width var(--ds-transition-duration-slow) var(--ds-ease-in-out);flex-shrink:0}`;
+    const SHELL_CSS = `.wd10-left{background:var(--dsw-specific-sidebar-fill);border-right:1px solid var(--dsw-alias-border-l1);min-width:0;height:100%;display:flex;flex-direction:column;overflow:hidden}.wd10-switch{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:12px;padding:4px;border-radius:10px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1)}.wd10-switch button{border:0;border-radius:7px;padding:7px 10px;color:var(--dsw-alias-fg-secondary);background:transparent;font:inherit;font-size:13px;cursor:pointer}.wd10-switch button[aria-selected=true]{background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);box-shadow:0 1px 3px rgba(0,0,0,.08)}.wd10-library{min-height:0;overflow:auto;padding:0 10px 18px}.wd10-libraryHead{padding:8px 6px 10px}.wd10-eyebrow{font-size:11px;letter-spacing:.08em;color:var(--dsw-alias-fg-tertiary);text-transform:uppercase}.wd10-libraryHead h2{font-size:17px;line-height:1.35;margin:4px 0;color:var(--dsw-alias-fg-primary)}.wd10-libraryHead p{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-refresh,.wd10-loadMore{margin-top:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;padding:5px 8px;background:transparent;color:var(--dsw-alias-fg-secondary);font:inherit;font-size:11px;cursor:pointer}.wd10-refresh:disabled,.wd10-loadMore:disabled{opacity:.55;cursor:default}.wd10-loadMore{width:100%;padding:8px}.wd10-workspaceList{margin:0 0 10px;padding:8px 6px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}.wd10-workspaceChoice{width:100%;text-align:left;border:1px solid transparent;border-radius:8px;padding:7px 8px;margin-top:4px;background:transparent;color:inherit;cursor:pointer}.wd10-workspaceChoice:hover,.wd10-workspaceChoice[aria-current=true]{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l1)}.wd10-projectPath{display:block;margin-top:3px;font-size:10px;color:var(--dsw-alias-fg-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wd10-project{width:100%;text-align:left;border:1px solid transparent;border-radius:10px;padding:10px;margin:2px 0 6px;background:transparent;color:inherit;cursor:pointer}.wd10-project:hover{background:var(--dsw-alias-bg-layer-1)}.wd10-project[aria-current=true]{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l2)}.wd10-projectTitle{display:block;font-size:13px;font-weight:600;color:var(--dsw-alias-fg-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wd10-projectMeta{display:flex;align-items:center;gap:7px;margin-top:5px;font-size:11px;color:var(--dsw-alias-fg-tertiary)}.wd10-stageBadge{border-radius:999px;padding:1px 7px;background:var(--dsw-alias-state-business-tertiary);color:var(--dsw-alias-state-business-primary)}.wd10-detail{min-width:0;height:100%;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base);border-right:1px solid var(--dsw-alias-border-l2);overflow:hidden}.wd10-detailHead{padding:22px 24px 12px}.wd10-detailHead h1{font-size:22px;line-height:1.25;margin:5px 0 7px;color:var(--dsw-alias-fg-primary)}.wd10-detailHead p{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-projectActions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.wd10-projectActions button,.wd10-receipt button,.wd10-choice,.wd10-nextAction{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 9px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:11px;cursor:pointer}.wd10-projectActions button:disabled,.wd10-receipt button:disabled,.wd10-choice:disabled,.wd10-nextAction:disabled{opacity:.55;cursor:default}.wd10-tabs{display:flex;gap:3px;padding:0 20px;border-bottom:1px solid var(--dsw-alias-border-l1);overflow:auto}.wd10-tabs button{border:0;border-bottom:2px solid transparent;padding:10px 8px 9px;background:transparent;color:var(--dsw-alias-fg-secondary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}.wd10-tabs button[aria-selected=true]{border-bottom-color:var(--dsw-alias-fg-primary);color:var(--dsw-alias-fg-primary)}.wd10-receipts{flex:none;max-height:188px;overflow:auto;padding:10px 18px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}.wd10-receiptTitle{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-receipt{margin-top:7px;padding:8px 10px;border-radius:9px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-receiptHead,.wd10-receiptFoot{display:flex;align-items:center;justify-content:space-between;gap:8px}.wd10-receipt strong{color:var(--dsw-alias-fg-primary)}.wd10-receipt p{margin:5px 0 0;line-height:1.45}.wd10-preflight{border-color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-state-warn-tertiary)}.wd10-pulse{color:var(--dsw-alias-state-business-primary);font-weight:600}.wd10-panel{min-height:0;overflow:auto;padding:20px 24px 28px}.wd10-card{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:16px;background:var(--dsw-alias-bg-layer-1);margin-bottom:12px}.wd10-card h3{font-size:14px;margin:0 0 7px;color:var(--dsw-alias-fg-primary)}.wd10-card p{font-size:12px;line-height:1.65;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-overviewMeta{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}.wd10-overviewMeta div{border:1px solid var(--dsw-alias-border-l1);border-radius:9px;padding:9px;background:var(--dsw-alias-bg-base)}.wd10-overviewMeta span,.wd10-currentChoice span{display:block;font-size:10px;color:var(--dsw-alias-fg-tertiary);margin-bottom:3px}.wd10-overviewMeta strong,.wd10-currentChoice strong{font-size:12px;color:var(--dsw-alias-fg-primary)}.wd10-currentChoices{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}.wd10-currentChoice{border-left:3px solid var(--dsw-alias-state-business-primary);padding:7px 9px;background:var(--dsw-alias-bg-base);border-radius:0 8px 8px 0}.wd10-choiceGroup{margin-top:14px}.wd10-choiceGroup h4{font-size:11px;margin:0 0 7px;color:var(--dsw-alias-fg-secondary)}.wd10-choiceList{display:flex;flex-wrap:wrap;gap:6px}.wd10-choice[aria-pressed=true]{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-tertiary);font-weight:600}.wd10-incomplete{color:var(--dsw-alias-state-warn-primary)!important;margin-top:10px!important}.wd10-next{margin-top:16px;padding-top:14px;border-top:1px solid var(--dsw-alias-border-l1)}.wd10-nextAction{margin-top:8px;border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-bg-base);font-weight:600}.wd10-unfinished strong{display:block;margin:8px 0;color:var(--dsw-alias-fg-primary)}.wd10-feedback{font-size:12px;line-height:1.5;margin:8px 0 0;color:var(--dsw-alias-fg-secondary)}.wd10-chat{min-width:0;height:100%;display:flex;overflow:hidden}.wd10-chatMain{min-width:0;flex:1;display:flex;flex-direction:column;overflow:hidden}.wd10-empty{padding:24px;color:var(--dsw-alias-fg-secondary);font-size:13px;line-height:1.6}@media(max-width:1120px){.wd10-detailHead{padding:18px 18px 10px}.wd10-panel{padding:16px 18px}.wd10-detailHead h1{font-size:19px}.wd10-tabs{padding:0 14px}.wd10-receipts{padding:9px 14px}.wd10-overviewMeta,.wd10-currentChoices{grid-template-columns:1fr}}.wd10-leftViews,.wd10-leftView,.wd10-nativeSidebar{min-height:0;flex:1;overflow:hidden}.wd10-leftView[hidden],.wd10-nativeSidebar[hidden]{display:none}.wd10-subSwitch{margin-top:0}.wd10-banner,.wd10-hint{display:flex;align-items:center;gap:8px;margin:10px 18px 0;padding:9px 10px;border:1px solid var(--dsw-alias-state-warn-primary);border-radius:9px;color:var(--dsw-alias-fg-primary);background:var(--dsw-alias-state-warn-tertiary);font-size:12px;line-height:1.45}.wd10-banner span,.wd10-hint span{min-width:0;flex:1}.wd10-banner button,.wd10-hint button{flex:none;border:1px solid currentColor;border-radius:7px;padding:4px 8px;background:transparent;color:inherit;cursor:pointer}.wd10-banner button:disabled{opacity:.55;cursor:default}.wd10-prefStatus{margin:0 14px 8px;color:var(--dsw-alias-state-warn-primary);font-size:11px}.wd10-contentDetails{transition:width var(--ds-transition-duration-slow) var(--ds-ease-in-out);flex-shrink:0}`;
     const CREATOR_TABS = Object.freeze([
       ['overview', '概览'], ['script', '脚本'], ['shoot', '拍摄'],
       ['publish', '发布'], ['review', '复盘']
@@ -197,6 +201,91 @@ window.__ModuleLoader__.load({
         projectCount: Number.isSafeInteger(value.projectCount) && value.projectCount >= projects.length
           ? value.projectCount : projects.length,
         nextCursor: Number.isSafeInteger(value.nextCursor) ? value.nextCursor : null
+      });
+    }
+
+    function strictOverviewText(value, maximum, nullable = true) {
+      if (value === null && nullable) return null;
+      if (typeof value !== 'string' || WORKSPACE_TEXT_CONTROL_RE.test(value)) return undefined;
+      const clean = value.trim();
+      if (!clean || Array.from(clean).length > maximum) return undefined;
+      return clean;
+    }
+
+    function overviewPageResult(snapshot, expectedContentRef, expectedCursor) {
+      const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+      const keys = [
+        'kind', 'contentRef', 'projectToken', 'title', 'stage', 'stageLabel',
+        'status', 'updated', 'decision', 'angle', 'hook', 'candidateCount',
+        'cursor', 'nextCursor', 'candidates'
+      ];
+      if (!exact(value, keys) || value.kind !== 'overview'
+          || !CONTENT_REF_RE.test(String(value.contentRef || ''))
+          || (expectedContentRef && value.contentRef !== expectedContentRef)
+          || !PROJECT_TOKEN_RE.test(String(value.projectToken || ''))
+          || !(value.stage === null || OVERVIEW_STAGES.has(value.stage))
+          || !Number.isSafeInteger(value.candidateCount) || value.candidateCount < 0
+          || value.candidateCount > 64
+          || !Number.isSafeInteger(value.cursor) || value.cursor !== expectedCursor
+          || !(value.nextCursor === null || (Number.isSafeInteger(value.nextCursor)
+            && value.nextCursor > value.cursor && value.nextCursor <= value.candidateCount))
+          || !Array.isArray(value.candidates) || value.candidates.length > 4
+          || value.cursor + value.candidates.length > value.candidateCount) return null;
+      const title = strictOverviewText(value.title, 120, false);
+      const stageLabel = strictOverviewText(value.stageLabel, 24, false);
+      const status = strictOverviewText(value.status, 48);
+      const updated = strictOverviewText(value.updated, 64);
+      const decision = strictOverviewText(value.decision, 160);
+      const angle = strictOverviewText(value.angle, 240);
+      const hook = strictOverviewText(value.hook, 240);
+      if ([title, stageLabel, status, updated, decision, angle, hook].includes(undefined)) return null;
+      const candidates = value.candidates.map((candidate) => {
+        if (!exact(candidate, ['field', 'value', 'selected'])
+            || !['angle', 'hook'].includes(candidate.field)
+            || (candidate.selected !== true && candidate.selected !== false)) return null;
+        const text = strictOverviewText(candidate.value, 240, false);
+        return text === undefined ? null : Object.freeze({
+          field: candidate.field, value: text, selected: candidate.selected
+        });
+      });
+      if (candidates.some((candidate) => candidate === null)
+          || new Set(candidates.map((candidate) => `${candidate.field}\u0000${candidate.value}`)).size
+            !== candidates.length
+          || (value.nextCursor === null
+            ? value.cursor + candidates.length !== value.candidateCount
+            : value.nextCursor !== value.cursor + candidates.length)) return null;
+      return Object.freeze({
+        kind: 'overview', contentRef: value.contentRef, projectToken: value.projectToken,
+        title, stage: value.stage, stageLabel, status, updated, decision, angle, hook,
+        candidateCount: value.candidateCount, cursor: value.cursor,
+        nextCursor: value.nextCursor, candidates: Object.freeze(candidates)
+      });
+    }
+
+    function sameOverviewHeader(left, right) {
+      return left && right && [
+        'contentRef', 'projectToken', 'title', 'stage', 'stageLabel', 'status',
+        'updated', 'decision', 'angle', 'hook', 'candidateCount'
+      ].every((key) => Object.is(left[key], right[key]));
+    }
+
+    function topicMutationResult(snapshot, expected) {
+      const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+      if (!exact(value, [
+        'kind', 'changed', 'contentRef', 'projectToken', 'field',
+        'value', 'updated', 'message'
+      ]) || value.kind !== 'mutation' || value.changed !== true
+          || value.contentRef !== expected.contentRef
+          || !CONTENT_REF_RE.test(String(value.contentRef || ''))
+          || !PROJECT_TOKEN_RE.test(String(value.projectToken || ''))
+          || value.projectToken === expected.projectToken
+          || value.field !== expected.field || value.value !== expected.value) return null;
+      const updated = strictOverviewText(value.updated, 64, false);
+      const message = strictOverviewText(value.message, 160, false);
+      return updated === undefined || message === undefined ? null : Object.freeze({
+        kind: 'mutation', changed: true, contentRef: value.contentRef,
+        projectToken: value.projectToken, field: value.field, value: value.value,
+        updated, message
       });
     }
 
@@ -440,8 +529,229 @@ window.__ModuleLoader__.load({
       });
     }
 
+    function OverviewPanel({ project, workspaceFiles, actions, actionPending,
+      onAction, onMutation }) {
+      const [surface, setSurface] = react.useState({ status: 'idle', overview: null });
+      const [choiceFeedback, setChoiceFeedback] = react.useState('');
+      const [choosing, setChoosing] = react.useState(false);
+      const readAttempt = react.useRef(0);
+      const readAbort = react.useRef(null);
+      const choiceAttempt = react.useRef(0);
+      const choiceAbort = react.useRef(null);
+      const choosingRef = react.useRef(false);
+
+      react.useEffect(() => {
+        const attempt = ++readAttempt.current;
+        readAbort.current?.abort();
+        const controller = new AbortController();
+        readAbort.current = controller;
+        choiceAttempt.current += 1;
+        choiceAbort.current?.abort();
+        choiceAbort.current = null;
+        choosingRef.current = false;
+        setChoosing(false);
+        setChoiceFeedback('');
+        setSurface({ status: project ? 'loading' : 'idle', overview: null });
+        if (!project || !workspaceFiles || typeof workspaceFiles.execute !== 'function') {
+          if (project) setSurface({ status: 'error', overview: null });
+          return () => controller.abort();
+        }
+        const read = async () => {
+          let cursor = 0;
+          let first = null;
+          const candidates = [];
+          const seen = new Set();
+          let complete = false;
+          let failed = false;
+          for (let pageIndex = 0; pageIndex < 16; pageIndex += 1) {
+            let page = null;
+            try {
+              page = overviewPageResult(await workspaceFiles.execute('overview.read', {
+                projectToken: project.projectToken, cursor, limit: 4
+              }, controller.signal), project.contentRef, cursor);
+            } catch (_error) { page = null; }
+            if (controller.signal.aborted || readAttempt.current !== attempt) return;
+            if (!page || (first && !sameOverviewHeader(first, page))) {
+              failed = true;
+              break;
+            }
+            first ||= page;
+            let duplicate = false;
+            for (const candidate of page.candidates) {
+              const key = `${candidate.field}\u0000${candidate.value}`;
+              if (seen.has(key)) { duplicate = true; break; }
+              seen.add(key);
+              candidates.push(candidate);
+            }
+            if (duplicate) { failed = true; break; }
+            if (page.nextCursor === null) { complete = true; break; }
+            cursor = page.nextCursor;
+          }
+          if (controller.signal.aborted || readAttempt.current !== attempt) return;
+          if (!first) {
+            setSurface({ status: 'error', overview: null });
+            return;
+          }
+          const overview = Object.freeze({ ...first, candidates: Object.freeze(candidates) });
+          setSurface({ status: complete && !failed ? 'ready' : 'partial', overview });
+        };
+        void read();
+        return () => {
+          controller.abort();
+          if (readAbort.current === controller) readAbort.current = null;
+        };
+      }, [project?.contentRef, project?.projectToken, workspaceFiles]);
+
+      react.useEffect(() => () => {
+        choiceAttempt.current += 1;
+        choiceAbort.current?.abort();
+        choiceAbort.current = null;
+        choosingRef.current = false;
+      }, []);
+
+      const choose = async (candidate) => {
+        const overview = surface.overview;
+        if (!overview || choosingRef.current || candidate.selected) return;
+        choosingRef.current = true;
+        setChoosing(true);
+        setChoiceFeedback(`正在把${candidate.field === 'angle' ? '角度' : '钩子'}写回项目文件…`);
+        const controller = new AbortController();
+        choiceAbort.current = controller;
+        const attempt = ++choiceAttempt.current;
+        try {
+          const snapshot = await workspaceFiles.execute('topic.choose', {
+            projectToken: overview.projectToken,
+            field: candidate.field,
+            value: candidate.value
+          }, controller.signal);
+          if (choiceAttempt.current !== attempt || controller.signal.aborted) return;
+          const mutation = topicMutationResult(snapshot, {
+            contentRef: overview.contentRef,
+            projectToken: overview.projectToken,
+            field: candidate.field,
+            value: candidate.value
+          });
+          if (!mutation) {
+            setChoiceFeedback(operationError(snapshot, '写回结果无效；请刷新后核对项目文件。'));
+            return;
+          }
+          setSurface((current) => {
+            if (!current.overview || current.overview.contentRef !== mutation.contentRef) return current;
+            return { ...current, overview: Object.freeze({
+              ...current.overview,
+              projectToken: mutation.projectToken,
+              updated: mutation.updated,
+              [mutation.field]: mutation.value,
+              candidates: Object.freeze(current.overview.candidates.map((item) => Object.freeze({
+                ...item,
+                selected: item.field === mutation.field
+                  ? item.value === mutation.value : item.selected
+              })))
+            }) };
+          });
+          setChoiceFeedback(mutation.message);
+          onMutation?.(mutation);
+        } catch (_error) {
+          if (choiceAttempt.current === attempt && !controller.signal.aborted) {
+            setChoiceFeedback('写回结果未知；请刷新后核对项目文件，不要重复点击。');
+          }
+        } finally {
+          if (choiceAbort.current === controller) choiceAbort.current = null;
+          if (choiceAttempt.current === attempt) {
+            choosingRef.current = false;
+            setChoosing(false);
+          }
+        }
+      };
+
+      if (surface.status === 'idle') return react_jsx_runtime.jsx('section', {
+        className: 'wd10-card', children: react_jsx_runtime.jsx('p', {
+          children: '请从左侧选择一张真实内容卡。'
+        })
+      });
+      if (surface.status === 'loading') return react_jsx_runtime.jsx('section', {
+        className: 'wd10-card', children: react_jsx_runtime.jsx('p', {
+          children: '正在读取选题与状态…'
+        })
+      });
+      if (surface.status === 'error' || !surface.overview) {
+        return react_jsx_runtime.jsx('section', { className: 'wd10-card', children:
+          react_jsx_runtime.jsx('p', { role: 'status', children:
+            '概览暂时读不到；没有用内容卡摘要冒充文件详情。' }) });
+      }
+      const overview = surface.overview;
+      const angles = overview.candidates.filter((candidate) => candidate.field === 'angle');
+      const hooks = overview.candidates.filter((candidate) => candidate.field === 'hook');
+      const choiceGroup = (label, emptyCopy, candidates) => react_jsx_runtime.jsxs('div', {
+        className: 'wd10-choiceGroup', children: [
+          react_jsx_runtime.jsx('h4', { children: label }),
+          candidates.length > 0 ? react_jsx_runtime.jsx('div', {
+            className: 'wd10-choiceList', children: candidates.map((candidate) => (
+              react_jsx_runtime.jsx('button', {
+                type: 'button', className: 'wd10-choice',
+                'aria-pressed': candidate.selected,
+                disabled: choosing || candidate.selected,
+                onClick: () => { void choose(candidate); },
+                children: candidate.value
+              }, `${candidate.field}:${candidate.value}`)
+            ))
+          }) : react_jsx_runtime.jsx('p', { children: emptyCopy })
+        ]
+      });
+      return react_jsx_runtime.jsxs('section', {
+        className: 'wd10-card wd10-overview', 'data-whaledock-overview': true, children: [
+          react_jsx_runtime.jsx('h3', { children: '选题拍板' }),
+          react_jsx_runtime.jsx('p', { children: overview.decision
+            ? `待拍板：${overview.decision}` : '角度与钩子都直接来自当前项目文件。' }),
+          react_jsx_runtime.jsxs('div', { className: 'wd10-overviewMeta', children: [
+            react_jsx_runtime.jsxs('div', { children: [
+              react_jsx_runtime.jsx('span', { children: '当前状态' }),
+              react_jsx_runtime.jsx('strong', { children: overview.status || overview.stageLabel })
+            ] }),
+            react_jsx_runtime.jsxs('div', { children: [
+              react_jsx_runtime.jsx('span', { children: '文件更新' }),
+              react_jsx_runtime.jsx('strong', { children: overview.updated || '未写明' })
+            ] })
+          ] }),
+          react_jsx_runtime.jsxs('div', { className: 'wd10-currentChoices', children: [
+            react_jsx_runtime.jsxs('div', { className: 'wd10-currentChoice', children: [
+              react_jsx_runtime.jsx('span', { children: '当前角度' }),
+              react_jsx_runtime.jsx('strong', { children: overview.angle || '还没拍板' })
+            ] }),
+            react_jsx_runtime.jsxs('div', { className: 'wd10-currentChoice', children: [
+              react_jsx_runtime.jsx('span', { children: '当前钩子' }),
+              react_jsx_runtime.jsx('strong', { children: overview.hook || '还没拍板' })
+            ] })
+          ] }),
+          choiceGroup('候选角度', '文件里没有候选角度。', angles),
+          choiceGroup('候选钩子', '文件里没有候选钩子。', hooks),
+          surface.status === 'partial' && react_jsx_runtime.jsx('p', {
+            className: 'wd10-incomplete', role: 'status', children:
+              `候选读取不完整；只显示已成功读取的 ${overview.candidates.length}/${overview.candidateCount} 项。`
+          }),
+          choiceFeedback && react_jsx_runtime.jsx('p', {
+            className: 'wd10-feedback', role: 'status', children: choiceFeedback
+          }),
+          react_jsx_runtime.jsxs('div', { className: 'wd10-next', children: [
+            react_jsx_runtime.jsx('h3', { children: '下一步' }),
+            actions.length === 0 ? react_jsx_runtime.jsx('p', {
+              children: '当前阶段没有可用的下一步动作。'
+            }) : react_jsx_runtime.jsxs(react_jsx_runtime.Fragment, { children: [
+              react_jsx_runtime.jsx('p', { children: '会先显示投递去向，再由你确认。' }),
+              ...actions.map((action) => react_jsx_runtime.jsx('button', {
+                type: 'button', className: 'wd10-nextAction',
+                disabled: actionPending || choosing,
+                title: action.hint || undefined,
+                onClick: () => onAction(action), children: action.label
+              }, action.id))
+            ] })
+          ] })
+        ]
+      });
+    }
+
     function CreatorDetail({ routingProject, project, tab, onTab, workspaceFiles,
-      alignment, onAlign, onCatalogRefresh }) {
+      alignment, onAlign, onCatalogRefresh, onProjectMutation }) {
       const [preflight, setPreflight] = react.useState(null);
       const [feedback, setFeedback] = react.useState('');
       const [pending, setPending] = react.useState(false);
@@ -597,14 +907,7 @@ window.__ModuleLoader__.load({
           react_jsx_runtime.jsx('h1', { children: title }),
           react_jsx_runtime.jsx('p', { children: project
             ? `${project.workflowLabel} · ${project.updated ? `更新 ${project.updated}` : '更新时间未写明'}`
-            : '请从左侧选择一张真实内容卡。' }),
-          project && project.actions.length > 0 && react_jsx_runtime.jsx('div', {
-            className: 'wd10-projectActions', children: project.actions.map((action) => (
-              react_jsx_runtime.jsx('button', { type: 'button', disabled: pending,
-                title: action.hint || undefined, onClick: () => { void runPrepare(action); },
-                children: action.label }, action.id)
-            ))
-          })
+            : '请从左侧选择一张真实内容卡。' })
         ] }),
         react_jsx_runtime.jsx('nav', { className: 'wd10-tabs', 'aria-label': '项目阶段', children:
           CREATOR_TABS.map(([id, label]) => react_jsx_runtime.jsx('button', {
@@ -616,16 +919,20 @@ window.__ModuleLoader__.load({
           onConfirm: () => { void confirmPreflight(); }, onCancel: cancelPreflight,
           refreshKey: receiptRefresh, onCatalogRefresh, preflightRemaining
         }),
-        react_jsx_runtime.jsx('main', { className: 'wd10-panel', children:
-          react_jsx_runtime.jsxs('section', {
+        react_jsx_runtime.jsx('main', { className: 'wd10-panel', children: tab === 'overview'
+          ? react_jsx_runtime.jsx(OverviewPanel, {
+            project, workspaceFiles, actions: project?.actions || [], actionPending: pending,
+            onAction: (action) => { void runPrepare(action); },
+            onMutation: onProjectMutation
+          })
+          : react_jsx_runtime.jsxs('section', {
             className: 'wd10-card wd10-unfinished', 'data-whaledock-unfinished': true, children: [
               react_jsx_runtime.jsx('h3', { children:
                 CREATOR_TABS.find(([id]) => id === tab)?.[1] || '概览' }),
               react_jsx_runtime.jsx('strong', { children: '这一格还没做' }),
-              react_jsx_runtime.jsx('p', { children: '这一批只接通真实内容卡与任务回执；这里不会用静态卡冒充已实现。' })
+              react_jsx_runtime.jsx('p', { children: '这里还没有接通真实文件能力，不会用静态卡冒充已实现。' })
             ]
-          })
-        })
+          }) })
       ] });
     }
 
@@ -927,6 +1234,22 @@ window.__ModuleLoader__.load({
         }
       };
 
+      const applyProjectMutation = react.useCallback((mutation) => {
+        const selected = selectedContentRef.current;
+        if (!selected || selected.contentRef !== mutation.contentRef) return;
+        selectedContentRef.current = {
+          contentRef: mutation.contentRef, token: mutation.projectToken
+        };
+        setSelectedContentToken(mutation.projectToken);
+        setCatalog((current) => ({
+          ...current,
+          projects: current.projects.map((project) => project.contentRef === mutation.contentRef
+            ? Object.freeze({ ...project, projectToken: mutation.projectToken,
+              updated: mutation.updated }) : project)
+        }));
+        refreshCatalog();
+      }, [refreshCatalog]);
+
       const writePreference = async (patch) => {
         if (preferences === undefined || typeof preferences.write !== 'function') {
           setPreferenceError('当前视图已切换，但偏好未保存。');
@@ -1057,7 +1380,8 @@ window.__ModuleLoader__.load({
                 error: alignmentError
               } : null,
               onAlign: () => { void alignProject(activeProject, true); },
-              onCatalogRefresh: refreshCatalog
+              onCatalogRefresh: refreshCatalog,
+              onProjectMutation: applyProjectMutation
             }),
             react_jsx_runtime.jsxs('section', { className: 'wd10-chat',
               'aria-label': '原生对话', children: [

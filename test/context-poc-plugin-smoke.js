@@ -121,7 +121,7 @@ async function main() {
     assert.match(pluginClient, /archivedSessionIds/);
     assert.doesNotMatch(pluginClient, /const STAGE_COPY = new Map/);
     for (const operation of [
-      'catalog.read', 'document.read', 'topic.choose',
+      'catalog.read', 'overview.read', 'document.read', 'topic.choose',
       'project.action.prepare', 'project.action.submit',
       'receipts.read', 'receipts.ack', 'receipts.open'
     ]) assert.match(pluginClient, new RegExp(`'${operation.replace('.', '\\.')}'`));

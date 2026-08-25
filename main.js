@@ -2899,7 +2899,7 @@ function videoProjectCard(item, projectToken, contentRef, active) {
     platforms: cleanList(fields.platforms),
     audience: safeText(fields.audience, '', 160) || null,
     angles: cleanList(fields.angles),
-    angle: safeText(fields.angle, '', 160) || null,
+    angle: safeText(fields.angle, '', 240) || null,
     hooks: cleanList(fields.hooks),
     hook: safeText(fields.hook, '', 240) || null,
     aiDisclosure: ['unknown', 'ai', 'not-ai'].includes(fields.aiDisclosure)
@@ -4132,11 +4132,17 @@ function currentVideoRuntime() {
 function readVideoDocumentByToken(projectToken) {
   const runtime = currentVideoRuntime();
   const record = runtime.projectTokens.get(projectToken);
-  if (!record) throw new Error('这张项目卡已过期，请重新选择');
+  if (!record) {
+    const error = new Error('这张项目卡已过期，请重新选择');
+    error.code = 'ERR_CONTEXT_PROJECT_STALE';
+    throw error;
+  }
   const document = videoCockpit.readDocument(runtime.root, record.relativePath);
   if (document.hash !== record.hash) {
     refreshVideoWorkspaceSnapshot();
-    throw new Error('文件已变化，列表已刷新，请重新选择');
+    const error = new Error('文件已变化，列表已刷新，请重新选择');
+    error.code = 'ERR_CONTEXT_PROJECT_STALE';
+    throw error;
   }
   return { runtime, record, document };
 }
@@ -5771,7 +5777,7 @@ const CONTEXT_POC_WORKSPACE_FILE_PENDING_MS = 10000;
 const CONTEXT_POC_WORKSPACE_FILE_EXECUTION_MARGIN_MS = 750;
 const CONTEXT_POC_MAX_WORKSPACE_FILE_READ_BATCH = 4;
 const CONTEXT_POC_WORKSPACE_FILE_OPERATIONS = new Set([
-  'catalog.read', 'document.read', 'topic.choose',
+  'catalog.read', 'document.read', 'overview.read', 'topic.choose',
   'project.action.prepare', 'project.action.submit',
   'receipts.read', 'receipts.ack', 'receipts.open'
 ]);
@@ -5892,6 +5898,20 @@ function contextPocWorkspaceFileProjectInput(value) {
   });
 }
 
+function contextPocWorkspaceFileOverviewInput(value) {
+  if (!contextPocExact(value, ['projectToken', 'cursor', 'limit'])
+      || typeof value.projectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)) {
+    throw new Error('项目概览请求无效');
+  }
+  const page = contextPocWorkspaceFilePageInput({
+    cursor: value.cursor,
+    limit: value.limit
+  }, 4);
+  if (page.cursor > 64) throw new Error('项目概览游标无效');
+  return Object.freeze({ projectToken: value.projectToken, ...page });
+}
+
 function contextPocWorkspaceFileTopicInput(value) {
   if (!contextPocExact(value, ['projectToken', 'field', 'value'])
       || typeof value.projectToken !== 'string'
@@ -5989,8 +6009,8 @@ function contextPocWorkspaceCatalogCard(value) {
     status: safeText(value.status, '', 48) || null,
     updated: safeText(value.updated, '', 64) || null,
     decision: safeText(value.decision, '', 160) || null,
-    angle: safeText(value.angle, '', 120) || null,
-    hook: safeText(value.hook, '', 160) || null,
+    angle: safeText(value.angle, '', 240) || null,
+    hook: safeText(value.hook, '', 240) || null,
     angleOptions: cleanList(value.angles),
     hookOptions: cleanList(value.hooks),
     canShoot: value.canShoot === true,
@@ -6064,11 +6084,79 @@ function contextPocWorkspaceDocumentResult(value) {
   });
 }
 
-function contextPocWorkspaceMutationResult(value) {
-  if (!contextPocExact(value, ['kind', 'changed', 'projectToken', 'message'])
-      || value.kind !== 'mutation' || value.changed !== true
+function contextPocWorkspaceOverviewResult(value) {
+  if (!contextPocExact(value, [
+    'kind', 'contentRef', 'projectToken', 'title', 'stage', 'stageLabel',
+    'status', 'updated', 'decision', 'angle', 'hook', 'candidateCount',
+    'cursor', 'nextCursor', 'candidates'
+  ]) || value.kind !== 'overview'
+      || typeof value.contentRef !== 'string'
+      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
       || typeof value.projectToken !== 'string'
       || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
+      || !Number.isSafeInteger(value.candidateCount)
+      || value.candidateCount < 0 || value.candidateCount > 64
+      || !Number.isSafeInteger(value.cursor) || value.cursor < 0 || value.cursor > 64
+      || !Array.isArray(value.candidates) || value.candidates.length > 4
+      || value.cursor + value.candidates.length > value.candidateCount) {
+    throw new Error('项目概览投影无效');
+  }
+  const expectedNext = value.cursor + value.candidates.length < value.candidateCount
+    ? value.cursor + value.candidates.length : null;
+  if (value.nextCursor !== expectedNext) throw new Error('项目概览分页投影无效');
+  const candidates = value.candidates.map((candidate) => {
+    if (!contextPocExact(candidate, ['field', 'value', 'selected'])
+        || !['angle', 'hook'].includes(candidate.field)
+        || typeof candidate.value !== 'string' || !candidate.value.trim()
+        || candidate.value.length > 240
+        || /[\u0000-\u001f\u007f]/.test(candidate.value)
+        || typeof candidate.selected !== 'boolean') {
+      throw new Error('项目概览候选投影无效');
+    }
+    return Object.freeze({
+      field: candidate.field,
+      value: candidate.value,
+      selected: candidate.selected
+    });
+  });
+  const nullableText = (input, maximum) => (
+    input === null ? null : safeText(input, '', maximum) || null
+  );
+  return Object.freeze({
+    kind: 'overview',
+    contentRef: value.contentRef,
+    projectToken: value.projectToken,
+    title: safeText(value.title, '未命名项目', 120),
+    stage: Object.prototype.hasOwnProperty.call(VIDEO_STAGE_LABELS, value.stage)
+      ? value.stage : null,
+    stageLabel: safeText(value.stageLabel, '未分类', 24),
+    status: nullableText(value.status, 48),
+    updated: nullableText(value.updated, 64),
+    decision: nullableText(value.decision, 160),
+    angle: nullableText(value.angle, 240),
+    hook: nullableText(value.hook, 240),
+    candidateCount: value.candidateCount,
+    cursor: value.cursor,
+    nextCursor: value.nextCursor,
+    candidates: Object.freeze(candidates)
+  });
+}
+
+function contextPocWorkspaceMutationResult(value) {
+  if (!contextPocExact(value, [
+    'kind', 'changed', 'contentRef', 'projectToken', 'field', 'value',
+    'updated', 'message'
+  ])
+      || value.kind !== 'mutation' || value.changed !== true
+      || typeof value.contentRef !== 'string'
+      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
+      || typeof value.projectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
+      || !['angle', 'hook'].includes(value.field)
+      || typeof value.value !== 'string' || !value.value.trim()
+      || value.value.length > 240 || /[\u0000-\u001f\u007f]/.test(value.value)
+      || typeof value.updated !== 'string' || !value.updated
+      || value.updated.length > 64 || /[\u0000-\u001f\u007f]/.test(value.updated)
       || typeof value.message !== 'string' || !value.message
       || [...value.message].length > 160) throw new Error('写回结果投影无效');
   return Object.freeze({ ...value });
@@ -6222,9 +6310,11 @@ function contextPocWorkspaceReceiptOpenResult(value) {
 function contextPocWorkspaceOperationErrorCode(error) {
   const code = error && error.code;
   if (code === 'ERR_WORKSPACE_UNAVAILABLE') return 'workspace-unavailable';
+  if (code === 'ERR_OPERATION_OUTCOME_UNKNOWN') return 'outcome-unknown';
   if (['ERR_WORKSPACE_BINDING_STALE', 'ERR_VIDEO_RUNTIME_STALE',
     'ERR_VIDEO_ROOT_CHANGED', 'ERR_CAS_MISMATCH',
-    'ERR_PATH_CHANGED', 'ERR_PATH_NOT_FOUND'].includes(code)) return 'operation-stale';
+    'ERR_PATH_CHANGED', 'ERR_PATH_NOT_FOUND',
+    'ERR_CONTEXT_PROJECT_STALE'].includes(code)) return 'operation-stale';
   return 'operation-failed';
 }
 
@@ -6262,6 +6352,24 @@ function contextPocWorkspaceFileOperations(options = {}) {
     return snapshot;
   });
   const document = options.document || videoDocumentSurface;
+  const overview = options.overview || ((projectToken) => {
+    const { runtime, record, document: source } = readVideoDocumentByToken(projectToken);
+    const fields = isPlainObject(source.fields) ? source.fields : {};
+    return {
+      contentRef: videoContentRef(runtime.epoch, record.relativePath),
+      projectToken,
+      title: source.title,
+      stage: source.stage,
+      stageLabel: VIDEO_STAGE_LABELS[source.stage] || '未分类',
+      status: typeof fields.status === 'string' ? fields.status : null,
+      updated: typeof fields.updated === 'string' ? fields.updated : null,
+      decision: typeof fields.decision === 'string' ? fields.decision : null,
+      angle: typeof fields.angle === 'string' ? fields.angle : null,
+      hook: typeof fields.hook === 'string' ? fields.hook : null,
+      angles: Array.isArray(fields.angles) ? fields.angles : [],
+      hooks: Array.isArray(fields.hooks) ? fields.hooks : []
+    };
+  });
   const chooseTopic = options.chooseTopic || ((input) => runVideoSceneAction({
     action: 'choose-topic', ...input
   }));
@@ -6344,13 +6452,121 @@ function contextPocWorkspaceFileOperations(options = {}) {
       redact: contextPocWorkspaceDocumentResult,
       errorCode: contextPocWorkspaceOperationErrorCode
     }),
+    'overview.read': Object.freeze({
+      validate: contextPocWorkspaceFileOverviewInput,
+      async handle({ input, context }) {
+        contextPocAssertWorkspaceOperationCurrent(context);
+        const surface = overview(input.projectToken);
+        if (!isPlainObject(surface) || surface.projectToken !== input.projectToken
+            || typeof surface.contentRef !== 'string'
+            || !/^content-[a-f0-9]{24}$/.test(surface.contentRef)) {
+          const error = new Error('项目概览身份已变化');
+          error.code = 'ERR_CONTEXT_PROJECT_STALE';
+          throw error;
+        }
+        const angles = Array.isArray(surface && surface.angles) ? surface.angles : [];
+        const hooks = Array.isArray(surface && surface.hooks) ? surface.hooks : [];
+        const candidates = [
+          ...angles.map((value) => ({
+            field: 'angle', value, selected: value === surface.angle
+          })),
+          ...hooks.map((value) => ({
+            field: 'hook', value, selected: value === surface.hook
+          }))
+        ];
+        if (candidates.length > 64 || input.cursor > candidates.length) {
+          const error = new Error('项目概览候选页已变化');
+          error.code = 'ERR_CONTEXT_PROJECT_STALE';
+          throw error;
+        }
+        const page = [];
+        for (let cursor = input.cursor;
+          cursor < candidates.length && page.length < input.limit; cursor += 1) {
+          const candidate = [...page, candidates[cursor]];
+          const projected = contextPocWorkspaceOverviewResult({
+            kind: 'overview',
+            contentRef: surface.contentRef,
+            projectToken: surface.projectToken,
+            title: surface.title,
+            stage: surface.stage,
+            stageLabel: surface.stageLabel,
+            status: surface.status,
+            updated: surface.updated,
+            decision: surface.decision,
+            angle: surface.angle,
+            hook: surface.hook,
+            candidateCount: candidates.length,
+            cursor: input.cursor,
+            nextCursor: input.cursor + candidate.length < candidates.length
+              ? input.cursor + candidate.length : null,
+            candidates: candidate
+          });
+          if (Buffer.byteLength(JSON.stringify(projected), 'utf8') > 5600 && page.length) break;
+          page.push(candidates[cursor]);
+        }
+        const next = input.cursor + page.length;
+        return {
+          kind: 'overview',
+          contentRef: surface.contentRef,
+          projectToken: surface.projectToken,
+          title: surface.title,
+          stage: surface.stage,
+          stageLabel: surface.stageLabel,
+          status: surface.status,
+          updated: surface.updated,
+          decision: surface.decision,
+          angle: surface.angle,
+          hook: surface.hook,
+          candidateCount: candidates.length,
+          cursor: input.cursor,
+          nextCursor: next < candidates.length ? next : null,
+          candidates: page
+        };
+      },
+      redact: contextPocWorkspaceOverviewResult,
+      errorCode: contextPocWorkspaceOperationErrorCode
+    }),
     'topic.choose': Object.freeze({
       validate: contextPocWorkspaceFileTopicInput,
       async handle({ input, context }) {
         contextPocAssertWorkspaceOperationCurrent(context);
+        const before = catalog();
+        const current = Array.isArray(before && before.projects)
+          ? before.projects.find((project) => project.projectToken === input.projectToken)
+          : null;
+        if (!current || typeof current.contentRef !== 'string'
+            || !/^content-[a-f0-9]{24}$/.test(current.contentRef)) {
+          const error = new Error('这张项目卡已过期，请重新选择');
+          error.code = 'ERR_CONTEXT_PROJECT_STALE';
+          throw error;
+        }
         const result = await chooseTopic(input);
+        let after;
+        try { after = catalog(); }
+        catch (_error) {
+          const error = new Error('写回已执行，但刷新后的项目身份无法确认');
+          error.code = 'ERR_OPERATION_OUTCOME_UNKNOWN';
+          throw error;
+        }
+        const replacement = Array.isArray(after && after.projects)
+          ? after.projects.find((project) => project.contentRef === current.contentRef)
+          : null;
+        if (!replacement || typeof replacement.projectToken !== 'string'
+            || !/^project-[a-f0-9]{24}$/.test(replacement.projectToken)
+            || replacement.projectToken === input.projectToken
+            || replacement[input.field] !== input.value
+            || typeof replacement.updated !== 'string' || !replacement.updated) {
+          const error = new Error('写回已执行，但刷新后的项目身份无法确认');
+          error.code = 'ERR_OPERATION_OUTCOME_UNKNOWN';
+          throw error;
+        }
         return {
-          kind: 'mutation', changed: true, projectToken: input.projectToken,
+          kind: 'mutation', changed: true,
+          contentRef: current.contentRef,
+          projectToken: replacement.projectToken,
+          field: input.field,
+          value: input.value,
+          updated: safeText(replacement.updated, '', 64),
           message: safeText(result && result.text, '已写回项目文件。', 160)
         };
       },

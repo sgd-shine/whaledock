@@ -988,8 +988,9 @@ async function mainTest() {
       openReceipt: async (input) => { calls.push(['openReceipt', input]); return { kind: 'ok' }; }
     });
     assert.deepEqual(Object.keys(ops).sort(), [
-      'catalog.read', 'document.read', 'project.action.prepare', 'project.action.submit',
-      'receipts.ack', 'receipts.open', 'receipts.read', 'topic.choose'
+      'catalog.read', 'document.read', 'overview.read', 'project.action.prepare',
+      'project.action.submit', 'receipts.ack', 'receipts.open', 'receipts.read',
+      'topic.choose'
     ]);
     const mainSource = source('main.js');
     assert.equal((mainSource.match(
@@ -1175,6 +1176,269 @@ async function mainTest() {
       input: { resultToken }, context: staleContext
     }));
     assert.equal(staleSideEffects, 0, '换绑后不得进入预检/提交/回执副作用');
+  });
+
+  await test('概览分页返回完整候选，连续拍板只接受刷新后的项目身份', async () => {
+    const mainSource = source('main.js');
+    assert.match(mainSource,
+      /function videoProjectCard[\s\S]*?angle: safeText\(fields\.angle, '', 240\)/,
+      '生产 catalog 不得截短 overview 已接受的 240 字角度');
+    assert.match(mainSource,
+      /function readVideoDocumentByToken[\s\S]*?error\.code = 'ERR_CONTEXT_PROJECT_STALE'[\s\S]*?error\.code = 'ERR_CONTEXT_PROJECT_STALE'/,
+      '缺 token 与 hash 变化都必须按 stale 映射');
+    const contentRef = `content-${'7'.repeat(24)}`;
+    const siblingContentRef = `content-${'8'.repeat(24)}`;
+    const angles = Array.from({ length: 32 }, (_unused, index) => (
+      `角度 ${String(index + 1).padStart(2, '0')} · ${'真实候选'.repeat(12)}`
+    ));
+    const hooks = Array.from({ length: 32 }, (_unused, index) => (
+      `钩子 ${String(index + 1).padStart(2, '0')} · ${'不编造'.repeat(12)}`
+    ));
+    const versions = [
+      `project-${'3'.repeat(24)}`,
+      `project-${'4'.repeat(24)}`,
+      `project-${'5'.repeat(24)}`
+    ];
+    let version = 0;
+    let selectedAngle = angles[0];
+    let selectedHook = hooks[0];
+    let updated = '2026-08-25T12:00:00.000Z';
+    let chooseCalls = 0;
+    const siblingToken = `project-${'6'.repeat(24)}`;
+    const catalog = () => ({
+      generation: 21 + version,
+      projects: [{
+        projectToken: versions[version], contentRef,
+        title: '同名项目', stage: 'topic', stageLabel: '选题',
+        status: 'needs-decision', updated, decision: '只用真实候选',
+        angle: selectedAngle, hook: selectedHook,
+        angles: angles.slice(0, 8), hooks: hooks.slice(0, 8),
+        canShoot: false, publish: null, actions: []
+      }, {
+        projectToken: siblingToken, contentRef: siblingContentRef,
+        title: '同名项目', stage: 'topic', stageLabel: '选题',
+        status: 'needs-decision', updated: '2026-08-25T11:00:00.000Z',
+        decision: null, angle: '另一个文件的角度', hook: '另一个文件的钩子',
+        angles: [], hooks: [], canShoot: false, publish: null, actions: []
+      }]
+    });
+    const overview = (projectToken) => {
+      if (projectToken !== versions[version]) {
+        const error = new Error('这张项目卡已过期');
+        error.code = 'ERR_CONTEXT_PROJECT_STALE';
+        throw error;
+      }
+      return {
+        contentRef, projectToken, title: '同名项目', stage: 'topic', stageLabel: '选题',
+        status: 'needs-decision', updated, decision: '只用真实候选',
+        angle: selectedAngle, hook: selectedHook, angles, hooks,
+        absolutePath: '/private/同名项目.md', hash: 'a'.repeat(64),
+        rawPrompt: 'SECRET OVERVIEW PROMPT'
+      };
+    };
+    const chooseTopic = async (input) => {
+      chooseCalls += 1;
+      assert.equal(input.projectToken, versions[version]);
+      if (input.field === 'angle') selectedAngle = input.value;
+      else selectedHook = input.value;
+      version += 1;
+      updated = `2026-08-25T12:00:0${version}.000Z`;
+      return { kind: 'ok', text: `已写回${input.field}` };
+    };
+    const ops = main.contextPocWorkspaceFileOperations({ catalog, overview, chooseTopic });
+    const current = { assertCurrent: () => true };
+
+    assert.deepEqual(ops['overview.read'].validate({
+      projectToken: versions[0], cursor: 0, limit: 4
+    }), { projectToken: versions[0], cursor: 0, limit: 4 });
+    for (const invalid of [
+      { projectToken: versions[0] },
+      { projectToken: versions[0], cursor: 0 },
+      { projectToken: versions[0], cursor: 0, limit: 5 },
+      { projectToken: versions[0], cursor: 65, limit: 4 },
+      { projectToken: versions[0], cursor: 0, limit: 4, path: '/private/leak' },
+      { projectToken: 'project-not-opaque', cursor: 0, limit: 4 }
+    ]) assert.throws(() => ops['overview.read'].validate(invalid));
+
+    const received = [];
+    let cursor = 0;
+    let pageCount = 0;
+    do {
+      const raw = await ops['overview.read'].handle({
+        input: { projectToken: versions[0], cursor, limit: 4 }, context: current
+      });
+      const page = ops['overview.read'].redact(raw);
+      pageCount += 1;
+      assert.equal(page.candidateCount, 64);
+      assert.equal(page.cursor, cursor);
+      assert.equal(page.candidates.length, 4);
+      assert.equal(Buffer.byteLength(JSON.stringify(page), 'utf8') <= 5600, true);
+      assert.doesNotMatch(JSON.stringify(page),
+        /(?:absolutePath|relativePath|hash|sessionRef|rawPrompt|SECRET)/);
+      received.push(...page.candidates);
+      cursor = page.nextCursor;
+    } while (cursor !== null && pageCount <= 16);
+    assert.equal(pageCount, 16);
+    assert.equal(received.length, 64);
+    assert.deepEqual(received.slice(0, 32).map((candidate) => candidate.field),
+      Array(32).fill('angle'));
+    assert.deepEqual(received.slice(32).map((candidate) => candidate.field),
+      Array(32).fill('hook'));
+    assert.deepEqual(received.map((candidate) => candidate.value), [...angles, ...hooks]);
+    assert.equal(received[0].selected, true);
+    assert.equal(received[32].selected, true);
+    assert.throws(() => ops['overview.read'].redact({
+      kind: 'overview', contentRef, projectToken: versions[0], title: '项目',
+      stage: 'topic', stageLabel: '选题', status: null, updated: null,
+      decision: null, angle: null, hook: null, candidateCount: 1,
+      cursor: 0, nextCursor: null,
+      candidates: [{ field: 'angle', value: angles[0], selected: false, hash: 'x' }]
+    }));
+
+    const angleInput = {
+      projectToken: versions[0], field: 'angle', value: angles[17]
+    };
+    const angleRaw = await ops['topic.choose'].handle({ input: angleInput, context: current });
+    const angleResult = ops['topic.choose'].redact(angleRaw);
+    assert.deepEqual(angleResult, {
+      kind: 'mutation', changed: true, contentRef,
+      projectToken: versions[1], field: 'angle', value: angles[17],
+      updated: '2026-08-25T12:00:01.000Z', message: '已写回angle'
+    });
+    assert.notEqual(angleResult.projectToken, angleInput.projectToken,
+      '拍板后必须返回刷新快照里的 replacement token');
+    assert.throws(() => ops['topic.choose'].redact({
+      ...angleRaw, relativePath: '01_选题库/同名项目.md'
+    }));
+    assert.throws(() => ops['topic.choose'].validate({
+      ...angleInput, value: `${angles[17]}\n越权`
+    }));
+    assert.throws(() => ops['topic.choose'].validate({ ...angleInput, extra: true }));
+
+    const hookInput = {
+      projectToken: angleResult.projectToken, field: 'hook', value: hooks[23]
+    };
+    const hookRaw = await ops['topic.choose'].handle({ input: hookInput, context: current });
+    const hookResult = ops['topic.choose'].redact(hookRaw);
+    assert.deepEqual(hookResult, {
+      kind: 'mutation', changed: true, contentRef,
+      projectToken: versions[2], field: 'hook', value: hooks[23],
+      updated: '2026-08-25T12:00:02.000Z', message: '已写回hook'
+    });
+    assert.equal(hookResult.contentRef, angleResult.contentRef,
+      '同一文件连续写回必须保留稳定 contentRef');
+    assert.equal(catalog().projects[1].projectToken, siblingToken,
+      '同名文件必须保持独立身份，不能按标题误命中');
+    assert.equal(catalog().projects[1].angle, '另一个文件的角度');
+
+    const longAngle = '长角度'.repeat(66) + '收';
+    assert.equal(Array.from(longAngle).length, 199);
+    const longTokens = [`project-${'a'.repeat(24)}`, `project-${'b'.repeat(24)}`];
+    const longContentRef = `content-${'c'.repeat(24)}`;
+    let longVersion = 0;
+    let longSelected = null;
+    const longOps = main.contextPocWorkspaceFileOperations({
+      catalog: () => ({
+        generation: longVersion,
+        projects: [{
+          projectToken: longTokens[longVersion], contentRef: longContentRef,
+          angle: longSelected, updated: `2026-08-25T13:00:0${longVersion}.000Z`
+        }]
+      }),
+      chooseTopic: async (input) => {
+        longSelected = input.value;
+        longVersion = 1;
+        return { text: '长角度已完整写回' };
+      }
+    });
+    const longResult = longOps['topic.choose'].redact(await longOps['topic.choose'].handle({
+      input: { projectToken: longTokens[0], field: 'angle', value: longAngle },
+      context: current
+    }));
+    assert.equal(longResult.projectToken, longTokens[1]);
+    assert.equal(longResult.value, longAngle);
+    assert.equal(Array.from(longResult.value).length, 199,
+      '161–240 字的合法角度不得在写后确认时被截短');
+
+    const sameToken = `project-${'d'.repeat(24)}`;
+    const sameContentRef = `content-${'e'.repeat(24)}`;
+    let sameSelected = angles[0];
+    const sameTokenOps = main.contextPocWorkspaceFileOperations({
+      catalog: () => ({ generation: 1, projects: [{
+        projectToken: sameToken, contentRef: sameContentRef,
+        angle: sameSelected, updated: '2026-08-25T13:30:00.000Z'
+      }] }),
+      chooseTopic: async (input) => {
+        sameSelected = input.value;
+        return { text: '底层声称成功但身份没轮换' };
+      }
+    });
+    let sameTokenError;
+    try {
+      await sameTokenOps['topic.choose'].handle({
+        input: { projectToken: sameToken, field: 'angle', value: angles[2] },
+        context: current
+      });
+    } catch (error) { sameTokenError = error; }
+    assert.equal(sameTokenOps['topic.choose'].errorCode(sameTokenError), 'outcome-unknown',
+      '写后仍是旧 token 时主进程不得返回成功 mutation');
+
+    let staleError;
+    try {
+      await ops['topic.choose'].handle({ input: angleInput, context: current });
+    } catch (error) { staleError = error; }
+    assert.equal(ops['topic.choose'].errorCode(staleError), 'operation-stale');
+    assert.equal(chooseCalls, 2, '旧 token 必须在任何写回动作前被拒绝');
+
+    let staleSideEffects = 0;
+    const staleOps = main.contextPocWorkspaceFileOperations({
+      catalog: () => { staleSideEffects += 1; return catalog(); },
+      overview: () => { staleSideEffects += 1; return overview(versions[2]); },
+      chooseTopic: async () => { staleSideEffects += 1; return { text: '不应执行' }; }
+    });
+    const staleContext = { assertCurrent: () => false };
+    await assert.rejects(staleOps['overview.read'].handle({
+      input: { projectToken: versions[2], cursor: 0, limit: 4 }, context: staleContext
+    }));
+    await assert.rejects(staleOps['topic.choose'].handle({
+      input: { projectToken: versions[2], field: 'hook', value: hooks[1] },
+      context: staleContext
+    }));
+    assert.equal(staleSideEffects, 0, '换绑后不得读取概览或进入拍板写回');
+
+    const casOps = main.contextPocWorkspaceFileOperations({
+      catalog,
+      chooseTopic: async () => {
+        const error = new Error('文件已变化');
+        error.code = 'ERR_CAS_MISMATCH';
+        throw error;
+      }
+    });
+    let casError;
+    try {
+      await casOps['topic.choose'].handle({
+        input: { projectToken: versions[2], field: 'hook', value: hooks[1] },
+        context: current
+      });
+    } catch (error) { casError = error; }
+    assert.equal(casOps['topic.choose'].errorCode(casError), 'operation-stale');
+
+    const uncertainOps = main.contextPocWorkspaceFileOperations({
+      catalog: (() => {
+        let reads = 0;
+        return () => (++reads === 1 ? catalog() : { generation: 99, projects: [] });
+      })(),
+      chooseTopic: async () => ({ text: '已执行但刷新失败' })
+    });
+    let uncertainError;
+    try {
+      await uncertainOps['topic.choose'].handle({
+        input: { projectToken: versions[2], field: 'hook', value: hooks[2] },
+        context: current
+      });
+    } catch (error) { uncertainError = error; }
+    assert.equal(uncertainOps['topic.choose'].errorCode(uncertainError), 'outcome-unknown',
+      '写回返回后无法取得 replacement token 时不得诱导自动重试');
   });
 
   await test('shell 公开面按当前 sessionRef 投影，不泄露 ref、路径或标题', async () => {
