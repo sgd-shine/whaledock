@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('assert/strict');
-const { createHmac } = require('crypto');
+const { createHash, createHmac } = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -29,6 +29,16 @@ function bridgeHmac(secret, label, clientNonce, hostInstanceId) {
 
 function rpcSession(secret, clientNonce, hostInstanceId) {
   return bridgeHmac(secret, 'rpc-session', clientNonce, hostInstanceId);
+}
+
+function projectIdForCwd(cwd) {
+  let normalized = cwd.replace(/\\/g, '/');
+  while (normalized.length > 1 && normalized.endsWith('/')
+      && !/^[A-Za-z]:\/$/.test(normalized)) normalized = normalized.slice(0, -1);
+  const digest = createHash('sha256')
+    .update(`whaledock-project/v1\0${normalized}\0.`)
+    .digest('hex');
+  return `wdp1_${digest.slice(0, 32)}`;
 }
 
 function handshakeRequest(clientNonce, secret = BRIDGE_TOKEN) {
@@ -179,6 +189,8 @@ async function main() {
     let gateDisposed = false;
     let preferences = null;
     let preferencesDisposed = false;
+    let workspaceFiles = null;
+    let workspaceFilesDisposed = false;
     let contentShell = null;
     let contentShellDisposed = false;
     let registerCalls = 0;
@@ -189,6 +201,10 @@ async function main() {
       contentViewHintSeen: false
     };
     let preferenceWriteHandler = null;
+    let workspaceRequestSeq = 0;
+    let loseWorkspaceAdmissionReply = false;
+    let workspaceStatusHandler = null;
+    let workspaceRealm = (value) => value;
     const preferenceProtocolEvents = [];
     const connection = {
       isLoopback: true,
@@ -204,6 +220,11 @@ async function main() {
                 selectionRevision: 5
               }
             };
+          }
+          if (endpoint === 'selection/register') {
+            return { ok: true, value: {
+              state: 'selected', code: null, selectionRevision: payload.selectionRevision
+            } };
           }
           if (endpoint === 'ui/preferences/get') {
             if (failPreferenceGet) throw new Error('preference fixture unavailable');
@@ -222,6 +243,38 @@ async function main() {
                 contentViewHintSeen: false
               }
             } };
+          }
+          if (endpoint === 'workspace/files/request') {
+            workspaceRequestSeq += 1;
+            if (loseWorkspaceAdmissionReply) throw new Error('admission reply lost');
+            return workspaceRealm({ ok: true, value: {
+              accepted: true,
+              requestToken: workspaceRequestSeq.toString(16).padStart(64, '0'),
+              state: 'queued',
+              code: null,
+              deadlineMs: Date.now() + 10000
+            } });
+          }
+          if (endpoint === 'workspace/files/status') {
+            if (workspaceStatusHandler) return workspaceStatusHandler(payload);
+            return workspaceRealm({ ok: true, value: {
+              requestToken: payload.requestToken,
+              state: 'queued',
+              code: null,
+              result: null
+            } });
+          }
+          if (endpoint === 'workspace/files/cancel') {
+            return workspaceRealm({ ok: true, value: {
+              cancelled: true,
+              code: 'cancelled',
+              snapshot: {
+                requestToken: payload.requestToken,
+                state: 'cancelled',
+                code: 'cancelled',
+                result: null
+              }
+            } });
           }
           return { ok: true, value: {} };
         }
@@ -247,6 +300,10 @@ async function main() {
           if (name === 'whaledockShellPreferences') {
             preferences = value;
             return () => { preferencesDisposed = true; };
+          }
+          if (name === 'whaledockWorkspaceFiles') {
+            workspaceFiles = value;
+            return () => { workspaceFilesDisposed = true; };
           }
           assert.equal(name, 'whaledockContentShell');
           contentShell = value;
@@ -404,10 +461,87 @@ async function main() {
     assert.equal(contentShell.contract, 'whaledock.content-shell/v1');
     assert.equal(typeof contentShell.Component, 'function');
     assert.equal(contentShell.preferences, preferences);
+    assert.equal(contentShell.workspaceFiles, workspaceFiles);
+    // 前半段历史 fixture 显式注入了外层 Object；文件协议会构造
+    // 安全深拷贝，这里切回浏览器实际的同 realm Object/response。
+    delete sandbox.Object;
+    workspaceRealm = (value) => vm.runInNewContext(
+      `(${JSON.stringify(value)})`, sandbox
+    );
+    const workspaceInput = (source) => vm.runInNewContext(`(${source})`, sandbox);
+    const beforeInvalidWorkspaceCall = calls.length;
+    assert.deepEqual(JSON.parse(JSON.stringify(await workspaceFiles.request(
+      'catalog.read', workspaceInput("{ cwd: '/private/forbidden' }")
+    ))), {
+      accepted: false, requestToken: null, state: 'rejected',
+      code: 'operation-invalid', deadlineMs: null
+    });
+    assert.equal(calls.length, beforeInvalidWorkspaceCall,
+      'Client 禁止键必须在本地拒绝，不得进入 RPC');
+    assert.equal((await workspaceFiles.request(
+      'catalog.read', workspaceInput("{ Absolute_Path: '/private/forbidden' }")
+    )).code, 'operation-invalid', '禁止键大小写/分隔符变体也须本地拒绝');
+    const queued = await workspaceFiles.request('catalog.read', workspaceInput('{}'));
+    assert.equal(queued.accepted, true, JSON.stringify({ queued, calls: calls.slice(-3) }));
+    const workspaceRequestCall = calls.find((call) => (
+      call.endpoint === 'workspace/files/request'
+    ));
+    assert.deepEqual(Object.keys(workspaceRequestCall.payload).sort(), [
+      'contract', 'controllerId', 'controllerProof', 'input', 'operation',
+      'pageInstanceId', 'selectionRevision', 'selectionToken'
+    ]);
+    assert.equal(JSON.stringify(workspaceRequestCall.payload).includes('raw-session-b'), false);
+    loseWorkspaceAdmissionReply = true;
+    assert.deepEqual(JSON.parse(JSON.stringify(await workspaceFiles.request(
+      'catalog.read', workspaceInput('{}')
+    ))), {
+      accepted: false, requestToken: null, state: 'rejected',
+      code: 'outcome-unknown', deadlineMs: null
+    }, 'Host 可能已入队但响应丢失时不得伪报确定未执行');
+    loseWorkspaceAdmissionReply = false;
+    assert.deepEqual(JSON.parse(JSON.stringify(await workspaceFiles.status(
+      queued.requestToken
+    ))), {
+      requestToken: queued.requestToken, state: 'queued', code: null, result: null
+    });
+    assert.deepEqual(JSON.parse(JSON.stringify(await workspaceFiles.cancel(
+      queued.requestToken
+    ))), {
+      cancelled: true,
+      code: 'cancelled',
+      snapshot: {
+        requestToken: queued.requestToken,
+        state: 'cancelled',
+        code: 'cancelled',
+        result: null
+      }
+    });
+    workspaceStatusHandler = (payload) => workspaceRealm({ ok: true, value: {
+      requestToken: payload.requestToken,
+      state: 'fulfilled',
+      code: null,
+      result: { projects: [{ projectToken: 'project-safe', title: '可见项目' }] }
+    } });
+    const executed = await workspaceFiles.execute('catalog.read', workspaceInput('{}'));
+    assert.deepEqual(JSON.parse(JSON.stringify(executed)), {
+      requestToken: '3'.padStart(64, '0'),
+      state: 'fulfilled',
+      code: null,
+      result: { projects: [{ projectToken: 'project-safe', title: '可见项目' }] }
+    });
+    workspaceStatusHandler = (payload) => workspaceRealm({ ok: true, value: {
+      requestToken: payload.requestToken,
+      state: 'fulfilled',
+      code: null,
+      result: { cwd: '/private/leak' }
+    } });
+    assert.equal(await workspaceFiles.status(executed.requestToken), null,
+      'Client 不得接纳 Host 回包中的工作区绝对路径');
     dispose();
     assert.equal(timers.size, 0);
     assert.equal(gateDisposed, true);
     assert.equal(preferencesDisposed, true);
+    assert.equal(workspaceFilesDisposed, true);
     assert.equal(contentShellDisposed, true);
   });
 
@@ -912,6 +1046,375 @@ async function main() {
         baseRevision: 2,
         patch: { contentViewMode: 'invalid' }
       })).ok, false);
+    });
+
+    await test('workspace/files 同项目闭环不泄露路径，mismatch/cancel/越权全部 fail-closed', async () => {
+      let rpcHandler = null;
+      const workspaceCwd = '/Users/fixture/WhaleDock-Content';
+      const otherCwd = '/Users/fixture/Other-Project';
+      const rawSessionId = 'workspace-file-raw-session';
+      let currentCwd = workspaceCwd;
+      hostPlugin.apply({
+        connection: { rpc: { handle(_channel, handler) { rpcHandler = handler; } } },
+        sessions: {
+          get(id) {
+            return id === rawSessionId ? { header: { cwd: currentCwd } } : null;
+          }
+        },
+        systemPrompt: { context() {} },
+        on() {}
+      });
+      const clientNonce = '0b'.repeat(32);
+      const hello = await rpcHandler('handshake', handshakeRequest(clientNonce));
+      assert.equal(hello.ok, true);
+      assert.equal(hello.value.capabilities.includes('workspace-files-v1'), true);
+      const hostInstanceId = hello.value.hostInstanceId;
+      const authToken = rpcSession(BRIDGE_TOKEN, clientNonce, hostInstanceId);
+      const registration = selectionRequest({
+        contract: CONTRACT,
+        controllerId: 'controller-workspace1',
+        pageInstanceId: 'page-workspace000001',
+        selectionRevision: 1,
+        currentSessionId: rawSessionId,
+        managed: true
+      });
+      assert.equal((await rpcHandler('selection/register', registration)).value.state, 'selected');
+      const resolved = await rpcHandler('selection/resolve', {
+        contract: CONTRACT,
+        controllerId: registration.controllerId,
+        authToken
+      });
+      assert.match(resolved.value.sessionRef, /^session-[a-f0-9]{64}$/);
+      const stage = await rpcHandler('context/stage', {
+        controllerId: registration.controllerId,
+        pageInstanceId: registration.pageInstanceId,
+        selectionRevision: 1,
+        envelope: {
+          contract: CONTRACT,
+          clientInstanceId: 'client-workspace01',
+          hostInstanceId,
+          sessionRef: resolved.value.sessionRef,
+          revision: 1,
+          project: {
+            projectId: projectIdForCwd(workspaceCwd),
+            relativePath: '.',
+            workbenchId: 'builtin:video',
+            title: '内容工作区',
+            projectRevision: null
+          }
+        },
+        authToken
+      });
+      assert.equal(stage.value.state, 'effective');
+      const pageAuth = {
+        contract: CONTRACT,
+        controllerId: registration.controllerId,
+        pageInstanceId: registration.pageInstanceId,
+        selectionRevision: 1,
+        selectionToken: registration.selectionToken,
+        controllerProof: registration.controllerProof
+      };
+      const coreBefore = await rpcHandler('events/read', {
+        contract: CONTRACT, hostInstanceId, afterEventSeq: 0, authToken
+      });
+      const baselineEventSeq = coreBefore.value.throughEventSeq;
+
+      assert.equal((await rpcHandler('workspace/files/request', {
+        ...pageAuth,
+        operation: 'catalog.read',
+        input: {},
+        unexpected: true
+      })).ok, false, '未知字段不得被忽略');
+      assert.equal((await rpcHandler('workspace/files/request', {
+        ...pageAuth,
+        controllerProof: 'ff'.repeat(32),
+        operation: 'catalog.read',
+        input: {}
+      })).ok, false, '伪造页面 proof 不得入队');
+      assert.equal((await rpcHandler('workspace/files/request', {
+        ...pageAuth,
+        operation: 'document.read',
+        input: { absolutePath: '/private/forbidden.md' }
+      })).ok, false, '路径键不得穿过 Host 边界');
+      for (const input of [
+        { Absolute_Path: '/private/forbidden.md' },
+        { Front_Matter: { status: 'done' } },
+        { Hash: 'ab'.repeat(32) }
+      ]) {
+        assert.equal((await rpcHandler('workspace/files/request', {
+          ...pageAuth, operation: 'catalog.read', input
+        })).ok, false, '禁止键的大小写/分隔符变体也不得穿过 Host 边界');
+      }
+      assert.equal((await rpcHandler('workspace/files/request', {
+        ...pageAuth,
+        operation: 'document.read',
+        input: {
+          chunkA: 'a'.repeat(1500),
+          chunkB: 'b'.repeat(1500),
+          chunkC: 'c'.repeat(1500)
+        }
+      })).ok, false, '超过 4KiB 的输入不得入队');
+
+      const queued = await rpcHandler('workspace/files/request', {
+        ...pageAuth,
+        operation: 'catalog.read',
+        input: { cursor: 0 }
+      });
+      assert.deepEqual(Object.keys(queued.value).sort(), [
+        'accepted', 'code', 'deadlineMs', 'requestToken', 'state'
+      ]);
+      assert.equal(queued.value.accepted, true);
+      assert.match(queued.value.requestToken, /^[a-f0-9]{64}$/);
+      assert.equal(queued.value.deadlineMs > Date.now(), true);
+
+      assert.equal((await rpcHandler('workspace/files/read', {
+        contract: CONTRACT, hostInstanceId, limit: 4, authToken: '00'.repeat(32)
+      })).ok, false, '伪造 main auth 不得读取队列');
+      const read = await rpcHandler('workspace/files/read', {
+        contract: CONTRACT, hostInstanceId, limit: 4, authToken
+      });
+      assert.equal(read.value.requests.length, 1);
+      const request = read.value.requests[0];
+      assert.equal(request.requestToken, queued.value.requestToken);
+      assert.equal(request.projectId, projectIdForCwd(workspaceCwd));
+      assert.equal(request.contextRevision, 1);
+      assert.equal(request.operation, 'catalog.read');
+      assert.deepEqual(request.input, { cursor: 0 });
+      const requestText = JSON.stringify(request);
+      for (const forbidden of [
+        workspaceCwd, rawSessionId, resolved.value.sessionRef,
+        registration.selectionToken, registration.controllerProof,
+        'absolutePath', 'relativePath', 'cwd', 'claimToken'
+      ]) assert.equal(requestText.includes(forbidden), false, `main 请求泄露: ${forbidden}`);
+
+      assert.equal((await rpcHandler('workspace/files/claim', {
+        contract: CONTRACT,
+        hostInstanceId,
+        requestToken: request.requestToken,
+        requestSeq: request.requestSeq,
+        authToken: '00'.repeat(32)
+      })).ok, false);
+      const claimed = await rpcHandler('workspace/files/claim', {
+        contract: CONTRACT,
+        hostInstanceId,
+        requestToken: request.requestToken,
+        requestSeq: request.requestSeq,
+        authToken
+      });
+      assert.equal(claimed.value.claimed, true);
+      assert.match(claimed.value.claimToken, /^[a-f0-9]{64}$/);
+      assert.equal(claimed.value.runningDeadlineMs <= request.deadlineMs, true,
+        'claim 不能重置页面看到的绝对 deadline');
+      const runningCancel = await rpcHandler('workspace/files/cancel', {
+        ...pageAuth,
+        requestToken: request.requestToken
+      });
+      assert.equal(runningCancel.value.cancelled, false);
+      assert.equal(runningCancel.value.code, 'already-running');
+
+      const settleBase = {
+        contract: CONTRACT,
+        hostInstanceId,
+        requestToken: request.requestToken,
+        requestSeq: request.requestSeq,
+        claimToken: claimed.value.claimToken,
+        status: 'fulfilled',
+        code: null,
+        authToken
+      };
+      assert.equal((await rpcHandler('workspace/files/settle', {
+        ...settleBase,
+        result: { absolutePath: '/private/forbidden.md' }
+      })).ok, false, '结果中的绝对路径必须拒绝');
+      assert.equal((await rpcHandler('workspace/files/settle', {
+        ...settleBase,
+        result: {
+          chunkA: 'a'.repeat(2048),
+          chunkB: 'b'.repeat(2048),
+          chunkC: 'c'.repeat(2048)
+        }
+      })).ok, false, '超过 6KiB 的结果必须拒绝');
+      assert.deepEqual((await rpcHandler('workspace/files/settle', {
+        ...settleBase,
+        result: {
+          projects: [{ projectToken: 'project-safe', title: '可见项目' }],
+          count: 1
+        }
+      })).value, { settled: true, code: null });
+      const fulfilled = await rpcHandler('workspace/files/status', {
+        ...pageAuth,
+        requestToken: request.requestToken
+      });
+      assert.deepEqual(fulfilled.value, {
+        requestToken: request.requestToken,
+        state: 'fulfilled',
+        code: null,
+        result: {
+          projects: [{ projectToken: 'project-safe', title: '可见项目' }],
+          count: 1
+        }
+      });
+      assert.equal(JSON.stringify(fulfilled).includes(claimed.value.claimToken), false);
+      assert.equal((await rpcHandler('workspace/files/status', {
+        ...pageAuth,
+        pageInstanceId: 'page-workspace-forged',
+        requestToken: request.requestToken
+      })).ok, false, '其他页不得读取结果');
+
+      const cancelQueued = await rpcHandler('workspace/files/request', {
+        ...pageAuth,
+        operation: 'document.read',
+        input: { projectToken: 'project-safe' }
+      });
+      const cancelled = await rpcHandler('workspace/files/cancel', {
+        ...pageAuth,
+        requestToken: cancelQueued.value.requestToken
+      });
+      assert.equal(cancelled.value.cancelled, true);
+      assert.equal(cancelled.value.snapshot.state, 'cancelled');
+
+      currentCwd = otherCwd;
+      const mismatch = await rpcHandler('workspace/files/request', {
+        ...pageAuth,
+        operation: 'catalog.read',
+        input: {}
+      });
+      assert.deepEqual(mismatch.value, {
+        accepted: false,
+        requestToken: null,
+        state: 'rejected',
+        code: 'workspace-mismatch',
+        deadlineMs: null
+      });
+      const afterMismatch = await rpcHandler('workspace/files/read', {
+        contract: CONTRACT, hostInstanceId, limit: 4, authToken
+      });
+      assert.deepEqual(afterMismatch.value.requests, [],
+        '工作区 mismatch 必须零入队');
+      const coreAfter = await rpcHandler('events/read', {
+        contract: CONTRACT, hostInstanceId, afterEventSeq: 0, authToken
+      });
+      assert.equal(coreAfter.value.throughEventSeq, baselineEventSeq,
+        'workspace/files 不得占用 core journal 序号');
+    });
+
+    await test('workspace/files 在 A→B→A 后不可读取、取消或 claim 旧 selection 请求', async () => {
+      let rpcHandler = null;
+      const rawA = 'workspace-selection-raw-a';
+      const rawB = 'workspace-selection-raw-b';
+      const cwdA = '/Users/fixture/Workspace-A';
+      const cwdB = '/Users/fixture/Workspace-B';
+      hostPlugin.apply({
+        connection: { rpc: { handle(_channel, handler) { rpcHandler = handler; } } },
+        sessions: {
+          get(id) {
+            if (id === rawA) return { header: { cwd: cwdA } };
+            if (id === rawB) return { header: { cwd: cwdB } };
+            return null;
+          }
+        },
+        systemPrompt: { context() {} },
+        on() {}
+      });
+      const clientNonce = '1b'.repeat(32);
+      const hello = await rpcHandler('handshake', handshakeRequest(clientNonce));
+      const hostInstanceId = hello.value.hostInstanceId;
+      const authToken = rpcSession(BRIDGE_TOKEN, clientNonce, hostInstanceId);
+      const controllerId = 'controller-file-aba1';
+      const pageInstanceId = 'page-file-aba000001';
+      const select = async (raw, selectionRevision) => {
+        const registration = selectionRequest({
+          contract: CONTRACT, controllerId, pageInstanceId, selectionRevision,
+          currentSessionId: raw, managed: true
+        });
+        const registered = await rpcHandler('selection/register', registration);
+        assert.equal(registered.value.state, 'selected');
+        const resolved = await rpcHandler('selection/resolve', {
+          contract: CONTRACT, controllerId, authToken
+        });
+        return { registration, sessionRef: resolved.value.sessionRef };
+      };
+      const selectedA = await select(rawA, 1);
+      const stageA = await rpcHandler('context/stage', {
+        controllerId, pageInstanceId, selectionRevision: 1,
+        envelope: {
+          contract: CONTRACT,
+          clientInstanceId: 'client-file-aba001', hostInstanceId,
+          sessionRef: selectedA.sessionRef, revision: 1,
+          project: {
+            projectId: projectIdForCwd(cwdA), relativePath: '.',
+            workbenchId: 'builtin:video', title: 'A', projectRevision: null
+          }
+        },
+        authToken
+      });
+      assert.equal(stageA.value.state, 'effective');
+      const authFor = (selectionRevision) => ({
+        contract: CONTRACT, controllerId, pageInstanceId, selectionRevision,
+        selectionToken: selectedA.registration.selectionToken,
+        controllerProof: selectedA.registration.controllerProof
+      });
+      const contextStale = await rpcHandler('workspace/files/request', {
+        ...authFor(1), operation: 'catalog.read', input: {}
+      });
+      const firstRead = await rpcHandler('workspace/files/read', {
+        contract: CONTRACT, hostInstanceId, limit: 1, authToken
+      });
+      const contextStaleRequest = firstRead.value.requests[0];
+      assert.equal(contextStaleRequest.requestToken, contextStale.value.requestToken);
+      const stageA2 = await rpcHandler('context/stage', {
+        controllerId, pageInstanceId, selectionRevision: 1,
+        envelope: {
+          contract: CONTRACT,
+          clientInstanceId: 'client-file-aba001', hostInstanceId,
+          sessionRef: selectedA.sessionRef, revision: 2,
+          project: {
+            projectId: projectIdForCwd(cwdA), relativePath: '.',
+            workbenchId: 'builtin:video', title: 'A2', projectRevision: 'a'.repeat(64)
+          }
+        },
+        authToken
+      });
+      assert.equal(stageA2.value.state, 'effective');
+      assert.deepEqual((await rpcHandler('workspace/files/claim', {
+        contract: CONTRACT, hostInstanceId,
+        requestToken: contextStaleRequest.requestToken,
+        requestSeq: contextStaleRequest.requestSeq, authToken
+      })).value, { claimed: false, code: 'operation-stale' },
+      '同 selection 下 context revision 更新也必须淘汰旧请求');
+      assert.equal((await rpcHandler('workspace/files/status', {
+        ...authFor(1), requestToken: contextStaleRequest.requestToken
+      })).ok, false, '新 context 不得读取旧 context token');
+
+      const queued = await rpcHandler('workspace/files/request', {
+        ...authFor(1), operation: 'catalog.read', input: {}
+      });
+      const read = await rpcHandler('workspace/files/read', {
+        contract: CONTRACT, hostInstanceId, limit: 1, authToken
+      });
+      const oldRequest = read.value.requests[0];
+      assert.equal(oldRequest.requestToken, queued.value.requestToken);
+
+      await select(rawB, 2);
+      const staleClaim = await rpcHandler('workspace/files/claim', {
+        contract: CONTRACT, hostInstanceId,
+        requestToken: oldRequest.requestToken, requestSeq: oldRequest.requestSeq, authToken
+      });
+      assert.deepEqual(staleClaim.value, { claimed: false, code: 'operation-stale' });
+      assert.equal((await rpcHandler('workspace/files/status', {
+        ...authFor(1), requestToken: oldRequest.requestToken
+      })).ok, false, '旧 revision 不得读旧 token');
+      assert.equal((await rpcHandler('workspace/files/status', {
+        ...authFor(2), requestToken: oldRequest.requestToken
+      })).ok, false, '新 session 不得继承旧 token');
+
+      await select(rawA, 3);
+      assert.equal((await rpcHandler('workspace/files/status', {
+        ...authFor(3), requestToken: oldRequest.requestToken
+      })).ok, false, 'A 返回后也不得复活旧 token');
+      assert.equal((await rpcHandler('workspace/files/cancel', {
+        ...authFor(3), requestToken: oldRequest.requestToken
+      })).ok, false, 'A 返回后也不得取消旧 token');
     });
 
     await test('513 次偏好尝试不占 core journal，后续 ACK→turn→delivery→end 连续可回放', async () => {

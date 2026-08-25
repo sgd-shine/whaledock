@@ -1253,6 +1253,36 @@ async function main() {
       }
       assert.equal(Object.prototype.hasOwnProperty.call(preferenceSnapshot, 'authToken'), false);
 
+      await transport.call('workspace/files/read', {
+        contract: CONTEXT_BRIDGE_PROTOCOL,
+        hostInstanceId,
+        limit: 4
+      });
+      await transport.call('workspace/files/claim', {
+        contract: CONTEXT_BRIDGE_PROTOCOL,
+        hostInstanceId,
+        requestToken: 'ab'.repeat(32),
+        requestSeq: 1
+      });
+      await transport.call('workspace/files/settle', {
+        contract: CONTEXT_BRIDGE_PROTOCOL,
+        hostInstanceId,
+        requestToken: 'ab'.repeat(32),
+        requestSeq: 1,
+        claimToken: 'cd'.repeat(32),
+        status: 'rejected',
+        code: 'operation-stale',
+        result: null
+      });
+      const workspaceBodies = requestBodies.slice(5, 8);
+      assert.deepEqual(workspaceBodies.map((body) => body.method), [
+        'workspace/files/read', 'workspace/files/claim', 'workspace/files/settle'
+      ]);
+      assert.equal(workspaceBodies.every((body) => (
+        body.payload.authToken === expectedSessionToken
+          && JSON.stringify(body.payload).includes(secret) === false
+      )), true);
+
       await assert.rejects(() => transport.call('unknown', {}));
       await assert.rejects(() => transport.call('context/stage', {
         text: 'x'.repeat(backend.CONTEXT_POC_LIMITS.maxRequestBytes)

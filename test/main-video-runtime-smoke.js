@@ -18,6 +18,7 @@ const directoryIdentity = (target) => {
   const stat = fs.lstatSync(target);
   return { dev: stat.dev, ino: stat.ino };
 };
+const documentBinding = (root, relativePath) => cockpit.readDocument(root, relativePath).binding;
 let passed = 0;
 
 async function test(name, fn) {
@@ -96,6 +97,24 @@ async function run() {
     assert.notEqual(first, second);
     assert.equal(first, main.videoProposalRevisionToken(
       7, proposalToken, originalHash, cockpit.hashText('建议 A')
+    ));
+    const originalBinding = {
+      rootDev: '1', rootIno: '2', parentDev: '3', parentIno: '4', fileDev: '5', fileIno: '6'
+    };
+    const proposalBinding = {
+      rootDev: '1', rootIno: '2', parentDev: '7', parentIno: '8', fileDev: '9', fileIno: '10'
+    };
+    const bound = main.videoProposalRevisionToken(
+      7, proposalToken, originalHash, cockpit.hashText('建议 A'),
+      originalBinding, proposalBinding
+    );
+    assert.notEqual(bound, first);
+    assert.notEqual(bound, main.videoProposalRevisionToken(
+      7, proposalToken, originalHash, cockpit.hashText('建议 A'),
+      { ...originalBinding, fileIno: '11' }, proposalBinding
+    ));
+    assert.throws(() => main.videoProposalRevisionToken(
+      7, proposalToken, originalHash, cockpit.hashText('建议 A'), originalBinding
     ));
   });
 
@@ -176,6 +195,7 @@ async function run() {
       main.atomicReplaceVideoText(
         tmp, '02_脚本/稿.md', originalHash, '# 新稿\n', {
           rootIdentity,
+          expectedBinding: documentBinding(tmp, '02_脚本/稿.md'),
           afterBackupPreserved() {
             const delayed = Buffer.from('# 编辑器延迟写入\n');
             fs.ftruncateSync(delayedEditorFd, 0);
@@ -197,6 +217,7 @@ async function run() {
     assert.throws(() => main.atomicReplaceVideoText(
       tmp, '02_脚本/journal-所有权.md', cockpit.hashText('# 所有权原稿\n'), '# 不应写入\n', {
         rootIdentity,
+        expectedBinding: documentBinding(tmp, '02_脚本/journal-所有权.md'),
         beforeJournalOpen(journalPath) {
           collidedJournal = journalPath;
           fs.writeFileSync(journalPath, thirdPartyJournal, { flag: 'wx' });
@@ -211,12 +232,15 @@ async function run() {
 
     const copyTarget = path.join(tmp, '02_脚本', '复制回退.md');
     fs.writeFileSync(copyTarget, '# 复制原稿\n');
-    main.atomicReplaceVideoText(
+    const copyWrite = main.atomicReplaceVideoText(
       tmp, '02_脚本/复制回退.md', cockpit.hashText('# 复制原稿\n'), '# 复制新稿\n', {
-        rootIdentity, forceCopy: true
+        rootIdentity,
+        expectedBinding: documentBinding(tmp, '02_脚本/复制回退.md'),
+        forceCopy: true
       }
     );
     assert.equal(fs.readFileSync(copyTarget, 'utf8'), '# 复制新稿\n');
+    assert.deepEqual(copyWrite.binding, documentBinding(tmp, '02_脚本/复制回退.md'));
 
     const fsyncTarget = path.join(tmp, '02_脚本', 'fsync-故障.md');
     fs.writeFileSync(fsyncTarget, '# fsync 原稿\n');
@@ -225,6 +249,7 @@ async function run() {
       assert.throws(() => main.atomicReplaceVideoText(
         tmp, '02_脚本/fsync-故障.md', cockpit.hashText('# fsync 原稿\n'), '# fsync 新稿\n', {
           rootIdentity,
+          expectedBinding: documentBinding(tmp, '02_脚本/fsync-故障.md'),
           beforeBackup() {
             fs.fsyncSync = () => {
               fs.fsyncSync = realFsyncSync;
@@ -241,7 +266,9 @@ async function run() {
       .some((name) => name.startsWith('.whaledock-')), false);
 
     assert.throws(() => main.atomicReplaceVideoText(
-      tmp, '02_脚本/稿.md', originalHash, '# 不该写入\n', { rootIdentity }
+      tmp, '02_脚本/稿.md', originalHash, '# 不该写入\n', {
+        rootIdentity, expectedBinding: documentBinding(tmp, '02_脚本/稿.md')
+      }
     ));
     assert.equal(fs.readFileSync(target, 'utf8'), '# 新稿\n');
 
@@ -250,6 +277,7 @@ async function run() {
     assert.throws(() => main.atomicReplaceVideoText(
       tmp, '02_脚本/稿.md', cockpit.hashText('# 新稿\n'), '# 鲸坞不该覆盖\n', {
         rootIdentity,
+        expectedBinding: documentBinding(tmp, '02_脚本/稿.md'),
         beforeBackup(currentTarget) {
           // 在最后复验与提交之间模拟另一个编辑器换入新 inode。
           fs.unlinkSync(currentTarget);
@@ -260,6 +288,53 @@ async function run() {
     assert.equal(fs.readFileSync(target, 'utf8'), '# 外部并发稿\n');
     assert.equal(fs.readdirSync(path.dirname(target))
       .some((name) => name.startsWith('.whaledock-cas-')), false);
+
+    const sameHashTarget = path.join(tmp, '02_脚本', '同内容换实体.md');
+    const sameHashIncoming = path.join(tmp, '02_脚本', '同内容换实体-外部.md');
+    const sameHashText = '# 内容完全相同\n';
+    fs.writeFileSync(sameHashTarget, sameHashText);
+    const staleBinding = documentBinding(tmp, '02_脚本/同内容换实体.md');
+    fs.writeFileSync(sameHashIncoming, sameHashText);
+    fs.unlinkSync(sameHashTarget);
+    fs.renameSync(sameHashIncoming, sameHashTarget);
+    assert.throws(() => main.atomicReplaceVideoText(
+      tmp, '02_脚本/同内容换实体.md', cockpit.hashText(sameHashText), '# 不应覆盖同 hash 新实体\n', {
+        rootIdentity, expectedBinding: staleBinding
+      }
+    ), (error) => error && error.code === 'ERR_CAS_MISMATCH');
+    assert.equal(fs.readFileSync(sameHashTarget, 'utf8'), sameHashText);
+
+    const readRaceTarget = path.join(tmp, '02_脚本', '读取窗口换实体.md');
+    const readRaceIncoming = path.join(tmp, '02_脚本', '读取窗口换实体-外部.md');
+    fs.writeFileSync(readRaceTarget, sameHashText);
+    fs.writeFileSync(readRaceIncoming, sameHashText);
+    const readRaceBinding = documentBinding(tmp, '02_脚本/读取窗口换实体.md');
+    assert.throws(() => main.atomicReplaceVideoText(
+      tmp, '02_脚本/读取窗口换实体.md', cockpit.hashText(sameHashText), '# 不应覆盖读取窗口新实体\n', {
+        rootIdentity,
+        expectedBinding: readRaceBinding,
+        beforeBoundRead(currentTarget) {
+          fs.unlinkSync(currentTarget);
+          fs.renameSync(readRaceIncoming, currentTarget);
+        }
+      }
+    ), (error) => error && error.code === 'ERR_CAS_MISMATCH');
+    assert.equal(fs.readFileSync(readRaceTarget, 'utf8'), sameHashText);
+
+    const boundParent = path.join(tmp, '02_脚本', '绑定父目录');
+    const oldBoundParent = path.join(tmp, '02_脚本', '绑定父目录-旧');
+    fs.mkdirSync(boundParent);
+    fs.writeFileSync(path.join(boundParent, '稿.md'), sameHashText);
+    const staleParentBinding = documentBinding(tmp, '02_脚本/绑定父目录/稿.md');
+    fs.renameSync(boundParent, oldBoundParent);
+    fs.mkdirSync(boundParent);
+    fs.writeFileSync(path.join(boundParent, '稿.md'), sameHashText);
+    assert.throws(() => main.atomicReplaceVideoText(
+      tmp, '02_脚本/绑定父目录/稿.md', cockpit.hashText(sameHashText), '# 不应覆盖新父目录\n', {
+        rootIdentity, expectedBinding: staleParentBinding
+      }
+    ), (error) => error && error.code === 'ERR_CAS_MISMATCH');
+    assert.equal(fs.readFileSync(path.join(boundParent, '稿.md'), 'utf8'), sameHashText);
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -338,6 +413,7 @@ async function run() {
     assert.throws(() => main.atomicReplaceVideoText(
       root, '02_脚本/稿.md', cockpit.hashText('# 原工作区稿\n'), '# 鲸坞新稿\n', {
         rootIdentity,
+        expectedBinding: documentBinding(root, '02_脚本/稿.md'),
         beforeBackup() {
           fs.renameSync(root, oldRoot);
           fs.mkdirSync(path.join(root, '02_脚本'), { recursive: true });
@@ -359,6 +435,7 @@ async function run() {
       assert.throws(() => main.atomicReplaceVideoText(
         raceRoot, '02_脚本/稿.md', cockpit.hashText('# 竞态前原稿\n'), '# 鲸坞竞态新稿\n', {
           rootIdentity: directoryIdentity(raceRoot),
+          expectedBinding: documentBinding(raceRoot, '02_脚本/稿.md'),
           beforeBackup() {
             fs.renameSync = (sourcePath, destinationPath) => {
               fs.renameSync = realRenameSync;
@@ -419,6 +496,25 @@ async function run() {
     assert.match(ipcBlock, /拍摄操作没有完成；未确认写回成功/);
   });
 
+  await test('建议与撤销生产链绑定原稿、建议和采用后实体，不再路径直读', async () => {
+    const value = source('main.js');
+    const proposalSurfaceBlock = value.slice(
+      value.indexOf('function videoProposalSurface('),
+      value.indexOf('function videoTargetedActionPrompt(')
+    );
+    assert.match(proposalSurfaceBlock, /documents\.original\.binding/);
+    assert.match(proposalSurfaceBlock, /documents\.proposal\.binding/);
+    assert.match(proposalSurfaceBlock, /sameVideoFileBinding\(adopted\.binding, videoUndo\.adoptedBinding\)/);
+    assert.equal(/fs\.readFileSync|resolveWorkspaceFile/.test(proposalSurfaceBlock), false);
+    const decisionBlock = value.slice(
+      value.indexOf('function decideVideoProposal('),
+      value.indexOf('function shootingSurface(')
+    );
+    assert.match(decisionBlock, /expectedBinding: documents\.original\.binding/);
+    assert.match(decisionBlock, /adoptedBinding: adoptedWrite\.binding/);
+    assert.match(decisionBlock, /expectedBinding: videoUndo\.adoptedBinding/);
+  });
+
   await test('watcher 有固定目录、去抖/兜底与 root 实体复验，不复用空旧数据', async () => {
     const value = source('main.js');
     assert.match(value, /VIDEO_WATCH_DEBOUNCE_MS = 220/);
@@ -428,6 +524,7 @@ async function run() {
     assert.match(value, /String\(rootStat\.ino\) !== String\(runtime\.rootIdentity\.ino\)/);
     assert.match(value, /runtime\.projectTokens = new Map\(\)/);
     assert.match(value, /未使用旧数据/);
+    assert.match(value, /videoCockpit\.scanWorkspace\(runtime\.root, \{ expectedRootIdentity: runtime\.rootIdentity \}\)/);
     assert.equal(/executeJavaScript/.test(value), false);
   });
 

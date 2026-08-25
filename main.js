@@ -31,6 +31,7 @@ const remoteInbox = require('./lib/remote-inbox');
 const remoteSecureStore = require('./lib/remote-secure-store');
 const deliveryReceipts = require('./lib/delivery-receipts');
 const contextBridgeModel = require('./lib/context-bridge');
+const contextFileRpc = require('./lib/context-file-rpc');
 const log = require('./lib/log');
 const update = require('./lib/update');
 
@@ -72,6 +73,7 @@ const contextPocController = createContextPocController({
 let contextPocBridgeRuntime = null;
 let contextPocBridgeGeneration = 0;
 let contextPocPreferences = null;
+let contextPocWorkspaceFiles = null;
 const reportContextPocAvailability = createContextPocAvailabilityReporter((message) => {
   log.line('context', message);
 });
@@ -2798,15 +2800,46 @@ function videoToken(kind, epoch, ...parts) {
     .digest('hex').slice(0, 24)}`;
 }
 
-function videoProposalRevisionToken(epoch, proposalToken, originalHash, proposalHash) {
+const VIDEO_FILE_BINDING_KEYS = Object.freeze([
+  'rootDev', 'rootIno', 'parentDev', 'parentIno', 'fileDev', 'fileIno'
+]);
+
+function videoFileBindingKey(binding) {
+  if (!isPlainObject(binding)
+      || Object.keys(binding).length !== VIDEO_FILE_BINDING_KEYS.length
+      || VIDEO_FILE_BINDING_KEYS.some((key) => (
+        !Object.prototype.hasOwnProperty.call(binding, key)
+        || typeof binding[key] !== 'string'
+        || !/^\d+$/.test(binding[key])
+      ))) {
+    throw new Error('视频文件实体绑定无效');
+  }
+  return VIDEO_FILE_BINDING_KEYS.map((key) => binding[key]).join(':');
+}
+
+function sameVideoFileBinding(left, right) {
+  try { return videoFileBindingKey(left) === videoFileBindingKey(right); }
+  catch (_error) { return false; }
+}
+
+function videoProposalRevisionToken(
+  epoch, proposalToken, originalHash, proposalHash,
+  originalBinding = null, proposalBinding = null
+) {
   if (!Number.isSafeInteger(epoch) || epoch < 0
       || typeof proposalToken !== 'string'
       || !/^proposal-[A-Za-z0-9_-]{1,80}$/.test(proposalToken)
       || !/^[a-f0-9]{64}$/.test(String(originalHash || ''))
-      || !/^[a-f0-9]{64}$/.test(String(proposalHash || ''))) {
+      || !/^[a-f0-9]{64}$/.test(String(proposalHash || ''))
+      || ((originalBinding === null) !== (proposalBinding === null))) {
     throw new Error('建议版本 token 输入无效');
   }
-  return videoToken('proposal-revision', epoch, proposalToken, originalHash, proposalHash);
+  const bindings = originalBinding === null ? [] : [
+    videoFileBindingKey(originalBinding), videoFileBindingKey(proposalBinding)
+  ];
+  return videoToken(
+    'proposal-revision', epoch, proposalToken, originalHash, proposalHash, ...bindings
+  );
 }
 
 function videoWorkspaceRoot() {
@@ -2853,6 +2886,7 @@ function videoProjectCard(item, projectToken, active) {
     stage: Object.prototype.hasOwnProperty.call(VIDEO_STAGE_LABELS, item.stage) ? item.stage : null,
     stageLabel: VIDEO_STAGE_LABELS[item.stage] || '未分类',
     status: safeText(item.status, '', 48) || null,
+    updated: safeText(fields.updated, '', 64) || null,
     decision: safeText(item.decision, '', 240) || null,
     platforms: cleanList(fields.platforms),
     audience: safeText(fields.audience, '', 160) || null,
@@ -2940,7 +2974,7 @@ function refreshVideoWorkspaceSnapshot() {
   if (!runtime || runtime.closed) return null;
   try {
     assertVideoRuntimeIdentity(runtime);
-    const scanned = videoCockpit.scanWorkspace(runtime.root);
+    const scanned = videoCockpit.scanWorkspace(runtime.root, { expectedRootIdentity: runtime.rootIdentity });
     if (runtime.recoveryIssues.length) {
       scanned.issues.push(...runtime.recoveryIssues.map(() => ({
         relativePath: null, reason: 'cas-recovery-required'
@@ -4211,6 +4245,14 @@ function sameVideoCasIdentity(left, right) {
     && String(left.ino) === String(right.ino));
 }
 
+function videoCasPublicBinding(rootIdentity, parentIdentity, fileIdentity) {
+  return Object.freeze({
+    rootDev: String(rootIdentity.dev), rootIno: String(rootIdentity.ino),
+    parentDev: String(parentIdentity.dev), parentIno: String(parentIdentity.ino),
+    fileDev: String(fileIdentity.dev), fileIno: String(fileIdentity.ino)
+  });
+}
+
 function videoCasReadBounded(file, maxBytes) {
   const beforePath = fs.lstatSync(file, { bigint: true });
   if (beforePath.isSymbolicLink() || !beforePath.isFile()
@@ -4309,6 +4351,31 @@ function assertVideoCasRootIdentity(root, expectedIdentity) {
     throw error;
   }
   return actual;
+}
+
+function assertVideoCasExpectedBinding(root, target, expectedBinding, expectedRootIdentity) {
+  // 绑定来自 readDocument 的 fd 读取快照；hash 相同也不能把另一个 inode 当成同一份稿。
+  videoFileBindingKey(expectedBinding);
+  const rootIdentity = assertVideoCasRootIdentity(root, expectedRootIdentity);
+  if (!sameVideoCasIdentity(rootIdentity, {
+    dev: expectedBinding.rootDev, ino: expectedBinding.rootIno
+  })) {
+    const error = new Error('视频工作区与读取时不是同一实体');
+    error.code = 'ERR_VIDEO_ROOT_CHANGED';
+    throw error;
+  }
+  const parentIdentity = videoCasIdentity(path.dirname(target), 'directory');
+  const fileIdentity = videoCasIdentity(target);
+  if (!sameVideoCasIdentity(parentIdentity, {
+    dev: expectedBinding.parentDev, ino: expectedBinding.parentIno
+  }) || !sameVideoCasIdentity(fileIdentity, {
+    dev: expectedBinding.fileDev, ino: expectedBinding.fileIno
+  })) {
+    const error = new Error('文件实体已变化，拒绝覆盖');
+    error.code = 'ERR_CAS_MISMATCH';
+    throw error;
+  }
+  return { rootIdentity, parentIdentity, fileIdentity };
 }
 
 function assertVideoCasRecordContext(record) {
@@ -4573,9 +4640,11 @@ function atomicReplaceVideoText(root, relativePath, expectedHash, text, options 
     throw new Error('待写回文本无效或超限');
   }
   const expectedRootIdentity = options && options.rootIdentity;
+  const expectedBinding = options && options.expectedBinding;
   assertVideoCasRootIdentity(root, expectedRootIdentity);
   const target = videoCockpit.resolveWorkspaceFile(root, relativePath);
   const directory = path.dirname(target);
+  assertVideoCasExpectedBinding(root, target, expectedBinding, expectedRootIdentity);
   if (recoverVideoCasDirectory(
     directory, videoCockpit.LIMITS.maxScanEntries, expectedRootIdentity
   ).length) {
@@ -4583,11 +4652,17 @@ function atomicReplaceVideoText(root, relativePath, expectedHash, text, options 
     error.code = 'ERR_VIDEO_RECOVERY_REQUIRED';
     throw error;
   }
+  assertVideoCasExpectedBinding(root, target, expectedBinding, expectedRootIdentity);
   const rootIdentity = videoCasIdentity(root, 'directory');
   const directoryIdentity = videoCasIdentity(directory, 'directory');
+  if (MAIN_HELPER_TEST && options && typeof options.beforeBoundRead === 'function') {
+    options.beforeBoundRead(target);
+  }
   const originalValue = videoCasReadBounded(target, videoCockpit.LIMITS.maxFileBytes);
-  assertVideoCasRootIdentity(root, expectedRootIdentity);
-  if (crypto.createHash('sha256').update(originalValue.buffer).digest('hex') !== expectedHash) {
+  assertVideoCasExpectedBinding(root, target, expectedBinding, expectedRootIdentity);
+  if (!sameVideoCasIdentity(originalValue.identity, {
+    dev: expectedBinding.fileDev, ino: expectedBinding.fileIno
+  }) || crypto.createHash('sha256').update(originalValue.buffer).digest('hex') !== expectedHash) {
     const error = new Error('原稿已变化，拒绝覆盖');
     error.code = 'ERR_CAS_MISMATCH';
     throw error;
@@ -4603,6 +4678,7 @@ function atomicReplaceVideoText(root, relativePath, expectedHash, text, options 
   let tmpIdentity = null;
   let activeRecord = null;
   let movedBackupIdentity = null;
+  let replacementIdentity = null;
   let backupMoveCompleted = false;
   try {
     const tmpFd = fs.openSync(tmp, 'wx', originalValue.identity.mode);
@@ -4672,9 +4748,10 @@ function atomicReplaceVideoText(root, relativePath, expectedHash, text, options 
       throw error;
     }
     assertVideoCasRecordContext(record);
-    cloneVideoCasExclusive(
+    const replacement = cloneVideoCasExclusive(
       tmp, target, MAIN_HELPER_TEST && options && options.forceCopy === true
     );
+    replacementIdentity = replacement.identity;
     fsyncVideoDirectory(directory);
     assertVideoCasRecordContext(record);
     if (videoCasHash(target) !== replacementHash || videoCasHash(record.backup) !== expectedHash) {
@@ -4688,7 +4765,11 @@ function atomicReplaceVideoText(root, relativePath, expectedHash, text, options 
     }
     cleanupVideoCasCommit(record);
     journalCreated = false;
-    return { hash: replacementHash, preservedRecovery: true };
+    return {
+      hash: replacementHash,
+      binding: videoCasPublicBinding(rootIdentity, directoryIdentity, replacementIdentity),
+      preservedRecovery: true
+    };
   } catch (error) {
     if (journalCreated) {
       // rename 的极窄窗口内即使 root 被换掉，也只把刚移走的同一 inode
@@ -4742,11 +4823,11 @@ function atomicReplaceVideoText(root, relativePath, expectedHash, text, options 
   }
 }
 
-function readVideoProposalTexts(runtime, proposal) {
+function readVideoProposalDocuments(runtime, proposal) {
   const record = proposal.plan.record;
   return {
-    original: videoCockpit.readDocument(runtime.root, record.sourceRelativePath).text,
-    proposal: videoCockpit.readDocument(runtime.root, record.proposalRelativePath).text
+    original: videoCockpit.readDocument(runtime.root, record.sourceRelativePath),
+    proposal: videoCockpit.readDocument(runtime.root, record.proposalRelativePath)
   };
 }
 
@@ -4755,10 +4836,11 @@ function videoProposalSurface(runtime = videoWorkspaceRuntime) {
   if (videoProposal && videoProposal.runtimeRoot === runtime.root
       && videoProposal.runtimeIdentity === runtime.rootIdentityKey) {
     let comparison = { ready: false, status: 'queued', reason: null };
+    let documents = null;
     try {
-      const texts = readVideoProposalTexts(runtime, videoProposal);
+      documents = readVideoProposalDocuments(runtime, videoProposal);
       comparison = videoCockpit.proposalComparison(
-        videoProposal.plan.record, texts.proposal, texts.original
+        videoProposal.plan.record, documents.proposal.text, documents.original.text
       );
     } catch (error) {
       comparison = {
@@ -4769,7 +4851,8 @@ function videoProposalSurface(runtime = videoWorkspaceRuntime) {
     }
     const record = videoProposal.plan.record;
     const proposalRevisionToken = comparison.ready ? videoProposalRevisionToken(
-      runtime.epoch, videoProposal.proposalToken, record.originalHash, comparison.proposalHash
+      runtime.epoch, videoProposal.proposalToken, record.originalHash, comparison.proposalHash,
+      documents.original.binding, documents.proposal.binding
     ) : null;
     return {
       proposalToken: videoProposal.proposalToken,
@@ -4790,8 +4873,11 @@ function videoProposalSurface(runtime = videoWorkspaceRuntime) {
       && videoUndo.runtimeIdentity === runtime.rootIdentityKey) {
     let canUndo = false;
     try {
-      const target = videoCockpit.resolveWorkspaceFile(runtime.root, videoUndo.record.sourceRelativePath);
-      canUndo = videoCockpit.hashText(fs.readFileSync(target, 'utf8')) === videoUndo.record.adoptedHash;
+      const adopted = videoCockpit.readDocument(
+        runtime.root, videoUndo.record.sourceRelativePath
+      );
+      canUndo = adopted.hash === videoUndo.record.adoptedHash
+        && sameVideoFileBinding(adopted.binding, videoUndo.adoptedBinding);
     } catch (_error) { canUndo = false; }
     return {
       proposalToken: null,
@@ -5001,7 +5087,7 @@ async function runVideoSceneAction(raw) {
       ? { stage: 'topic', status: 'needs-decision', updated: new Date().toISOString() }
       : { status: 'ignored', updated: new Date().toISOString() }, document.hash);
     atomicReplaceVideoText(runtime.root, document.relativePath, document.hash, patched, {
-      rootIdentity: runtime.rootIdentity
+      rootIdentity: runtime.rootIdentity, expectedBinding: document.binding
     });
     refreshVideoWorkspaceSnapshot();
     return {
@@ -5019,7 +5105,7 @@ async function runVideoSceneAction(raw) {
       document.text, { [request.field]: request.value, updated: new Date().toISOString() }, document.hash
     );
     atomicReplaceVideoText(runtime.root, document.relativePath, document.hash, patched, {
-      rootIdentity: runtime.rootIdentity
+      rootIdentity: runtime.rootIdentity, expectedBinding: document.binding
     });
     refreshVideoWorkspaceSnapshot();
     return { kind: 'ok', text: `已把${request.field === 'angle' ? '角度' : '钩子'}写回项目文件。` };
@@ -5064,7 +5150,7 @@ async function runVideoSceneAction(raw) {
       );
     }
     atomicReplaceVideoText(runtime.root, document.relativePath, document.hash, patched, {
-      rootIdentity: runtime.rootIdentity
+      rootIdentity: runtime.rootIdentity, expectedBinding: document.binding
     });
     refreshVideoWorkspaceSnapshot();
     return {
@@ -5095,7 +5181,7 @@ async function runVideoSceneAction(raw) {
       );
     }
     atomicReplaceVideoText(runtime.root, document.relativePath, document.hash, patched, {
-      rootIdentity: runtime.rootIdentity
+      rootIdentity: runtime.rootIdentity, expectedBinding: document.binding
     });
     refreshVideoWorkspaceSnapshot();
     return { kind: 'ok', text: request.value === 'unknown' ? 'AI 内容状态已恢复为待确认。' : '已记录你的 AI 内容选择。' };
@@ -5257,26 +5343,34 @@ function decideVideoProposal(value) {
     refreshVideoWorkspaceSnapshot();
     return { kind: 'ok', text: '已退回建议，原稿从未改动。' };
   }
-  const texts = readVideoProposalTexts(runtime, videoProposal);
+  const documents = readVideoProposalDocuments(runtime, videoProposal);
   const comparison = videoCockpit.proposalComparison(
-    videoProposal.plan.record, texts.proposal, texts.original
+    videoProposal.plan.record, documents.proposal.text, documents.original.text
   );
   const currentRevision = comparison.ready ? videoProposalRevisionToken(
     runtime.epoch, videoProposal.proposalToken,
-    videoProposal.plan.record.originalHash, comparison.proposalHash
+    videoProposal.plan.record.originalHash, comparison.proposalHash,
+    documents.original.binding, documents.proposal.binding
   ) : null;
   if (!comparison.ready || currentRevision !== request.proposalRevisionToken) {
     refreshVideoWorkspaceSnapshot();
     throw new Error('建议内容已变化，请先重新查看对照卡');
   }
-  const adopted = videoCockpit.adoptProposal(videoProposal.plan.record, texts.proposal, texts.original);
-  atomicReplaceVideoText(
+  const adopted = videoCockpit.adoptProposal(
+    videoProposal.plan.record, documents.proposal.text, documents.original.text
+  );
+  const adoptedWrite = atomicReplaceVideoText(
     runtime.root,
     videoProposal.plan.record.sourceRelativePath,
     videoProposal.plan.record.originalHash,
     adopted.text,
-    { rootIdentity: runtime.rootIdentity }
+    { rootIdentity: runtime.rootIdentity, expectedBinding: documents.original.binding }
   );
+  if (adoptedWrite.hash !== adopted.undo.adoptedHash) {
+    const error = new Error('采用后实体回读不一致');
+    error.code = 'ERR_CAS_MISMATCH';
+    throw error;
+  }
   const previous = videoProposal;
   removeOwnedVideoProposal(runtime.root, previous, runtime.rootIdentity);
   videoProposal = null;
@@ -5286,7 +5380,8 @@ function decideVideoProposal(value) {
     runtimeRoot: runtime.root,
     runtimeIdentity: runtime.rootIdentityKey,
     title: previous.title,
-    record: adopted.undo
+    record: adopted.undo,
+    adoptedBinding: adoptedWrite.binding
   };
   refreshVideoWorkspaceSnapshot();
   return { kind: 'ok', text: '已采用这一块；原稿其他部分不动，仍可撤销一次。' };
@@ -5306,12 +5401,16 @@ function undoVideoProposal(value) {
   if (!videoUndo || videoUndo.runtimeRoot !== runtime.root
       || videoUndo.runtimeIdentity !== runtime.rootIdentityKey
       || videoUndo.revisionToken !== request.revisionToken) throw new Error('这份撤销快照已过期');
-  const target = videoCockpit.resolveWorkspaceFile(runtime.root, videoUndo.record.sourceRelativePath);
-  const current = fs.readFileSync(target, 'utf8');
-  const restored = videoCockpit.undoAdoption(videoUndo.record, current);
+  const current = videoCockpit.readDocument(
+    runtime.root, videoUndo.record.sourceRelativePath
+  );
+  if (!sameVideoFileBinding(current.binding, videoUndo.adoptedBinding)) {
+    throw new Error('采用后的文件实体已变化，不能撤销');
+  }
+  const restored = videoCockpit.undoAdoption(videoUndo.record, current.text);
   atomicReplaceVideoText(
     runtime.root, videoUndo.record.sourceRelativePath, videoUndo.record.adoptedHash, restored.text,
-    { rootIdentity: runtime.rootIdentity }
+    { rootIdentity: runtime.rootIdentity, expectedBinding: videoUndo.adoptedBinding }
   );
   videoUndo = null;
   refreshVideoWorkspaceSnapshot();
@@ -5614,11 +5713,25 @@ function registerShootingIpc() {
 const CONTEXT_POC_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 const CONTEXT_POC_TOKEN_RE = /^[a-f0-9]{64}$/;
 const CONTEXT_POC_SESSION_REF_RE = /^session-[a-f0-9]{64}$/;
+const CONTEXT_POC_PROJECT_ID_RE = /^wdp1_[a-f0-9]{32}$/;
+const CONTEXT_POC_PROJECT_REVISION_RE = /^[a-f0-9]{64}$/;
 const CONTEXT_POC_PREFERENCES_CAPABILITY = 'ui-preferences-v1';
 const CONTEXT_POC_MAX_PREFERENCE_REVISION = 1_000_000_000;
 const CONTEXT_POC_PREFERENCE_PENDING_MS = 3000;
 const CONTEXT_POC_PREFERENCE_WRITE_MARGIN_MS = 500;
 const CONTEXT_POC_MAX_PREFERENCE_READ_BATCH = 16;
+const CONTEXT_POC_WORKSPACE_FILES_CAPABILITY = 'workspace-files-v1';
+const CONTEXT_POC_WORKSPACE_FILE_PENDING_MS = 10000;
+const CONTEXT_POC_WORKSPACE_FILE_EXECUTION_MARGIN_MS = 750;
+const CONTEXT_POC_MAX_WORKSPACE_FILE_READ_BATCH = 4;
+const CONTEXT_POC_WORKSPACE_FILE_OPERATIONS = new Set([
+  'catalog.read', 'document.read', 'topic.choose'
+]);
+const CONTEXT_POC_WORKSPACE_FILE_REJECT_CODES = new Set([
+  'workspace-unavailable', 'workspace-mismatch', 'operation-invalid',
+  'operation-timeout', 'operation-failed', 'operation-stale',
+  'outcome-unknown', 'busy'
+]);
 const CONTEXT_POC_EVENT_TYPES = new Set([
   'ack', 'turn-start', 'turn-miss', 'delivery', 'turn-end'
 ]);
@@ -5632,6 +5745,508 @@ function contextPocExact(value, required, optional = []) {
 
 function contextPocValidId(value) {
   return typeof value === 'string' && CONTEXT_POC_ID_RE.test(value);
+}
+
+function contextPocWorkspaceFileInputValue(value) {
+  if (!isPlainObject(value)) return null;
+  try {
+    const serialized = JSON.stringify(value);
+    if (Buffer.byteLength(serialized, 'utf8') > contextFileRpc.DEFAULT_LIMITS.maxInputBytes) {
+      return null;
+    }
+    const cloned = JSON.parse(serialized);
+    return isPlainObject(cloned) ? Object.freeze(cloned) : null;
+  } catch (_error) { return null; }
+}
+
+function contextPocWorkspaceFileRequestValue(value) {
+  if (!contextPocExact(value, [
+    'requestToken', 'requestSeq', 'controllerId', 'pageInstanceId',
+    'selectionRevision', 'projectId', 'projectRevision', 'contextRevision',
+    'operation', 'input', 'issuedAtMs', 'deadlineMs'
+  ]) || !CONTEXT_POC_TOKEN_RE.test(String(value.requestToken || ''))
+      || !Number.isSafeInteger(value.requestSeq) || value.requestSeq < 1
+      || !contextPocValidId(value.controllerId) || !contextPocValidId(value.pageInstanceId)
+      || !Number.isSafeInteger(value.selectionRevision) || value.selectionRevision < 1
+      || !CONTEXT_POC_PROJECT_ID_RE.test(String(value.projectId || ''))
+      || !(value.projectRevision === null
+        || CONTEXT_POC_PROJECT_REVISION_RE.test(String(value.projectRevision || '')))
+      || !Number.isSafeInteger(value.contextRevision) || value.contextRevision < 1
+      || !CONTEXT_POC_WORKSPACE_FILE_OPERATIONS.has(value.operation)
+      || !Number.isSafeInteger(value.issuedAtMs) || value.issuedAtMs < 0
+      || !Number.isSafeInteger(value.deadlineMs)
+      || value.deadlineMs !== value.issuedAtMs + CONTEXT_POC_WORKSPACE_FILE_PENDING_MS) return null;
+  const input = contextPocWorkspaceFileInputValue(value.input);
+  return input ? Object.freeze({ ...value, input }) : null;
+}
+
+function contextPocWorkspaceFileReadResponseValue(value, runtime) {
+  if (!contextPocExact(value, ['contract', 'hostInstanceId', 'requests'])
+      || value.contract !== contextBridgeModel.CONTRACT_VERSION
+      || !runtime || !runtime.handshake
+      || value.hostInstanceId !== runtime.handshake.hostInstanceId
+      || !Array.isArray(value.requests)
+      || value.requests.length > CONTEXT_POC_MAX_WORKSPACE_FILE_READ_BATCH) return null;
+  const requests = value.requests.map(contextPocWorkspaceFileRequestValue);
+  if (requests.some((request) => request === null)
+      || new Set(requests.map((request) => request.requestToken)).size !== requests.length
+      || new Set(requests.map((request) => request.requestSeq)).size !== requests.length) return null;
+  return Object.freeze({
+    contract: value.contract,
+    hostInstanceId: value.hostInstanceId,
+    requests: Object.freeze(requests)
+  });
+}
+
+function contextPocWorkspaceFileClaimValue(value) {
+  if (contextPocExact(value, ['claimed', 'code']) && value.claimed === false
+      && ['operation-stale', 'already-running', 'already-settled'].includes(value.code)) {
+    return Object.freeze({ claimed: false, code: value.code });
+  }
+  if (!contextPocExact(value, [
+    'claimed', 'code', 'claimToken', 'runningDeadlineMs'
+  ]) || value.claimed !== true || value.code !== null
+      || !CONTEXT_POC_TOKEN_RE.test(String(value.claimToken || ''))
+      || !Number.isSafeInteger(value.runningDeadlineMs) || value.runningDeadlineMs < 0) return null;
+  return Object.freeze({ ...value });
+}
+
+function contextPocWorkspaceFileSettleValue(value) {
+  if (!contextPocExact(value, ['settled', 'code']) || typeof value.settled !== 'boolean'
+      || (value.settled ? value.code !== null : value.code !== 'operation-stale')) return null;
+  return Object.freeze({ settled: value.settled, code: value.code });
+}
+
+function contextPocWorkspaceFilePageInput(value, maximumLimit) {
+  if (!isPlainObject(value)
+      || Object.keys(value).some((key) => key !== 'cursor' && key !== 'limit')) {
+    throw new Error('文件页请求字段无效');
+  }
+  const cursor = value.cursor === undefined ? 0 : value.cursor;
+  const limit = value.limit === undefined ? maximumLimit : value.limit;
+  if (!Number.isSafeInteger(cursor) || cursor < 0
+      || !Number.isSafeInteger(limit) || limit < 1 || limit > maximumLimit) {
+    throw new Error('文件页游标或上限无效');
+  }
+  return Object.freeze({ cursor, limit });
+}
+
+function contextPocWorkspaceFileProjectInput(value) {
+  if (!isPlainObject(value)
+      || Object.keys(value).some((key) => !['projectToken', 'cursor', 'limit'].includes(key))
+      || typeof value.projectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)) {
+    throw new Error('项目文档请求无效');
+  }
+  return Object.freeze({
+    projectToken: value.projectToken,
+    ...contextPocWorkspaceFilePageInput({ cursor: value.cursor, limit: value.limit }, 2)
+  });
+}
+
+function contextPocWorkspaceFileTopicInput(value) {
+  if (!contextPocExact(value, ['projectToken', 'field', 'value'])
+      || typeof value.projectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
+      || !['angle', 'hook'].includes(value.field)
+      || typeof value.value !== 'string' || !value.value
+      || value.value.length > 240
+      || /[\u0000-\u001f\u007f]/.test(value.value)) {
+    throw new Error('选题拍板请求无效');
+  }
+  return Object.freeze({
+    projectToken: value.projectToken,
+    field: value.field,
+    value: value.value
+  });
+}
+
+function contextPocWorkspaceCatalogCard(value) {
+  if (!isPlainObject(value) || typeof value.projectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)) {
+    throw new Error('内容卡投影无效');
+  }
+  const cleanList = (items) => (Array.isArray(items) ? items : [])
+    .map((item) => safeText(item, '', 64)).filter(Boolean).slice(0, 3);
+  const publish = isPlainObject(value.publish) ? Object.freeze({
+    ready: value.publish.ready === true,
+    published: value.publish.published === true,
+    aiDisclosure: ['unknown', 'ai', 'not-ai'].includes(value.publish.aiDisclosure)
+      ? value.publish.aiDisclosure : 'unknown'
+  }) : null;
+  return Object.freeze({
+    projectToken: value.projectToken,
+    title: safeText(value.title, '未命名项目', 120),
+    stage: Object.prototype.hasOwnProperty.call(VIDEO_STAGE_LABELS, value.stage)
+      ? value.stage : null,
+    stageLabel: safeText(value.stageLabel, '未分类', 24),
+    status: safeText(value.status, '', 48) || null,
+    updated: safeText(value.updated, '', 64) || null,
+    decision: safeText(value.decision, '', 160) || null,
+    angle: safeText(value.angle, '', 120) || null,
+    hook: safeText(value.hook, '', 160) || null,
+    angleOptions: cleanList(value.angles),
+    hookOptions: cleanList(value.hooks),
+    canShoot: value.canShoot === true,
+    publish
+  });
+}
+
+function contextPocWorkspaceCatalogResult(value) {
+  if (!contextPocExact(value, [
+    'kind', 'generation', 'projectCount', 'cursor', 'nextCursor', 'projects'
+  ]) || value.kind !== 'catalog'
+      || !Number.isSafeInteger(value.generation) || value.generation < 0
+      || !Number.isSafeInteger(value.projectCount) || value.projectCount < 0
+      || !Number.isSafeInteger(value.cursor) || value.cursor < 0
+      || !(value.nextCursor === null
+        || (Number.isSafeInteger(value.nextCursor) && value.nextCursor > value.cursor))
+      || !Array.isArray(value.projects) || value.projects.length > 4) {
+    throw new Error('内容库投影无效');
+  }
+  return Object.freeze({
+    kind: 'catalog', generation: value.generation,
+    projectCount: value.projectCount, cursor: value.cursor,
+    nextCursor: value.nextCursor,
+    projects: Object.freeze(value.projects.map(contextPocWorkspaceCatalogCard))
+  });
+}
+
+function contextPocWorkspaceDocumentResult(value) {
+  if (!contextPocExact(value, [
+    'kind', 'projectToken', 'title', 'stage', 'stageLabel', 'blockCount',
+    'cursor', 'nextCursor', 'truncated', 'blocks'
+  ]) || value.kind !== 'document'
+      || typeof value.projectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
+      || !Number.isSafeInteger(value.blockCount) || value.blockCount < 0
+      || !Number.isSafeInteger(value.cursor) || value.cursor < 0
+      || !(value.nextCursor === null
+        || (Number.isSafeInteger(value.nextCursor) && value.nextCursor > value.cursor))
+      || typeof value.truncated !== 'boolean'
+      || !Array.isArray(value.blocks) || value.blocks.length > 2) {
+    throw new Error('文档投影无效');
+  }
+  const blocks = value.blocks.map((block) => {
+    if (!contextPocExact(block, [
+      'blockToken', 'kind', 'text', 'textTruncated', 'startLine', 'endLine'
+    ]) || typeof block.blockToken !== 'string'
+        || !/^block-[a-f0-9]{24}$/.test(block.blockToken)
+        || typeof block.kind !== 'string' || !/^[a-z][a-z-]{0,31}$/.test(block.kind)
+        || typeof block.text !== 'string' || Buffer.byteLength(block.text, 'utf8') > 2048
+        || typeof block.textTruncated !== 'boolean'
+        || !Number.isSafeInteger(block.startLine) || block.startLine < 1
+        || !Number.isSafeInteger(block.endLine) || block.endLine < block.startLine) {
+      throw new Error('文档块投影无效');
+    }
+    return Object.freeze({ ...block });
+  });
+  return Object.freeze({
+    kind: 'document', projectToken: value.projectToken,
+    title: safeText(value.title, '未命名文档', 120),
+    stage: Object.prototype.hasOwnProperty.call(VIDEO_STAGE_LABELS, value.stage)
+      ? value.stage : null,
+    stageLabel: safeText(value.stageLabel, '未分类', 24),
+    blockCount: value.blockCount,
+    cursor: value.cursor,
+    nextCursor: value.nextCursor,
+    truncated: value.truncated,
+    blocks: Object.freeze(blocks)
+  });
+}
+
+function contextPocWorkspaceMutationResult(value) {
+  if (!contextPocExact(value, ['kind', 'changed', 'projectToken', 'message'])
+      || value.kind !== 'mutation' || value.changed !== true
+      || typeof value.projectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
+      || typeof value.message !== 'string' || !value.message
+      || [...value.message].length > 160) throw new Error('写回结果投影无效');
+  return Object.freeze({ ...value });
+}
+
+function contextPocWorkspaceOperationErrorCode(error) {
+  const code = error && error.code;
+  if (code === 'ERR_WORKSPACE_UNAVAILABLE') return 'workspace-unavailable';
+  if (['ERR_WORKSPACE_BINDING_STALE', 'ERR_VIDEO_RUNTIME_STALE',
+    'ERR_VIDEO_ROOT_CHANGED', 'ERR_CAS_MISMATCH',
+    'ERR_PATH_CHANGED', 'ERR_PATH_NOT_FOUND'].includes(code)) return 'operation-stale';
+  return 'operation-failed';
+}
+
+function contextPocUtf8Clip(value, maximumBytes) {
+  const source = String(value || '')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '�');
+  let bytes = 0;
+  let text = '';
+  for (const symbol of source) {
+    const size = Buffer.byteLength(symbol, 'utf8');
+    if (bytes + size > maximumBytes) break;
+    text += symbol;
+    bytes += size;
+  }
+  return Object.freeze({ text, truncated: text.length !== source.length });
+}
+
+function contextPocAssertWorkspaceOperationCurrent(context) {
+  if (!context || typeof context.assertCurrent !== 'function'
+      || context.assertCurrent() !== true) {
+    const error = new Error('文件 operation 工作区绑定已变化');
+    error.code = 'ERR_WORKSPACE_BINDING_STALE';
+    throw error;
+  }
+}
+
+function contextPocWorkspaceFileOperations(options = {}) {
+  const catalog = options.catalog || (() => {
+    const snapshot = currentVideoWorkspaceSnapshot();
+    if (!snapshot || snapshot.status !== 'ready') {
+      const error = new Error('视频工作区不可用');
+      error.code = 'ERR_WORKSPACE_UNAVAILABLE';
+      throw error;
+    }
+    return snapshot;
+  });
+  const document = options.document || videoDocumentSurface;
+  const chooseTopic = options.chooseTopic || ((input) => runVideoSceneAction({
+    action: 'choose-topic', ...input
+  }));
+  return Object.freeze({
+    'catalog.read': Object.freeze({
+      validate: (input) => contextPocWorkspaceFilePageInput(input, 4),
+      async handle({ input, context }) {
+        contextPocAssertWorkspaceOperationCurrent(context);
+        const snapshot = catalog();
+        const projects = Array.isArray(snapshot.projects) ? snapshot.projects : [];
+        const page = [];
+        for (let cursor = input.cursor;
+          cursor < projects.length && page.length < input.limit; cursor += 1) {
+          const candidate = [...page, projects[cursor]];
+          const projected = contextPocWorkspaceCatalogResult({
+            kind: 'catalog', generation: snapshot.generation,
+            projectCount: projects.length, cursor: input.cursor,
+            nextCursor: input.cursor + candidate.length < projects.length
+              ? input.cursor + candidate.length : null,
+            projects: candidate
+          });
+          if (Buffer.byteLength(JSON.stringify(projected), 'utf8') > 5600 && page.length) break;
+          page.push(projects[cursor]);
+        }
+        const next = input.cursor + page.length;
+        return {
+          kind: 'catalog', generation: snapshot.generation,
+          projectCount: projects.length, cursor: input.cursor,
+          nextCursor: next < projects.length ? next : null,
+          projects: page
+        };
+      },
+      redact: contextPocWorkspaceCatalogResult,
+      errorCode: contextPocWorkspaceOperationErrorCode
+    }),
+    'document.read': Object.freeze({
+      validate: contextPocWorkspaceFileProjectInput,
+      async handle({ input, context }) {
+        contextPocAssertWorkspaceOperationCurrent(context);
+        const surface = document(input.projectToken);
+        const page = surface.blocks.slice(input.cursor, input.cursor + input.limit).map((block) => {
+          const clipped = contextPocUtf8Clip(block.text, 1800);
+          return {
+            blockToken: block.blockToken,
+            kind: block.kind,
+            text: clipped.text,
+            textTruncated: clipped.truncated,
+            startLine: block.startLine,
+            endLine: block.endLine
+          };
+        });
+        const next = input.cursor + page.length;
+        return {
+          kind: 'document', projectToken: surface.projectToken,
+          title: surface.title, stage: surface.stage, stageLabel: surface.stageLabel,
+          blockCount: surface.blockCount, cursor: input.cursor,
+          nextCursor: next < surface.blocks.length ? next : null,
+          truncated: surface.truncated === true || next < surface.blockCount
+            || page.some((block) => block.textTruncated),
+          blocks: page
+        };
+      },
+      redact: contextPocWorkspaceDocumentResult,
+      errorCode: contextPocWorkspaceOperationErrorCode
+    }),
+    'topic.choose': Object.freeze({
+      validate: contextPocWorkspaceFileTopicInput,
+      async handle({ input, context }) {
+        contextPocAssertWorkspaceOperationCurrent(context);
+        const result = await chooseTopic(input);
+        return {
+          kind: 'mutation', changed: true, projectToken: input.projectToken,
+          message: safeText(result && result.text, '已写回项目文件。', 160)
+        };
+      },
+      redact: contextPocWorkspaceMutationResult,
+      errorCode: contextPocWorkspaceOperationErrorCode
+    })
+  });
+}
+
+function contextPocWorkspaceFileBroker(options = {}) {
+  return contextFileRpc.createContextFileRpcBroker({
+    operations: contextPocWorkspaceFileOperations(options.operations),
+    ...(options.now ? { now: options.now } : {}),
+    ...(options.randomBytes ? { randomBytes: options.randomBytes } : {}),
+    limits: {
+      maxActive: 32, maxTotal: 64, maxPerController: 4, maxReadBatch: 4,
+      resultTtlMs: 1
+    }
+  });
+}
+
+function contextPocWorkspacePublicRejectCode(value) {
+  if (CONTEXT_POC_WORKSPACE_FILE_REJECT_CODES.has(value)) return value;
+  if (value === 'outcome-unknown') return 'outcome-unknown';
+  if (value === 'request-expired') return 'operation-timeout';
+  if (['request-unavailable', 'request-cancelled', 'claim-invalid',
+    'already-running', 'already-settled'].includes(value)) return 'operation-stale';
+  return 'operation-failed';
+}
+
+function contextPocWorkspaceBindingEqual(left, right) {
+  return Boolean(left && right
+    && left.hostInstanceId === right.hostInstanceId
+    && left.controllerId === right.controllerId
+    && left.pageInstanceId === right.pageInstanceId
+    && left.selectionRevision === right.selectionRevision
+    && left.projectId === right.projectId
+    && left.contextRevision === right.contextRevision
+    && left.workspaceGeneration === right.workspaceGeneration
+    && left.rootIdentity && right.rootIdentity
+    && left.rootIdentity.dev === right.rootIdentity.dev
+    && left.rootIdentity.ino === right.rootIdentity.ino);
+}
+
+function createContextPocWorkspaceFileCoordinator(options = {}) {
+  const broker = options.broker || contextPocWorkspaceFileBroker();
+  const bindingFor = options.bindingFor || contextPocWorkspaceFileBindingFor;
+  const isCurrent = options.isCurrent || contextPocRuntimeCurrent;
+  const now = options.now || Date.now;
+  if (!broker || typeof broker.enqueue !== 'function' || typeof bindingFor !== 'function'
+      || typeof isCurrent !== 'function' || typeof now !== 'function') {
+    throw new TypeError('context POC workspace files adapter invalid');
+  }
+
+  const settle = async (runtime, request, claim, status, code, result) => {
+    if (!isCurrent(runtime)) return false;
+    const raw = await runtime.transport.call('workspace/files/settle', {
+      contract: contextBridgeModel.CONTRACT_VERSION,
+      hostInstanceId: runtime.handshake.hostInstanceId,
+      requestToken: request.requestToken,
+      requestSeq: request.requestSeq,
+      claimToken: claim.claimToken,
+      status,
+      code,
+      result
+    });
+    const response = contextPocWorkspaceFileSettleValue(raw);
+    return Boolean(response && response.settled);
+  };
+
+  const apply = async (runtime, request) => {
+    let claim = null;
+    try {
+      const rawClaim = await runtime.transport.call('workspace/files/claim', {
+        contract: contextBridgeModel.CONTRACT_VERSION,
+        hostInstanceId: runtime.handshake.hostInstanceId,
+        requestToken: request.requestToken,
+        requestSeq: request.requestSeq
+      });
+      if (!isCurrent(runtime)) return false;
+      claim = contextPocWorkspaceFileClaimValue(rawClaim);
+      if (!claim) return false;
+      if (!claim.claimed) return true;
+
+      const at = now();
+      if (!Number.isSafeInteger(at) || at < request.issuedAtMs
+          || request.deadlineMs - at < CONTEXT_POC_WORKSPACE_FILE_EXECUTION_MARGIN_MS
+          || claim.runningDeadlineMs - at < CONTEXT_POC_WORKSPACE_FILE_EXECUTION_MARGIN_MS
+          || claim.runningDeadlineMs > request.deadlineMs) {
+        return settle(runtime, request, claim, 'rejected', 'operation-timeout', null);
+      }
+      const binding = bindingFor(runtime, request);
+      if (!binding) {
+        return settle(runtime, request, claim, 'rejected', 'operation-stale', null);
+      }
+
+      const queued = broker.enqueue({ binding, operation: request.operation, input: request.input });
+      const row = broker.read({ binding, limit: CONTEXT_POC_MAX_WORKSPACE_FILE_READ_BATCH })
+        .find((item) => item.requestToken === queued.requestToken);
+      if (!row) return settle(runtime, request, claim, 'rejected', 'operation-failed', null);
+      const internalClaim = broker.claim({
+        binding, requestToken: row.requestToken, requestSeq: row.requestSeq
+      });
+      if (!internalClaim.claimed) {
+        return settle(runtime, request, claim, 'rejected', 'operation-failed', null);
+      }
+      const outcome = await broker.execute({
+        binding,
+        requestToken: row.requestToken,
+        requestSeq: row.requestSeq,
+        claimToken: internalClaim.claimToken,
+        context: Object.freeze({
+          assertCurrent() {
+            return contextPocWorkspaceBindingEqual(bindingFor(runtime, request), binding);
+          }
+        })
+      });
+      if (!isCurrent(runtime)) return false;
+      if (!contextPocWorkspaceBindingEqual(bindingFor(runtime, request), binding)) {
+        // handler 已取得执行权后才发现 selection/context/workspace 变化，不能声称没执行。
+        return settle(runtime, request, claim, 'rejected', 'outcome-unknown', null);
+      }
+      const snapshot = outcome && outcome.snapshot
+        ? outcome.snapshot : broker.snapshot({ binding, requestToken: row.requestToken });
+      if (snapshot.state === 'fulfilled') {
+        return settle(runtime, request, claim, 'fulfilled', null, snapshot.result);
+      }
+      return settle(runtime, request, claim, 'rejected',
+        contextPocWorkspacePublicRejectCode(snapshot.code), null);
+    } catch (_error) {
+      if (claim && claim.claimed && isCurrent(runtime)) {
+        try {
+          return await settle(runtime, request, claim, 'rejected', 'operation-failed', null);
+        } catch (_settleError) { return false; }
+      }
+      return false;
+    }
+  };
+
+  const drain = async (runtime) => {
+    if (!runtime || runtime.workspaceFilesBusy === true) return false;
+    runtime.workspaceFilesBusy = true;
+    try {
+      const capable = Boolean(runtime.handshake
+        && Array.isArray(runtime.handshake.capabilities)
+        && runtime.handshake.capabilities.includes(CONTEXT_POC_WORKSPACE_FILES_CAPABILITY));
+      if (!capable || !isCurrent(runtime) || !runtime.binding) return false;
+      const raw = await runtime.transport.call('workspace/files/read', {
+        contract: contextBridgeModel.CONTRACT_VERSION,
+        hostInstanceId: runtime.handshake.hostInstanceId,
+        limit: CONTEXT_POC_MAX_WORKSPACE_FILE_READ_BATCH
+      });
+      if (!isCurrent(runtime)) return false;
+      const batch = contextPocWorkspaceFileReadResponseValue(raw, runtime);
+      if (!batch) return false;
+      for (const request of batch.requests) {
+        if (!isCurrent(runtime)) return false;
+        await apply(runtime, request);
+      }
+      return true;
+    } catch (_error) {
+      return false;
+    } finally {
+      runtime.workspaceFilesBusy = false;
+    }
+  };
+  return Object.freeze({ apply, drain, broker });
 }
 
 function contextPocPreferencePatchValue(value) {
@@ -5853,6 +6468,7 @@ contextPocPreferences = createContextPocPreferenceCoordinator({
   read: () => config.get(),
   write: (patch) => config.set(patch)
 });
+contextPocWorkspaceFiles = createContextPocWorkspaceFileCoordinator();
 
 function contextPocHandshakeValue(value) {
   if (!contextPocExact(value, [
@@ -6002,10 +6618,27 @@ function contextPocEventsValue(value, runtime) {
   return value;
 }
 
-function currentContextPocProject() {
+function currentContextPocWorkspaceIdentity() {
   const workspace = currentWorkspaceSurface();
   const workspaceKey = workspace && workspace.current && workspace.current.effectivePath;
-  if (!boundedPath(workspaceKey)) return null;
+  if (!boundedPath(workspaceKey) || !Number.isSafeInteger(workspace.generation)
+      || workspace.generation < 0 || workspace.busy) return null;
+  try {
+    const stat = fs.lstatSync(workspaceKey, { bigint: true });
+    if (stat.isSymbolicLink() || !stat.isDirectory()
+        || fs.realpathSync(workspaceKey) !== workspaceKey) return null;
+    return Object.freeze({
+      workspace,
+      workspaceKey,
+      workspaceGeneration: workspace.generation,
+      rootIdentity: Object.freeze({ dev: String(stat.dev), ino: String(stat.ino) })
+    });
+  } catch (_error) { return null; }
+}
+
+function currentContextPocProject(identity = currentContextPocWorkspaceIdentity()) {
+  if (!identity) return null;
+  const { workspace, workspaceKey, workspaceGeneration, rootIdentity } = identity;
   const active = currentWorkbench();
   const workbenchId = active && typeof active.id === 'string'
     ? `${active.source === 'user' ? 'user' : 'builtin'}:${crypto.createHash('sha256')
@@ -6020,8 +6653,53 @@ function currentContextPocProject() {
     relativePath: '.',
     workbenchId,
     title: `${workspaceLabel} · ${workbenchLabel}`,
-    projectRevision: null
+    // revision 同时封住 workspace coordinator 代际与根目录实体；A→B→A
+    // 不能让旧页面排队的写请求落到后来同路径的新工作区。
+    projectRevision: crypto.createHash('sha256').update([
+      'whaledock-workspace-revision/v1', String(workspaceGeneration),
+      rootIdentity.dev, rootIdentity.ino, workbenchId || 'default'
+    ].join('\0')).digest('hex')
   };
+}
+
+function contextPocWorkspaceFileBindingFor(runtime, request) {
+  try {
+    if (!runtime || !request || !runtime.handshake || !runtime.binding
+        || !Array.isArray(runtime.handshake.capabilities)
+        || !runtime.handshake.capabilities.includes(CONTEXT_POC_WORKSPACE_FILES_CAPABILITY)
+        || request.controllerId !== runtime.binding.controllerId
+        || request.pageInstanceId !== runtime.binding.pageInstanceId
+        || request.selectionRevision !== runtime.binding.selectionRevision) return null;
+
+    const identity = currentContextPocWorkspaceIdentity();
+    const project = identity && currentContextPocProject(identity);
+    if (!project) return null;
+    const normalizedProject = contextBridgeModel.normalizeProjectContext(project);
+    if (request.projectId !== normalizedProject.projectId
+        || request.projectRevision !== normalizedProject.projectRevision) return null;
+
+    const session = contextPocController.state.snapshot(runtime.binding.sessionRef).session;
+    if (!session || session.effectiveRevision !== request.contextRevision
+        || !session.effectiveProject
+        || JSON.stringify(session.effectiveProject) !== JSON.stringify(normalizedProject)) return null;
+
+    const videoRuntime = currentVideoRuntime();
+    if (videoRuntime.root !== identity.workspaceKey
+        || videoRuntime.generation !== identity.workspaceGeneration
+        || String(videoRuntime.rootIdentity.dev) !== identity.rootIdentity.dev
+        || String(videoRuntime.rootIdentity.ino) !== identity.rootIdentity.ino) return null;
+    assertVideoRuntimeIdentity(videoRuntime);
+    return contextFileRpc.normalizeBinding({
+      hostInstanceId: runtime.handshake.hostInstanceId,
+      controllerId: runtime.binding.controllerId,
+      pageInstanceId: runtime.binding.pageInstanceId,
+      selectionRevision: runtime.binding.selectionRevision,
+      projectId: request.projectId,
+      contextRevision: request.contextRevision,
+      workspaceGeneration: identity.workspaceGeneration,
+      rootIdentity: identity.rootIdentity
+    });
+  } catch (_error) { return null; }
 }
 
 function contextPocRuntimeCurrent(runtime) {
@@ -6352,6 +7030,9 @@ async function contextPocTick(runtime) {
     // 偏好通道没有 core cursor；只在本轮 ACK/turn journal 与 stage 全部完成后
     // 后台读取。读、验、写或 settle 失败都由该偏好自己的绝对 deadline 收口。
     void contextPocPreferences.drain(runtime).catch(() => {});
+    // 文件 sidecar 同样只能在 core journal + stage 之后启动；它的 claim、实体绑定、
+    // CAS 与结果 TTL 独立收口，不占用也不推进 context core cursor。
+    void contextPocWorkspaceFiles.drain(runtime).catch(() => {});
   } catch (error) {
     if (contextPocRuntimeCurrent(runtime)) {
       if (error && error.code === 'ERR_CONTEXT_POC_EVENT_GAP') {
@@ -6422,6 +7103,7 @@ async function startContextPocBridge(state) {
       cursor: contextPocController.runtime.eventCursor,
       resumeEffects: [...connected.effects],
       busy: false,
+      workspaceFilesBusy: false,
       closed: false,
       terminal: false,
       timer: null,
@@ -10472,6 +11154,17 @@ if (MAIN_HELPER_TEST) {
     contextPocPreferenceReadResponseValue,
     createContextPocPreferenceCoordinator,
     CONTEXT_POC_PREFERENCE_WRITE_MARGIN_MS,
+    contextPocWorkspaceFileInputValue,
+    contextPocWorkspaceFileRequestValue,
+    contextPocWorkspaceFileReadResponseValue,
+    contextPocWorkspaceFileClaimValue,
+    contextPocWorkspaceFileSettleValue,
+    contextPocUtf8Clip,
+    contextPocWorkspaceFileOperations,
+    contextPocWorkspaceFileBroker,
+    contextPocWorkspaceBindingEqual,
+    createContextPocWorkspaceFileCoordinator,
+    CONTEXT_POC_WORKSPACE_FILE_EXECUTION_MARGIN_MS,
     contextPocCurrentEffects,
     contextPocRememberTurnMiss,
     contextPocClearTurnMiss,

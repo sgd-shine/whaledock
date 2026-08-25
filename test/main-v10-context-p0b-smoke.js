@@ -725,6 +725,172 @@ async function mainTest() {
       '首次偏好 sync 也必须由 core tick 收口后的 sidecar drain 发起');
   });
 
+  await test('workspace files 主进程闭环绑定页面/上下文/工作区，过期与执行后换绑不伪报', async () => {
+    assert.equal(main.CONTEXT_POC_WORKSPACE_FILE_EXECUTION_MARGIN_MS, 750);
+    const issuedAtMs = 1_000_000;
+    const request = {
+      requestToken: 'ab'.repeat(32),
+      requestSeq: 17,
+      controllerId: 'controller-files-0001',
+      pageInstanceId: 'page-files-00000001',
+      selectionRevision: 3,
+      projectId: `wdp1_${'b'.repeat(32)}`,
+      projectRevision: 'c'.repeat(64),
+      contextRevision: 5,
+      operation: 'catalog.read',
+      input: { cursor: 0, limit: 4 },
+      issuedAtMs,
+      deadlineMs: issuedAtMs + 10_000
+    };
+    assert.deepEqual(main.contextPocWorkspaceFileRequestValue(request), request);
+    assert.equal(main.contextPocWorkspaceFileRequestValue({ ...request, extra: true }), null);
+    assert.equal(main.contextPocWorkspaceFileRequestValue({
+      ...request, deadlineMs: request.deadlineMs + 1
+    }), null, 'Host 不得漂移绝对 deadline');
+    const clip = main.contextPocUtf8Clip('鲸'.repeat(1000), 1800);
+    assert.equal(Buffer.byteLength(clip.text, 'utf8') <= 1800, true);
+    assert.equal(clip.truncated, true);
+
+    const worstProjects = Array.from({ length: 4 }, (_item, index) => ({
+      projectToken: `project-${String(index + 1).repeat(24)}`,
+      title: '标题'.repeat(100), stage: 'topic', stageLabel: '选题',
+      status: '待确认'.repeat(40), updated: '2026-08-25T12:00:00.000Z',
+      decision: '决策'.repeat(100), angle: '角度'.repeat(100), hook: '钩子'.repeat(120),
+      angles: Array(8).fill('候选角度'.repeat(40)),
+      hooks: Array(8).fill('候选钩子'.repeat(40)), canShoot: false, publish: null
+    }));
+    const boundedOps = main.contextPocWorkspaceFileOperations({
+      catalog: () => ({ generation: 9, projects: worstProjects }),
+      document: (projectToken) => ({
+        projectToken, title: '中文稿', stage: 'script', stageLabel: '脚本',
+        blockCount: 2, truncated: false,
+        blocks: [1, 2].map((value) => ({
+          blockToken: `block-${String(value).repeat(24)}`,
+          kind: 'paragraph', text: '中文段落'.repeat(500), startLine: value, endLine: value
+        }))
+      })
+    });
+    const rawCatalog = await boundedOps['catalog.read'].handle({
+      input: { cursor: 0, limit: 4 }, context: { assertCurrent: () => true }
+    });
+    const catalog = boundedOps['catalog.read'].redact(rawCatalog);
+    assert.equal(catalog.projects.length >= 1 && catalog.projects.length <= 4, true);
+    assert.equal(Buffer.byteLength(JSON.stringify(catalog), 'utf8') <= 5600, true,
+      '中文内容卡必须在 Host 6KiB 前主动分页');
+    const projectToken = `project-${'d'.repeat(24)}`;
+    const rawDocument = await boundedOps['document.read'].handle({
+      input: { projectToken, cursor: 0, limit: 2 },
+      context: { assertCurrent: () => true }
+    });
+    const document = boundedOps['document.read'].redact(rawDocument);
+    assert.equal(document.blocks.every((block) => (
+      Buffer.byteLength(block.text, 'utf8') <= 1800 && block.textTruncated
+    )), true);
+    assert.equal(Buffer.byteLength(JSON.stringify(document), 'utf8') < 6144, true);
+
+    const binding = {
+      hostInstanceId: 'host-files-0001',
+      controllerId: request.controllerId,
+      pageInstanceId: request.pageInstanceId,
+      selectionRevision: request.selectionRevision,
+      projectId: request.projectId,
+      contextRevision: request.contextRevision,
+      workspaceGeneration: 11,
+      rootIdentity: { dev: '101', ino: '202' }
+    };
+    const runCoordinator = async ({ bindingFor, catalogHandler, claimDeadline }) => {
+      const calls = [];
+      const broker = main.contextPocWorkspaceFileBroker({ operations: {
+        catalog: catalogHandler || (() => ({
+          generation: 11,
+          projects: [{
+            projectToken: `project-${'e'.repeat(24)}`,
+            title: '真实项目', stage: 'topic', stageLabel: '选题',
+            status: 'needs-decision', updated: '2026-08-25T12:00:00.000Z',
+            angles: [], hooks: [], canShoot: false, publish: null
+          }]
+        }))
+      } });
+      const runtime = {
+        handshake: {
+          hostInstanceId: binding.hostInstanceId,
+          capabilities: ['workspace-files-v1']
+        },
+        binding: {
+          controllerId: binding.controllerId,
+          pageInstanceId: binding.pageInstanceId,
+          selectionRevision: binding.selectionRevision
+        },
+        workspaceFilesBusy: false,
+        transport: {
+          async call(endpoint, payload) {
+            calls.push({ endpoint, payload });
+            if (endpoint === 'workspace/files/read') {
+              return {
+                contract: bridge.CONTRACT_VERSION,
+                hostInstanceId: binding.hostInstanceId,
+                requests: [request]
+              };
+            }
+            if (endpoint === 'workspace/files/claim') {
+              return {
+                claimed: true, code: null, claimToken: 'ef'.repeat(32),
+                runningDeadlineMs: claimDeadline === undefined
+                  ? request.deadlineMs - 100 : claimDeadline
+              };
+            }
+            if (endpoint === 'workspace/files/settle') return { settled: true, code: null };
+            throw new Error('unexpected workspace endpoint');
+          }
+        }
+      };
+      const coordinator = main.createContextPocWorkspaceFileCoordinator({
+        broker, bindingFor, isCurrent: () => true, now: () => issuedAtMs + 100
+      });
+      assert.equal(await coordinator.drain(runtime), true);
+      assert.equal(runtime.workspaceFilesBusy, false);
+      return calls;
+    };
+
+    const successCalls = await runCoordinator({ bindingFor: () => binding });
+    const successSettle = successCalls.find((call) => call.endpoint === 'workspace/files/settle');
+    assert.equal(successSettle.payload.status, 'fulfilled');
+    assert.equal(successSettle.payload.result.kind, 'catalog');
+    assert.doesNotMatch(JSON.stringify(successSettle.payload.result),
+      /(?:absolutePath|relativePath|workspaceKey|sessionRef|claimToken|hash)/);
+
+    let staleRuns = 0;
+    const staleCalls = await runCoordinator({
+      bindingFor: () => null,
+      catalogHandler: () => { staleRuns += 1; return { generation: 1, projects: [] }; }
+    });
+    assert.equal(staleRuns, 0, '执行前 binding 失效不得进入 handler');
+    const staleSettle = staleCalls.find((call) => call.endpoint === 'workspace/files/settle');
+    assert.deepEqual({ status: staleSettle.payload.status, code: staleSettle.payload.code }, {
+      status: 'rejected', code: 'operation-stale'
+    });
+
+    let bindingChecks = 0;
+    const afterCalls = await runCoordinator({
+      bindingFor: () => (++bindingChecks <= 2 ? binding : {
+        ...binding, selectionRevision: binding.selectionRevision + 1
+      })
+    });
+    const afterSettle = afterCalls.find((call) => call.endpoint === 'workspace/files/settle');
+    assert.deepEqual({ status: afterSettle.payload.status, code: afterSettle.payload.code }, {
+      status: 'rejected', code: 'outcome-unknown'
+    }, 'handler 取得执行权后换绑只能报告结果未知');
+
+    const deadlineCalls = await runCoordinator({
+      bindingFor: () => binding,
+      claimDeadline: request.deadlineMs + 1
+    });
+    const deadlineSettle = deadlineCalls.find((call) => call.endpoint === 'workspace/files/settle');
+    assert.deepEqual({ status: deadlineSettle.payload.status, code: deadlineSettle.payload.code }, {
+      status: 'rejected', code: 'operation-timeout'
+    }, 'Host 不能通过 claim 重置原始绝对 deadline');
+  });
+
   await test('shell 公开面按当前 sessionRef 投影，不泄露 ref、路径或标题', async () => {
     const controller = main.createContextPocController({
       env: { WHALEDOCK_CONTEXT_POC: '1' }, bridgeModel: bridge
@@ -1197,6 +1363,11 @@ async function mainTest() {
     assert.ok(tick.indexOf('contextPocSendEffects(runtime, staged.effects)')
       < tick.indexOf('void contextPocPreferences.drain(runtime)'),
     '偏好 sidecar 只能在本轮 core drain/stage 后后台启动');
+    assert.ok(tick.indexOf('contextPocSendEffects(runtime, staged.effects)')
+      < tick.indexOf('void contextPocWorkspaceFiles.drain(runtime)'),
+    '文件 sidecar 只能在本轮 core drain/stage 后后台启动');
+    assert.ok(tick.indexOf('contextPocDrainEventPages(runtime)')
+      < tick.indexOf('void contextPocWorkspaceFiles.drain(runtime)'));
     assert.doesNotMatch(tick, /resetState\(/);
     assert.match(tick, /ERR_CONTEXT_POC_EVENT_GAP/);
     assert.match(tick, /runtime\.terminal = true/);
@@ -1233,6 +1404,7 @@ async function mainTest() {
     );
     assert.match(start, /contextPocConnectHost\(contextPocController, handshake\)/);
     assert.match(start, /resumeEffects: \[\.\.\.connected\.effects\]/);
+    assert.match(start, /workspaceFilesBusy: false/);
     assert.doesNotMatch(start,
       /contextPocConnectHost\(contextPocController, handshake\)[\s\S]{0,180}availabilityReason = null/,
       'handshake 本身不能提前恢复旧 selection 的绿色状态');
@@ -1273,6 +1445,17 @@ async function mainTest() {
       value.indexOf('async function switchToHeavyWorkbench')
     );
     assert.match(switcher, /await wakeContextPocBridge\(\)/);
+
+    const workspaceBinding = value.slice(
+      value.indexOf('function contextPocWorkspaceFileBindingFor'),
+      value.indexOf('function contextPocRuntimeCurrent')
+    );
+    assert.match(workspaceBinding, /selectionRevision !== runtime\.binding\.selectionRevision/);
+    assert.match(workspaceBinding, /session\.effectiveRevision !== request\.contextRevision/);
+    assert.match(workspaceBinding, /JSON\.stringify\(session\.effectiveProject\)/);
+    assert.match(workspaceBinding, /videoRuntime\.generation !== identity\.workspaceGeneration/);
+    assert.match(workspaceBinding, /rootIdentity\.dev/);
+    assert.match(workspaceBinding, /assertVideoRuntimeIdentity\(videoRuntime\)/);
   });
 
   await test('打包独立携带 POC 资产且根生产依赖没有扩张', async () => {

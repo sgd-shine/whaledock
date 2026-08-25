@@ -1093,6 +1093,7 @@ async function main() {
   for (const [file, label] of [
     ['main-v10-switch-feedback-smoke.js', '切换反馈、陈旧 attach 与启动降级'],
     ['context-bridge-smoke.js', '上下文 revision、turn freeze 与 delivery 证据合同'],
+    ['context-file-rpc-smoke.js', 'Host 到 main 的高层文件能力与工作区实体绑定'],
     ['backend-context-bridge-smoke.js', 'managed dsh 资格门与假 transport 收口'],
     ['refork-dsh-ui-smoke.js', '精确 rc.2 可复现 UI refork 与差异预算'],
     ['context-poc-manifest-smoke.js', '固定资产 manifest 生成器与 tamper fail-closed'],

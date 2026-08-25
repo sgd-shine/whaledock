@@ -164,7 +164,8 @@ function run() {
 
     const fakeFs = {
       realpathSync(value) { return path.resolve(value); },
-      lstatSync() {
+      lstatSync(value, options) {
+        if (path.resolve(value) === path.resolve(root)) return fs.lstatSync(root, options);
         return { isSymbolicLink: () => true, isFile: () => false, size: 1 };
       }
     };
@@ -188,6 +189,132 @@ function run() {
       () => cockpit.resolveWorkspaceFile(root, '01_选题库/太大.md'),
       'ERR_FILE_TOO_LARGE'
     );
+  });
+
+  test('readDocument 在 open 窗口拒绝软链接 swap，且使用 O_NOFOLLOW', () => {
+    const raceRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-read-link-')));
+    const target = write(raceRoot, '02_脚本/软链竞态.md', '# 原稿\n');
+    const outside = write(path.join(raceRoot, '..'), `${path.basename(raceRoot)}-外部.md`, '# 外部文件\n');
+    let swapped = false;
+    let openFlags = null;
+    const racingFs = new Proxy(fs, {
+      get(owner, property) {
+        if (property === 'openSync') {
+          return (file, flags, ...args) => {
+            if (path.resolve(file) === path.resolve(target)) {
+              openFlags = flags;
+              swapped = true;
+              const error = new Error('simulated nofollow symlink swap');
+              error.code = 'ELOOP';
+              throw error;
+            }
+            return fs.openSync(file, flags, ...args);
+          };
+        }
+        if (property === 'lstatSync') {
+          return (file, options) => {
+            if (swapped && path.resolve(file) === path.resolve(target)) {
+              return { isSymbolicLink: () => true, isFile: () => false, size: 0 };
+            }
+            return fs.lstatSync(file, options);
+          };
+        }
+        if (property === 'realpathSync') {
+          return (file) => (swapped && path.resolve(file) === path.resolve(target)
+            ? fs.realpathSync(outside) : fs.realpathSync(file));
+        }
+        const value = owner[property];
+        return typeof value === 'function' ? value.bind(owner) : value;
+      }
+    });
+    throwsCode(
+      () => cockpit.readDocument(raceRoot, '02_脚本/软链竞态.md', { fsImpl: racingFs }),
+      'ERR_PATH_CHANGED'
+    );
+    assert.equal(swapped, true);
+    if (Number.isInteger(fs.constants.O_NOFOLLOW) && fs.constants.O_NOFOLLOW !== 0) {
+      assert.equal((openFlags & fs.constants.O_NOFOLLOW) === fs.constants.O_NOFOLLOW, true);
+    }
+    assert.equal(fs.readFileSync(outside, 'utf8'), '# 外部文件\n');
+    fs.rmSync(raceRoot, { recursive: true, force: true });
+    fs.rmSync(outside, { force: true });
+  });
+
+  test('readDocument 绑定 root dev/ino，同路径换根后 fail-closed', () => {
+    const parent = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-read-root-')));
+    const raceRoot = path.join(parent, 'workspace');
+    const oldRoot = path.join(parent, 'old-workspace');
+    const target = write(raceRoot, '02_脚本/换根.md', '# 原工作区\n');
+    let swapped = false;
+    const racingFs = new Proxy(fs, {
+      get(owner, property) {
+        if (property === 'openSync') {
+          return (file, flags, ...args) => {
+            if (!swapped && path.resolve(file) === path.resolve(target)) {
+              swapped = true;
+              fs.renameSync(raceRoot, oldRoot);
+              write(raceRoot, '02_脚本/换根.md', '# 第三方新工作区\n');
+            }
+            return fs.openSync(file, flags, ...args);
+          };
+        }
+        const value = owner[property];
+        return typeof value === 'function' ? value.bind(owner) : value;
+      }
+    });
+    throwsCode(
+      () => cockpit.readDocument(raceRoot, '02_脚本/换根.md', { fsImpl: racingFs }),
+      'ERR_ROOT_CHANGED'
+    );
+    assert.equal(fs.readFileSync(path.join(raceRoot, '02_脚本', '换根.md'), 'utf8'),
+      '# 第三方新工作区\n');
+    assert.equal(fs.readFileSync(path.join(oldRoot, '02_脚本', '换根.md'), 'utf8'), '# 原工作区\n');
+    fs.rmSync(parent, { recursive: true, force: true });
+  });
+
+  test('readDocument 的 CAS 快照在读后同 hash 换 inode 时拒绝返回', () => {
+    const raceRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-read-cas-')));
+    const original = '# 内容完全相同\n';
+    const target = write(raceRoot, '02_脚本/CAS.md', original);
+    const incoming = write(raceRoot, '02_脚本/换入.md', original);
+    const displaced = path.join(raceRoot, '02_脚本', 'CAS-old.md');
+    const originalIno = String(fs.lstatSync(target, { bigint: true }).ino);
+    const incomingIno = String(fs.lstatSync(incoming, { bigint: true }).ino);
+    let fileFstats = 0;
+    let swapped = false;
+    const racingFs = new Proxy(fs, {
+      get(owner, property) {
+        if (property === 'fstatSync') {
+          return (descriptor, options) => {
+            const stat = fs.fstatSync(descriptor, options);
+            if (String(stat.ino) === originalIno) {
+              fileFstats += 1;
+              if (fileFstats === 2) {
+                fs.renameSync(target, displaced);
+                fs.renameSync(incoming, target);
+                swapped = true;
+              }
+            }
+            return stat;
+          };
+        }
+        const value = owner[property];
+        return typeof value === 'function' ? value.bind(owner) : value;
+      }
+    });
+    throwsCode(
+      () => cockpit.readDocument(raceRoot, '02_脚本/CAS.md', { fsImpl: racingFs }),
+      'ERR_PATH_CHANGED'
+    );
+    assert.equal(swapped, true);
+    assert.notEqual(originalIno, incomingIno);
+    assert.equal(String(fs.lstatSync(target, { bigint: true }).ino), incomingIno);
+    assert.equal(fs.readFileSync(target, 'utf8'), original);
+    const stable = cockpit.readDocument(raceRoot, '02_脚本/CAS.md');
+    assert.equal(stable.text, original);
+    assert.equal(stable.hash, cockpit.hashText(original));
+    assert.equal(stable.binding.fileIno, incomingIno);
+    fs.rmSync(raceRoot, { recursive: true, force: true });
   });
 
   test('parseDocumentBlocks 按标题、空段、表格行切块且 id 不受空行位移影响', () => {
@@ -225,13 +352,25 @@ function run() {
   });
 
   test('readDocument 不返回绝对路径，旧文件从目录推导 stage', () => {
-    write(root, '02_脚本/旧稿.md', '# 旧稿标题\n\n第一段。\n');
+    const file = write(root, '02_脚本/旧稿.md', '# 旧稿标题\n\n第一段。\n');
     const document = cockpit.readDocument(root, '02_脚本/旧稿.md');
+    const rootStat = fs.lstatSync(fs.realpathSync(root), { bigint: true });
+    const parentStat = fs.lstatSync(fs.realpathSync(path.dirname(file)), { bigint: true });
+    const fileStat = fs.lstatSync(fs.realpathSync(file), { bigint: true });
     assert.equal(document.relativePath, '02_脚本/旧稿.md');
     assert.equal(document.title, '旧稿标题');
     assert.equal(document.stage, 'script');
     assert.deepEqual(document.fields, {});
     assert.equal(document.hash, cockpit.hashText(document.text));
+    assert.deepEqual(document.binding, {
+      rootDev: String(rootStat.dev),
+      rootIno: String(rootStat.ino),
+      parentDev: String(parentStat.dev),
+      parentIno: String(parentStat.ino),
+      fileDev: String(fileStat.dev),
+      fileIno: String(fileStat.ino)
+    });
+    assert.equal(Object.isFrozen(document.binding), true);
     assert.ok(document.blocks.length >= 2);
     assert.equal(JSON.stringify(document).includes(root), false);
   });
@@ -256,7 +395,11 @@ function run() {
         return typeof value === 'function' ? value.bind(target) : value;
       }
     });
-    const scanned = cockpit.scanWorkspace(root, { fsImpl: guardedFs });
+    const scanRootStat = fs.lstatSync(fs.realpathSync(root), { bigint: true });
+    const scanned = cockpit.scanWorkspace(root, {
+      fsImpl: guardedFs,
+      expectedRootIdentity: { dev: scanRootStat.dev, ino: scanRootStat.ino }
+    });
     assert.equal(writes, 0);
     assert.equal(scanned.items.some((item) => item.relativePath.includes('05_禁止扫描')), false);
     assert.equal(scanned.items.some((item) => item.title === '绝不能出现'), false);
@@ -268,6 +411,75 @@ function run() {
     ]);
     assert.ok(scanned.items.length <= cockpit.LIMITS.maxScanItems);
     assert.equal(JSON.stringify(scanned).includes(root), false);
+  });
+
+  test('scanWorkspace 绑定 expected root，换 inode 或根软链接均稳定拒绝', () => {
+    const parent = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-scan-root-')));
+    const scanRoot = path.join(parent, 'workspace');
+    const oldRoot = path.join(parent, 'old-workspace');
+    const replacement = path.join(parent, 'replacement');
+    write(scanRoot, '01_选题库/原项目.md', '# 原项目\n');
+    write(replacement, '01_选题库/替换目标.md', '# 替换目标不得泄漏\n');
+    const expectedStat = fs.lstatSync(scanRoot, { bigint: true });
+    const expectedRootIdentity = { dev: expectedStat.dev, ino: expectedStat.ino };
+    let swapped = false;
+    let replacementOpens = 0;
+    let replacementDirectoryReads = 0;
+    const checkpoints = [];
+    const guardedFs = new Proxy(fs, {
+      get(owner, property) {
+        if (property === 'openSync') {
+          return (file, flags, ...args) => {
+            const resolved = path.resolve(file);
+            if (swapped && (resolved === scanRoot || resolved.startsWith(`${scanRoot}${path.sep}`))) {
+              replacementOpens += 1;
+            }
+            return fs.openSync(file, flags, ...args);
+          };
+        }
+        if (property === 'readdirSync') {
+          return (directory, ...args) => {
+            const resolved = path.resolve(directory);
+            if (swapped && (resolved === scanRoot || resolved.startsWith(`${scanRoot}${path.sep}`))) {
+              replacementDirectoryReads += 1;
+            }
+            return fs.readdirSync(directory, ...args);
+          };
+        }
+        const value = owner[property];
+        return typeof value === 'function' ? value.bind(owner) : value;
+      }
+    });
+    throwsCode(() => cockpit.scanWorkspace(scanRoot, {
+      fsImpl: guardedFs,
+      expectedRootIdentity,
+      onScanCheckpoint(checkpoint) {
+        checkpoints.push(checkpoint);
+        if (!swapped && checkpoint.stage === 'before-directory-read'
+            && checkpoint.relativePath === '01_选题库') {
+          fs.renameSync(scanRoot, oldRoot);
+          fs.renameSync(replacement, scanRoot);
+          swapped = true;
+        }
+      }
+    }), 'ERR_ROOT_CHANGED');
+    assert.equal(swapped, true);
+    assert.equal(replacementOpens, 0);
+    assert.equal(replacementDirectoryReads, 0);
+    assert.equal(fs.readFileSync(path.join(scanRoot, '01_选题库', '替换目标.md'), 'utf8'),
+      '# 替换目标不得泄漏\n');
+    assert.equal(fs.readFileSync(path.join(oldRoot, '01_选题库', '原项目.md'), 'utf8'), '# 原项目\n');
+    assert.equal(checkpoints.some((checkpoint) => JSON.stringify(checkpoint).includes(parent)), false);
+
+    const realRoot = path.join(parent, 'real-root');
+    const linkRoot = path.join(parent, 'linked-root');
+    write(realRoot, '01_选题库/链接目标.md', '# 链接目标\n');
+    const realStat = fs.lstatSync(realRoot, { bigint: true });
+    fs.symlinkSync(realRoot, linkRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    throwsCode(() => cockpit.scanWorkspace(linkRoot, {
+      expectedRootIdentity: { dev: realStat.dev, ino: realStat.ino }
+    }), 'ERR_ROOT_CHANGED');
+    fs.rmSync(parent, { recursive: true, force: true });
   });
 
   test('scanWorkspace 在根目录消失时报告不可读，不冒充空工作区', () => {

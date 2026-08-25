@@ -10,11 +10,34 @@ window.__ModuleLoader__.load({
     const CHANNEL = '/whaledock.context';
     const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
     const TOKEN_RE = /^[a-f0-9]{64}$/;
+    const CONTROL_RE = /[\u0000-\u001f\u007f]/;
+    const WORKSPACE_TEXT_CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
     const PREFLIGHT_TIMEOUT_MS = 2500;
     const PREFLIGHT_RETRY_MS = 120;
     const MAX_PREFERENCE_REVISION = 1_000_000_000;
     const MAX_PREFERENCE_LISTENERS = 64;
     const PREFERENCE_BOOTSTRAP_RETRY_MS = Object.freeze([50, 100, 200, 400, 800]);
+    const WORKSPACE_FILE_OPERATIONS = new Set([
+      'catalog.read', 'document.read', 'topic.choose'
+    ]);
+    const WORKSPACE_FILE_STATES = new Set([
+      'queued', 'running', 'fulfilled', 'rejected', 'cancelled', 'expired'
+    ]);
+    const WORKSPACE_FILE_CODES = new Set([
+      'workspace-unavailable', 'workspace-mismatch', 'operation-invalid',
+      'operation-timeout', 'operation-failed', 'operation-stale',
+      'outcome-unknown', 'busy', 'cancelled'
+    ]);
+    const WORKSPACE_FILE_FORBIDDEN_KEYS = new Set([
+      'absolutepath', 'relativepath', 'effectivepath', 'workspacekey', 'cwd',
+      'filepath', 'root', 'rootpath', 'frontmatter', 'patch',
+      'sessionref', 'currentsessionid', 'rawsession', 'context', 'envelope',
+      'authtoken', 'selectiontoken', 'controllerproof', 'claimtoken', 'requestseq',
+      'hash', 'dev', 'ino'
+    ]);
+    const WORKSPACE_FILE_POLL_MS = 120;
+    const MAX_WORKSPACE_FILE_INPUT_BYTES = 4 * 1024;
+    const MAX_WORKSPACE_FILE_RESULT_BYTES = 6 * 1024;
     const SHELL_CONTRACT = 'whaledock.content-shell/v1';
     const inject = ['connection', 'sessions'];
 
@@ -595,11 +618,12 @@ window.__ModuleLoader__.load({
       });
     }
 
-    function createContentShell(ctx, preferences) {
+    function createContentShell(ctx, preferences, workspaceFiles) {
       return Object.freeze({
         contract: SHELL_CONTRACT,
         Component: WhaleDockContentShell,
         preferences,
+        workspaceFiles,
         projectActions: createProjectActions(ctx)
       });
     }
@@ -626,6 +650,67 @@ window.__ModuleLoader__.load({
       return plain(value) && required.every((key) => (
         Object.prototype.hasOwnProperty.call(value, key)
       )) && Object.keys(value).every((key) => required.includes(key));
+    }
+
+    function utf8Bytes(value) {
+      let bytes = 0;
+      for (const symbol of String(value)) {
+        const code = symbol.codePointAt(0);
+        bytes += code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4;
+      }
+      return bytes;
+    }
+
+    function safeWorkspaceValue(value, maximumBytes) {
+      const canonicalKey = (key) => key.toLowerCase().replace(/[-_]/g, '');
+      const visit = (item, depth) => {
+        if (depth > 5) return null;
+        if (item === null || typeof item === 'boolean') return item;
+        if (Number.isSafeInteger(item) && Math.abs(item) <= 1_000_000_000_000) return item;
+        if (typeof item === 'string') {
+          return utf8Bytes(item) <= 2048 && !WORKSPACE_TEXT_CONTROL_RE.test(item) ? item : null;
+        }
+        if (Array.isArray(item)) {
+          if (item.length > 64) return null;
+          const result = [];
+          for (const child of item) {
+            const clean = visit(child, depth + 1);
+            if (clean === null && child !== null) return null;
+            result.push(clean);
+          }
+          return result;
+        }
+        if (!plain(item) || Object.keys(item).length > 64) return null;
+        const result = {};
+        for (const [key, child] of Object.entries(item)) {
+          if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(key)
+              || WORKSPACE_FILE_FORBIDDEN_KEYS.has(canonicalKey(key))) return null;
+          const clean = visit(child, depth + 1);
+          if (clean === null && child !== null) return null;
+          result[key] = clean;
+        }
+        return result;
+      };
+      const clean = visit(value, 0);
+      if (!plain(clean)) return null;
+      return utf8Bytes(JSON.stringify(clean)) <= maximumBytes
+        ? Object.freeze(clean) : null;
+    }
+
+    function workspaceFileSnapshot(value) {
+      if (!exact(value, ['requestToken', 'state', 'code', 'result'])
+          || typeof value.requestToken !== 'string' || !TOKEN_RE.test(value.requestToken)
+          || !WORKSPACE_FILE_STATES.has(value.state)) return null;
+      if (value.state === 'fulfilled') {
+        const result = safeWorkspaceValue(value.result, MAX_WORKSPACE_FILE_RESULT_BYTES);
+        return value.code === null && result
+          ? Object.freeze({ ...value, result }) : null;
+      }
+      const codeValid = (value.state === 'queued' || value.state === 'running')
+        ? value.code === null
+        : WORKSPACE_FILE_CODES.has(value.code);
+      return codeValid && value.result === null
+        ? Object.freeze({ ...value, result: null }) : null;
     }
 
     function preferencePatch(value) {
@@ -765,6 +850,115 @@ window.__ModuleLoader__.load({
         selectionRevision,
         selectionToken,
         controllerProof
+      });
+      const workspaceWait = (signal) => new Promise((resolve) => {
+        if (abort.signal.aborted || signal?.aborted) { resolve(false); return; }
+        let timer = null;
+        const finish = (value) => {
+          if (timer !== null) globalThis.clearTimeout(timer);
+          abort.signal.removeEventListener('abort', onAbort);
+          signal?.removeEventListener('abort', onAbort);
+          resolve(value);
+        };
+        const onAbort = () => finish(false);
+        abort.signal.addEventListener('abort', onAbort, { once: true });
+        signal?.addEventListener('abort', onAbort, { once: true });
+        timer = globalThis.setTimeout(() => finish(true), WORKSPACE_FILE_POLL_MS);
+      });
+      const workspaceFiles = Object.freeze({
+        async request(operation, value = {}, signal) {
+          const input = safeWorkspaceValue(value, MAX_WORKSPACE_FILE_INPUT_BYTES);
+          if (!WORKSPACE_FILE_OPERATIONS.has(operation) || !input) {
+            return Object.freeze({
+              accepted: false, requestToken: null, state: 'rejected',
+              code: 'operation-invalid', deadlineMs: null
+            });
+          }
+          const registered = await registerSelection(true);
+          if (registered?.ok !== true || registered.value?.state !== 'selected') {
+            return Object.freeze({
+              accepted: false, requestToken: null, state: 'rejected',
+              code: 'workspace-unavailable', deadlineMs: null
+            });
+          }
+          try {
+            const reply = await connection.rpc.call(CHANNEL, 'workspace/files/request', {
+              ...preferenceAuth(), operation, input
+            }, signal || abort.signal);
+            const result = reply?.ok === true ? reply.value : null;
+            if (!exact(result, [
+              'accepted', 'requestToken', 'state', 'code', 'deadlineMs'
+            ]) || typeof result.accepted !== 'boolean' || result.state !== 'rejected'
+              && result.state !== 'queued') throw new Error('workspace request invalid');
+            if (result.accepted) {
+              if (!TOKEN_RE.test(result.requestToken) || result.state !== 'queued'
+                  || result.code !== null || !Number.isSafeInteger(result.deadlineMs)
+                  || result.deadlineMs <= Date.now()
+                  || result.deadlineMs > Date.now() + 20000) {
+                throw new Error('workspace request invalid');
+              }
+            } else if (result.requestToken !== null || result.deadlineMs !== null
+                || result.state !== 'rejected' || !WORKSPACE_FILE_CODES.has(result.code)) {
+              throw new Error('workspace request invalid');
+            }
+            return Object.freeze({ ...result });
+          } catch (_error) {
+            return Object.freeze({
+              accepted: false, requestToken: null, state: 'rejected',
+              code: 'outcome-unknown', deadlineMs: null
+            });
+          }
+        },
+        async status(requestToken, signal) {
+          if (typeof requestToken !== 'string' || !TOKEN_RE.test(requestToken)) return null;
+          try {
+            const reply = await connection.rpc.call(CHANNEL, 'workspace/files/status', {
+              ...preferenceAuth(), requestToken
+            }, signal || abort.signal);
+            return reply?.ok === true ? workspaceFileSnapshot(reply.value) : null;
+          } catch (_error) { return null; }
+        },
+        async cancel(requestToken) {
+          if (typeof requestToken !== 'string' || !TOKEN_RE.test(requestToken)) {
+            return Object.freeze({ cancelled: false, code: 'already-settled', snapshot: null });
+          }
+          try {
+            const reply = await connection.rpc.call(CHANNEL, 'workspace/files/cancel', {
+              ...preferenceAuth(), requestToken
+            }, abort.signal);
+            const result = reply?.ok === true ? reply.value : null;
+            const snapshot = result && workspaceFileSnapshot(result.snapshot);
+            if (!exact(result, ['cancelled', 'code', 'snapshot']) || !snapshot
+                || typeof result.cancelled !== 'boolean'
+                || !['cancelled', 'already-running', 'already-settled'].includes(result.code)
+                || (result.cancelled !== (result.code === 'cancelled'))) return null;
+            return Object.freeze({ ...result, snapshot });
+          } catch (_error) { return null; }
+        },
+        async execute(operation, value = {}, signal) {
+          const queued = await workspaceFiles.request(operation, value, signal);
+          if (!queued.accepted) return Object.freeze({
+            requestToken: null, state: 'rejected', code: queued.code, result: null
+          });
+          while (!abort.signal.aborted && !signal?.aborted
+              && Date.now() <= queued.deadlineMs) {
+            const snapshot = await workspaceFiles.status(queued.requestToken, signal);
+            if (!snapshot) return Object.freeze({
+              requestToken: queued.requestToken, state: 'rejected',
+              code: 'outcome-unknown', result: null
+            });
+            if (snapshot.state !== 'queued' && snapshot.state !== 'running') return snapshot;
+            if (!await workspaceWait(signal)) break;
+          }
+          const cancelled = await workspaceFiles.cancel(queued.requestToken);
+          if (cancelled?.snapshot
+              && cancelled.snapshot.state !== 'queued'
+              && cancelled.snapshot.state !== 'running') return cancelled.snapshot;
+          return Object.freeze({
+            requestToken: queued.requestToken, state: 'rejected',
+            code: 'outcome-unknown', result: null
+          });
+        }
       });
       const adoptPreferenceSnapshot = (value) => {
         const snapshot = preferenceSnapshot(value);
@@ -948,10 +1142,15 @@ window.__ModuleLoader__.load({
         const dispose = ctx.reflect.provide('whaledockShellPreferences', preferences);
         if (typeof dispose === 'function') disposePreferences = dispose;
       } catch (_error) { /* 偏好服务失败不能破坏 context gate */ }
+      let disposeWorkspaceFiles = () => {};
+      try {
+        const dispose = ctx.reflect.provide('whaledockWorkspaceFiles', workspaceFiles);
+        if (typeof dispose === 'function') disposeWorkspaceFiles = dispose;
+      } catch (_error) { /* 文件服务失败不能破坏 context gate */ }
       let disposeContentShell = () => {};
       let disposeShellStyle = () => {};
       try {
-        const shell = createContentShell(ctx, preferences);
+        const shell = createContentShell(ctx, preferences, workspaceFiles);
         const dispose = ctx.reflect.provide('whaledockContentShell', shell);
         if (typeof dispose === 'function') disposeContentShell = dispose;
         disposeShellStyle = installShellStyle();
@@ -959,6 +1158,7 @@ window.__ModuleLoader__.load({
       ctx.effect(() => () => {
         try { disposeShellStyle(); } catch (_error) { /* 样式清理失败不阻断协议释放 */ }
         try { disposeContentShell(); } catch (_error) { /* 官方三栏仍可接管回退 */ }
+        try { disposeWorkspaceFiles(); } catch (_error) { /* context gate 仍继续释放 */ }
         try { disposePreferences(); } catch (_error) { /* context gate 仍继续释放 */ }
         disposeGate();
         unsubscribeSessions();
