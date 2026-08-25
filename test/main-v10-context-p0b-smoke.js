@@ -2035,6 +2035,9 @@ async function mainTest() {
     });
     const value = source('main.js');
     assert.match(value, /userDataPath: app\.getPath\('userData'\)/);
+    assert.match(value, /const bundledResourcesPath = app\.isPackaged\s*\? process\.resourcesPath\s*: path\.join\(__dirname, 'vendor'\)/,
+      '源码预览必须使用仓库已构建的 vendor/dsh-runtime，打包版继续使用 Resources');
+    assert.match(value, /resourcesPath: bundledResourcesPath/);
     assert.match(value, /contextPocAssetRoot: app\.isPackaged/);
     assert.match(value, /contextPocEnabled: contextPocController\.enabled/);
   });

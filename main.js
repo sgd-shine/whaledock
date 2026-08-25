@@ -8229,9 +8229,12 @@ async function handleEventEffects(value, monitor) {
 
 // ---------- 启动 ----------
 async function onReady() {
+  const bundledResourcesPath = app.isPackaged
+    ? process.resourcesPath
+    : path.join(__dirname, 'vendor');
   backend.setRuntimeInfo({
     execPath: process.execPath,
-    resourcesPath: process.resourcesPath,
+    resourcesPath: bundledResourcesPath,
     userDataPath: app.getPath('userData'),
     contextPocAssetRoot: app.isPackaged
       ? path.join(process.resourcesPath, 'context-poc')
