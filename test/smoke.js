@@ -12,6 +12,7 @@ const backend = require('../lib/backend');
 const config = require('../lib/config');
 const log = require('../lib/log');
 const update = require('../lib/update');
+const hotfixBuild = require('../scripts/hotfix-build-config');
 const macosBuildVisibility = require('../scripts/macos-build-visibility');
 const macosCodesign = require('../scripts/macos-codesign');
 
@@ -278,6 +279,58 @@ async function main() {
       && macosBuildVisibility.archiveMacAppBundles(macRelease, { unregister: false }).length === 0);
 
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  const hotfixConfig = hotfixBuild.createHotfixBuildConfig(pkg);
+  const sourceContextResources = pkg.build.extraResources.filter(hotfixBuild.isContextPocResource);
+  const packagedContextResources = hotfixConfig.extraResources.filter(hotfixBuild.isContextPocResource);
+  check('packaging: v0.9.1 独立配置精确排除 context-poc 且源码资产保留',
+    pkg.version === hotfixBuild.HOTFIX_VERSION
+      && sourceContextResources.length === 1
+      && packagedContextResources.length === 0
+      && pkg.scripts['dist:mac:arm64'].includes('--config electron-builder.v0.9.1.cjs')
+      && pkg.scripts['dist:mac:x64'].includes('--config electron-builder.v0.9.1.cjs')
+      && pkg.scripts['dist:win'].includes('--config electron-builder.v0.9.1.cjs'));
+
+  let wrongVersionRejected = false;
+  let missingResourceRejected = false;
+  let duplicateResourceRejected = false;
+  try { hotfixBuild.createHotfixBuildConfig({ ...pkg, version: '0.9.2' }); }
+  catch (_error) { wrongVersionRejected = true; }
+  try {
+    hotfixBuild.createHotfixBuildConfig({
+      ...pkg,
+      build: {
+        ...pkg.build,
+        extraResources: pkg.build.extraResources.filter(
+          (entry) => !hotfixBuild.isContextPocResource(entry)
+        )
+      }
+    });
+  } catch (_error) { missingResourceRejected = true; }
+  try {
+    hotfixBuild.createHotfixBuildConfig({
+      ...pkg,
+      build: {
+        ...pkg.build,
+        extraResources: [...pkg.build.extraResources, sourceContextResources[0]]
+      }
+    });
+  } catch (_error) { duplicateResourceRejected = true; }
+  check('packaging: v0.9.1 独立配置对错版、漏配与重复资源均 fail-closed',
+    wrongVersionRejected && missingResourceRejected && duplicateResourceRejected);
+
+  const cleanHotfixResources = path.join(tmp, 'hotfix-resources-clean');
+  fs.mkdirSync(cleanHotfixResources, { recursive: true });
+  const cleanHotfixVerified = hotfixBuild.verifyHotfixResources(cleanHotfixResources)
+    === path.resolve(cleanHotfixResources);
+  fs.mkdirSync(path.join(cleanHotfixResources, 'context-poc'));
+  let leakedContextRejected = false;
+  try {
+    hotfixBuild.verifyHotfixResources(cleanHotfixResources);
+  } catch (_error) {
+    leakedContextRejected = true;
+  }
+  check('packaging: v0.9.1 成品回读对 context-poc 缺席放行、存在即拒绝',
+    cleanHotfixVerified && leakedContextRejected);
   check('packaging: macOS 打包挂上 afterPack 签名钩子',
     pkg.build.afterPack === 'scripts/macos-codesign.js' && pkg.build.mac.identity === null,
     `${pkg.build.afterPack} / identity=${String(pkg.build.mac.identity)}`);
@@ -307,6 +360,18 @@ async function main() {
   );
   const publishStepOffset = releaseWorkflow.indexOf('  publish-release:');
   const publishStep = releaseWorkflow.slice(publishStepOffset);
+  const hotfixConfigUseCount = (releaseWorkflow.match(/--config electron-builder\.v0\.9\.1\.cjs/g) || []).length;
+  const hotfixReadbackCount = (releaseWorkflow.match(/hotfix-build-config\.js "?--resources/g) || []).length;
+  check('packaging: v0.9.1 三平台构建与全载体回读都经过实验资产排除门',
+    hotfixConfigUseCount === 3
+      && hotfixReadbackCount >= 8
+      && publishStep.includes('## v0.9.1 更新')
+      && publishStep.includes('切换不再“点了没反应”')
+      && publishStep.includes('安全启动可见降级')
+      && publishStep.includes('本版不含 v0.10 实验功能')
+      && publishStep.includes('默认关闭的壳侧预备代码仍在')
+      && resumeWorkflow.includes('hotfix-build-config.js --resources="$mount_dir/WhaleDock.app/Contents/Resources"')
+      && resumeWorkflow.includes('## v0.9.1 更新'));
   check('packaging: 发布仅下载 final macOS 与 Windows 成品，排除 pending 覆盖',
     publishStepOffset > 0
       && publishStep.includes('name: whaledock-mac-${{ github.ref_name }}')

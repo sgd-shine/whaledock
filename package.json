@@ -1,7 +1,7 @@
 {
   "name": "whaledock",
   "productName": "WhaleDock",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "鲸坞 WhaleDock — Unofficial desktop app for DeepSeek Harness (dsh): auto-starts the local dsh backend and wraps its Web UI in a native window. 非官方 DeepSeek Harness 桌面客户端：给鲸鱼一个靠岸的坞。",
   "main": "main.js",
   "author": "SGD",
@@ -21,11 +21,11 @@
     "dist": "npm run dist:mac:arm64",
     "dist:mac": "npm run dist:mac:arm64 && npm run dist:mac:x64",
     "predist:mac:arm64": "npm run bundle:dsh -- --platform=darwin --arch=arm64",
-    "dist:mac:arm64": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg zip --arm64 --publish never",
+    "dist:mac:arm64": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config electron-builder.v0.9.1.cjs --mac dmg zip --arm64 --publish never",
     "predist:mac:x64": "npm run bundle:dsh -- --platform=darwin --arch=x64",
-    "dist:mac:x64": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg zip --x64 --publish never",
+    "dist:mac:x64": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config electron-builder.v0.9.1.cjs --mac dmg zip --x64 --publish never",
     "predist:win": "npm run bundle:dsh -- --platform=win32 --arch=x64",
-    "dist:win": "electron-builder --win nsis portable --x64 --publish never"
+    "dist:win": "electron-builder --config electron-builder.v0.9.1.cjs --win nsis portable --x64 --publish never"
   },
   "devDependencies": {
     "electron": "^43.4.0",

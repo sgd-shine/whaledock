@@ -226,6 +226,28 @@ test('外层 verifier 用成品 Electron + ELECTRON_RUN_AS_NODE 发起私有 pro
   }
 });
 
+test('v0.9.1 外层 verifier 在启动成品 Electron 前拒绝 context-poc', () => {
+  const value = fixture();
+  try {
+    writeJson(path.join(value.root, 'package.json'), {
+      name: 'whaledock-fixture', version: '0.9.1'
+    });
+    fs.mkdirSync(path.join(value.resources, 'context-poc'));
+    let spawned = false;
+    assert.throws(() => verifier.verifyApp({
+      root: value.root,
+      appRoot: value.appRoot,
+      spawnSync: () => {
+        spawned = true;
+        return { status: 1, stdout: '', stderr: '' };
+      }
+    }), /v0\.9\.1 成品错误携带 context-poc/);
+    assert.equal(spawned, false);
+  } finally {
+    fs.rmSync(value.root, { recursive: true, force: true });
+  }
+});
+
 test('CI、Release 与续公证覆盖两套合规和全部安装载体', () => {
   const root = path.join(__dirname, '..');
   const ci = fs.readFileSync(path.join(root, '.github', 'workflows', 'ci.yml'), 'utf8');
@@ -247,11 +269,19 @@ test('CI、Release 与续公证覆盖两套合规和全部安装载体', () => {
   ]) assert.equal(release.includes(expected), true, expected);
   assert.equal((release.match(/verify-packaged-compliance\.js/g) || []).length >= 9, true);
   assert.equal((release.match(/verify-packaged-app-runtime\.js/g) || []).length >= 8, true);
+  assert.match(release, /hotfix-build-config\.js --resources=release\/\.app-archives\.noindex/);
+  assert.match(resume, /hotfix-build-config\.js --resources="\$mount_dir\/WhaleDock\.app\/Contents\/Resources"/);
   assert.match(resume, /Resume tag\/package\/lock version mismatch/);
   assert.match(resume, /verify-packaged-compliance\.js --search="\$mount_dir\/WhaleDock\.app\/Contents\/Resources"/);
   assert.match(resume, /verify-packaged-app-runtime\.js --app="\$mount_dir\/WhaleDock\.app"/);
-  assert.match(release, /## v0\.9\.0 更新/);
-  assert.match(resume, /## v0\.9\.0 更新/);
+  assert.match(release, /## v0\.9\.1 更新/);
+  assert.match(resume, /## v0\.9\.1 更新/);
+  for (const value of [release, resume]) {
+    assert.match(value, /切换不再“点了没反应”/);
+    assert.match(value, /安全启动可见降级/);
+    assert.match(value, /本版不含 v0\.10 实验功能/);
+    assert.match(value, /默认关闭的壳侧预备代码仍在/);
+  }
 });
 
 console.log(`PACKAGED APP RUNTIME ALL PASS (${passed})`);

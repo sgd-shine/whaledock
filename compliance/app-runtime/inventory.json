@@ -4,7 +4,7 @@
     "name": "@larksuiteoapi/node-sdk",
     "version": "1.73.0"
   },
-  "packageLockSha256": "9f68b1e8c3efd3cc96fe0c06a81a03f37f4e26d3bed160d893eec1398c8cde40",
+  "packageLockSha256": "2591046207598b0a2eebe85d2eb74094ecdaea1a43521fa01d05d16edc5c1dc3",
   "packagingPolicy": {
     "schemaVersion": 1,
     "electronBuilderVersion": "26.15.3",

@@ -6,7 +6,7 @@
 
 ## 闭包快照
 
-- 根 package-lock SHA-256：`9f68b1e8c3efd3cc96fe0c06a81a03f37f4e26d3bed160d893eec1398c8cde40`
+- 根 package-lock SHA-256：`2591046207598b0a2eebe85d2eb74094ecdaea1a43521fa01d05d16edc5c1dc3`
 - 闭包 SHA-256：`667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`
 - 包数：52
 - 安装树文件：830
