@@ -16,6 +16,7 @@ const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 8 * 1024 * 1024;
 const SOURCE_FILES = Object.freeze([
   'context-bridge.patch.yml',
+  'FORK-NOTICE.md',
   'plugin/package.json',
   'plugin/lib/index.js',
   'plugin/lib/client.js',

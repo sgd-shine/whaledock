@@ -1282,6 +1282,7 @@ async function mainTest() {
     ));
     assert.deepEqual(contextResource.filter, [
       'context-bridge.patch.yml',
+      'FORK-NOTICE.md',
       'plugin/package.json',
       'plugin/lib/index.js',
       'plugin/lib/client.js',

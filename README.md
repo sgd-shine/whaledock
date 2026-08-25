@@ -12,9 +12,10 @@
 - **新功能开发已经切到 v0.10+**：当前独立分支 `codex/v010-forward` 从上述稳定基线起步，应用身份为 `0.10.0-alpha.1`。本地预览包使用独立构建配置与 `release-preview/`，不会冒充正式 v0.10 Release。
 - v0.10 的原生页面保留官方会话侧栏，同时加入内容视图、多项目对齐、受控草稿填充、发送前上下文闸门、偏好持久化和桥不可用时的可见降级。受管页面只在鲸坞自行拉起、精确内置 dsh `0.1.1-rc.2` 且固定资产清单逐文件通过时启用；外部或无法证明的 dsh 继续使用原生会话，不接管发送。
 - v0.10 受管模式使用鲸坞自己的持久 dsh 数据目录，跨后端重启、App 重启与工作区切换保留会话、设置、凭据、附件、存储和预设。它不会读取、迁移、覆盖或清理 `~/.dsh`；旧环境数据不会自动导入，首次使用可能需要重新配置模型。
-- **v0.10 Batch 1 已完成本地 alpha 收口**：统一 `npm run smoke` 实跑 **735 PASS / 42 个 ALL PASS**；受管基线固定为 14 个文件、`564,862 B`、SHA-256 `c5df6830…b79e`。真实 rc.2 双冷启动回读了 Host/HTTP、会话与 cwd 恢复、同一持久 home/asset root 复用，设置与凭据文件保持不变，退出后端口已关闭。
-- **arm64 预览是本地安装证据，不是发布**：本次 App 已用 Developer ID Application 签名并开启 Hardened Runtime，也已在本机安装；但未经 Apple 公证、没有 stapled ticket，因而不是公开或正式安装包。当前 ZIP / DMG 为 `193,679,417 B` / `175,633,885 B`；本地安装 App 约 `600,872 KiB`，其中内置 dsh runtime 约 `286,532 KiB`。
-- 安装态首次沿用 macOS 受保护文稿目录作为 cwd 时，自动验收不代用户授予 TCC 文件访问权限；本轮只是改用专用、非受保护的测试工作区完成 Batch 1 验证。这不代表文稿目录权限已通过，仍需用户本人在正式验收时确认。下一步是 Batch 2 可复现 refork / 双闭包合规；v0.10 仍未发布，三平台 CI、Windows/Intel 真机与后续人工验收也仍是独立证据门。
+- **v0.10 Batch 1 已完成受管上下文与持久数据根收口**：真实 rc.2 双冷启动回读了 Host/HTTP、会话与 cwd 恢复、同一持久 home/asset root 复用，设置与凭据文件保持不变，退出后端口已关闭。
+- **v0.10 Batch 2 已完成可复现 refork 与双合规闭环**：两个 dsh UI fork 均由锁定的 rc.2 上游 tarball 和精确 patch 重建，布局 fork 差异为 `42+/5-`，对话 fork 为 `19+/3-`；未知版本在网络前拒绝，下载、tar、patch、差异预算与原子更新均有 fail-closed 守门。统一 `npm run smoke` 实跑 **773 PASS / 43 个 ALL PASS**；当前 context 基线为 **15 个文件 / 575,921 B**，digest `7c5e774f…ef78`。修改后的 fork 来源、许可和终态文件摘要已进入根 App 合规链，并与内置 dsh runtime 的独立合规链保持分离。
+- **arm64 预览仍只是本地证据**：Batch 2 已用 Developer ID Application + Hardened Runtime 构建并替换安装到 `/Applications/WhaleDock.app`；成品回读根 App runtime `52 packages / 449 files`、单份内置 dsh 合规材料，安装版 `app.asar` 与构建归档哈希一致，Spotlight 只发现这一份正式安装。当前 ZIP / DMG 为 `193,689,020 B` / `175,628,511 B`，App / 内置 dsh runtime 占用 `615,216 / 300,776 KiB`，`app.asar` 为 `19,632,375 B`。Gatekeeper 明确回读 `Unnotarized Developer ID`，没有 stapled ticket；这仍不是公开或正式 Release。
+- 安装态沿用 macOS 受保护文稿目录作为 cwd 时，自动验收不代用户授予 TCC 文件访问权限；已有运行验证只改用专用、非受保护的测试工作区。这不代表文稿目录权限已通过，仍需用户本人确认。下一步是 **Batch 3.0**；v0.10 仍未发布，三平台 CI、Windows/Intel 真机、Apple 公证与后续人工验收仍是独立证据门。
 
 ## v0.2 带来了什么
 

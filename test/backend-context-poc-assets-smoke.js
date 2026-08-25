@@ -186,14 +186,14 @@ async function main() {
       });
     });
 
-    await test('固定基线锁定 14 文件且 2 MiB / 8 MiB 边界 fail-closed', async () => {
+    await test('固定基线锁定 15 文件且 2 MiB / 8 MiB 边界 fail-closed', async () => {
       const plan = backend.contextPocPlan(bundledPlan(), info);
       const baseline = backend.contextPocReadAssets(plan);
       const fileLimit = 2 * 1024 * 1024;
       const totalLimit = 8 * 1024 * 1024;
       assert.equal(backend.CONTEXT_POC_LIMITS.maxAssetFileBytes, fileLimit);
       assert.equal(backend.CONTEXT_POC_LIMITS.maxAssetBytes, totalLimit);
-      assert.equal(baseline.assets.length, 14);
+      assert.equal(baseline.assets.length, 15);
       assert.equal(baseline.assets.reduce(
         (sum, asset) => sum + asset.data.length, 0
       ) < totalLimit, true);
@@ -217,7 +217,8 @@ async function main() {
       const sourcePaths = baseline.assets.map((asset) => asset.relative);
       const boundaryFiles = sourcePaths.map((relative, index) => ({
         path: relative,
-        size: index < 3 ? fileLimit : (index === 3 ? fileLimit - 10 : 1),
+        size: index < 3 ? fileLimit
+          : (index === 3 ? fileLimit - (sourcePaths.length - 4) : 1),
         sha256: String(index.toString(16)).slice(-1).repeat(64)
       }));
       const digest = (files) => crypto.createHash('sha256')

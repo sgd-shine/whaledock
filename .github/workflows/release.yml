@@ -40,6 +40,9 @@ jobs:
       - name: Verify committed app runtime compliance materials
         run: npm run app-runtime:verify
 
+      - name: Verify reproducible dsh UI forks
+        run: npm run refork:dsh -- --check
+
       # 可选：仓库配了 Developer ID 证书才会执行；没配就走 ad-hoc，构建照常通过。
       - name: Import Developer ID certificate (optional)
         id: mac-cert
@@ -442,6 +445,9 @@ jobs:
 
       - name: Verify committed app runtime compliance materials
         run: npm run app-runtime:verify
+
+      - name: Verify reproducible dsh UI forks
+        run: npm run refork:dsh -- --check
 
       - name: Smoke test (no GUI)
         run: npm run smoke

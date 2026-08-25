@@ -19,6 +19,7 @@
     "app-runtime:generate": "node scripts/app-runtime-compliance.js generate",
     "app-runtime:verify": "node scripts/app-runtime-compliance.js verify",
     "context-poc:verify": "node scripts/context-poc-manifest.js --check",
+    "refork:dsh": "node scripts/refork-dsh-ui.js",
     "dist": "npm run dist:mac:arm64",
     "dist:mac": "npm run dist:mac:arm64 && npm run dist:mac:x64",
     "predist:mac:arm64": "npm run bundle:dsh -- --platform=darwin --arch=arm64",
@@ -80,6 +81,7 @@
         "to": "context-poc",
         "filter": [
           "context-bridge.patch.yml",
+          "FORK-NOTICE.md",
           "plugin/package.json",
           "plugin/lib/index.js",
           "plugin/lib/client.js",

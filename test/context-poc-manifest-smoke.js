@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('assert/strict');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -32,11 +33,11 @@ function fileAt(root, relative) {
 function main() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-context-root-'));
   try {
-    test('committed baseline 为规范字节并锁定精确 14 文件', () => {
+    test('committed baseline 为规范字节并锁定精确 15 文件', () => {
       const baseline = manifest.readBaseline();
       const receipt = manifest.assertCommittedBaseline();
-      assert.equal(baseline.files.length, 14);
-      assert.equal(receipt.files, 14);
+      assert.equal(baseline.files.length, 15);
+      assert.equal(receipt.files, 15);
       assert.equal(receipt.digest, baseline.digest);
       assert.deepEqual(
         baseline.files.map((file) => file.path),
@@ -87,7 +88,9 @@ function main() {
       for (let index = 0; index < manifest.SOURCE_FILES.length; index += 1) {
         const size = index < 3
           ? manifest.MAX_FILE_BYTES
-          : (index === 3 ? manifest.MAX_FILE_BYTES - 10 : 1);
+          : (index === 3
+            ? manifest.MAX_FILE_BYTES - (manifest.SOURCE_FILES.length - 4)
+            : 1);
         fs.writeFileSync(fileAt(total, manifest.SOURCE_FILES[index]), Buffer.alloc(size, 0x63));
       }
       assert.equal(manifest.createManifest(total).totalBytes, manifest.MAX_TOTAL_BYTES);
@@ -123,9 +126,15 @@ function main() {
         path.join(asar, 'lib', 'context-poc-baseline.json')
       );
       copySource(path.join(resources, 'context-poc'));
-      const receipt = packagedVerifier.verifyPackagedContextPoc({ asar, resources });
+      fs.cpSync(
+        path.join(__dirname, '..', 'compliance', 'app-runtime'),
+        path.join(resources, 'compliance', 'app-runtime'),
+        { recursive: true }
+      );
+      const inventory = require('../compliance/app-runtime/inventory.json');
+      const receipt = packagedVerifier.verifyPackagedContextPoc({ asar, resources, inventory });
       assert.equal(receipt.contextPocBaselineVerified, true);
-      assert.equal(receipt.contextPocFiles, 14);
+      assert.equal(receipt.contextPocFiles, 15);
 
       fs.appendFileSync(
         path.join(resources, 'context-poc', 'plugin', 'lib', 'client.js'),
@@ -139,6 +148,10 @@ function main() {
     test('外层成品 receipt 必须带回 app.asar 信任根摘要', () => {
       const baseline = manifest.readBaseline();
       const inventory = require('../compliance/app-runtime/inventory.json');
+      const sources = require('../compliance/app-runtime/SOURCES.json');
+      const sourcesBytes = fs.readFileSync(path.join(
+        __dirname, '..', 'compliance', 'app-runtime', 'SOURCES.json'
+      ));
       const report = {
         status: 'PASS',
         electronVersion: '43.4.0',
@@ -152,16 +165,22 @@ function main() {
         contextPocBaselineVerified: true,
         contextPocFiles: baseline.files.length,
         contextPocBytes: baseline.totalBytes,
-        contextPocDigest: baseline.digest
+        contextPocDigest: baseline.digest,
+        redistributedForksVerified: true,
+        redistributedForkCount: sources.components.length,
+        redistributedForksTreeSha256: packagedVerifier.redistributedForksTreeSha256(sources),
+        redistributedSourcesSha256: crypto.createHash('sha256').update(sourcesBytes).digest('hex'),
+        redistributedLicenseSha256: sources.license.sha256
       };
       assert.doesNotThrow(() => packagedVerifier.validateProbeReport(
-        report, inventory, report.appVersion, baseline
+        report, inventory, report.appVersion, baseline, sources
       ));
       assert.throws(() => packagedVerifier.validateProbeReport(
         { ...report, contextPocDigest: 'f'.repeat(64) },
         inventory,
         report.appVersion,
-        baseline
+        baseline,
+        sources
       ), /context-poc receipt/);
     });
   } finally {

@@ -26,7 +26,7 @@ if (contextResources.length !== 1) {
 }
 if (JSON.stringify(contextResources[0].filter)
     !== JSON.stringify(contextPocManifest.SOURCE_FILES)) {
-  throw new Error('v0.10 preview 的 context-poc 载体文件集未锁定为固定 14 文件');
+  throw new Error('v0.10 preview 的 context-poc 载体文件集未锁定为固定 15 文件');
 }
 
 async function previewBeforePack(context) {

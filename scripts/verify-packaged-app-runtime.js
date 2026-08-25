@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { HOTFIX_VERSION, verifyHotfixResources } = require('./hotfix-build-config');
+const appRuntimeCompliance = require('./app-runtime-compliance');
 const contextPocManifest = require('./context-poc-manifest');
 
 const DEFAULT_ROOT = path.resolve(__dirname, '..');
@@ -24,6 +25,10 @@ function packagedError(kind, message) {
 
 function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function canonicalJson(value) {
+  return Buffer.from(JSON.stringify(value, null, 2) + '\n', 'utf8');
 }
 
 function readJson(filePath, label = filePath) {
@@ -301,6 +306,115 @@ function assertExactPackagedFiles(expected, actual, label = '成品包') {
   return actualRows;
 }
 
+function redistributedForksTreeSha256(sources) {
+  return sha256(sources.components.map((component) => (
+    `${component.key}\0${component.treeSha256}`
+  )).join('\n'));
+}
+
+function verifyPackagedRedistributedForks(options = {}) {
+  const resources = path.resolve(options.resources || '');
+  const baselinePath = path.resolve(options.baselinePath || '');
+  const baseline = contextPocManifest.validateBaseline(options.baseline);
+  const actual = contextPocManifest.validateBaseline(options.actual);
+  const complianceDir = path.join(resources, COMPLIANCE_RELATIVE);
+  const sourcesPath = path.join(complianceDir, 'SOURCES.json');
+  const sourcesMarkdownPath = path.join(complianceDir, 'SOURCES.md');
+  assertFile(sourcesPath, '成品再分发 SOURCES.json');
+  const sourcesBytes = fs.readFileSync(sourcesPath);
+  let sources;
+  try { sources = appRuntimeCompliance.validateRedistributedSources(JSON.parse(sourcesBytes)); }
+  catch (error) { throw packagedError('PROBE', `再分发 SOURCES.json 无效：${error.message}`); }
+  try {
+    appRuntimeCompliance.validateRedistributedInventory(
+      options.inventory && options.inventory.redistributedComponents,
+      sources
+    );
+  } catch (error) {
+    throw packagedError('PROBE', `再分发 inventory 无效：${error.message}`);
+  }
+  if (!sourcesBytes.equals(canonicalJson(sources))) {
+    throw packagedError('PROBE', '再分发 SOURCES.json 不是规范字节');
+  }
+  assertFile(sourcesMarkdownPath, '成品再分发 SOURCES.md');
+  if (!fs.readFileSync(sourcesMarkdownPath).length) {
+    throw packagedError('PROBE', '成品再分发 SOURCES.md 为空');
+  }
+  const baselineBytes = fs.readFileSync(baselinePath);
+  const baselineAuthority = {
+    path: 'lib/context-poc-baseline.json',
+    schema: baseline.schema,
+    package: baseline.package,
+    fileOrder: baseline.files.map((file) => file.path),
+    fileCount: baseline.files.length,
+    totalBytes: baseline.totalBytes,
+    digest: baseline.digest,
+    canonicalSha256: sha256(baselineBytes)
+  };
+  if (JSON.stringify(sources.contextPocBaseline) !== JSON.stringify(baselineAuthority)) {
+    throw packagedError('PROBE', '成品 SOURCES 未绑定 app.asar context-poc baseline');
+  }
+  const actualByPath = new Map(actual.files.map((file) => [file.path, file]));
+  const noticeRelative = sources.forkNotice.path.slice('context-poc/'.length);
+  if (!sources.forkNotice.path.startsWith('context-poc/') || !noticeRelative) {
+    throw packagedError('PROBE', '成品 SOURCES fork notice 路径无效');
+  }
+  const noticePath = path.join(resources, 'context-poc', ...noticeRelative.split('/'));
+  assertFile(noticePath, '成品 fork notice');
+  const noticeBytes = fs.readFileSync(noticePath);
+  if (sha256(noticeBytes) !== sources.forkNotice.sha256) {
+    throw packagedError('PROBE', '成品 fork notice 与 SOURCES 不一致');
+  }
+  const licensePath = path.join(complianceDir, ...sources.license.materialPath.split('/'));
+  assertFile(licensePath, '成品再分发 MIT 许可原文');
+  const licenseBytes = fs.readFileSync(licensePath);
+  if (sha256(licenseBytes) !== sources.license.sha256) {
+    throw packagedError('PROBE', '成品再分发 MIT 许可原文漂移');
+  }
+  for (const component of sources.components) {
+    const prefix = component.forkPath.slice('context-poc/'.length);
+    if (!component.forkPath.startsWith('context-poc/') || !prefix) {
+      throw packagedError('PROBE', `${component.key} fork 路径无效`);
+    }
+    const rows = [];
+    for (const relative of reforkFiles()) {
+      const expected = component.files[relative];
+      const packagedPath = `${prefix}/${relative}`;
+      const observed = actualByPath.get(packagedPath);
+      if (!observed || observed.size !== expected.size || observed.sha256 !== expected.sha256) {
+        throw packagedError('PROBE', `${component.key}/${relative} 未绑定 context-poc 固定信任根`);
+      }
+      rows.push({ path: relative, size: observed.size, sha256: observed.sha256 });
+    }
+    if (sha256(rows.map((row) => `${row.path}\0${row.size}\0${row.sha256}`).join('\n'))
+        !== component.treeSha256) {
+      throw packagedError('PROBE', `${component.key} 成品树 SHA-256 不一致`);
+    }
+    const forkLicense = fs.readFileSync(path.join(resources, 'context-poc', ...prefix.split('/'), 'LICENSE'));
+    if (!forkLicense.equals(licenseBytes)) {
+      throw packagedError('PROBE', `${component.key} 成品 LICENSE 与 MIT 材料不一致`);
+    }
+    const manifest = readJson(
+      path.join(resources, 'context-poc', ...prefix.split('/'), 'package.json'),
+      `${component.key} 成品 package.json`
+    );
+    if (manifest.name !== component.name || manifest.version !== component.version) {
+      throw packagedError('PROBE', `${component.key} 成品包身份与 SOURCES 不一致`);
+    }
+  }
+  return Object.freeze({
+    redistributedForksVerified: true,
+    redistributedForkCount: sources.components.length,
+    redistributedForksTreeSha256: redistributedForksTreeSha256(sources),
+    redistributedSourcesSha256: sha256(sourcesBytes),
+    redistributedLicenseSha256: sha256(licenseBytes)
+  });
+}
+
+function reforkFiles() {
+  return ['package.json', 'LICENSE', 'lib/index.js', 'lib/invariant.js', 'lib/client.js'];
+}
+
 function verifyPackagedContextPoc(options = {}) {
   const asar = path.resolve(options.asar || '');
   const resources = path.resolve(options.resources || '');
@@ -308,11 +422,19 @@ function verifyPackagedContextPoc(options = {}) {
   const baseline = contextPocManifest.readBaseline(baselinePath);
   const actual = contextPocManifest.createManifest(path.join(resources, 'context-poc'));
   contextPocManifest.assertManifestMatches(baseline, actual);
+  const redistributed = verifyPackagedRedistributedForks({
+    resources,
+    baselinePath,
+    baseline,
+    actual,
+    inventory: options.inventory
+  });
   return Object.freeze({
     contextPocBaselineVerified: true,
     contextPocFiles: actual.files.length,
     contextPocBytes: actual.totalBytes,
-    contextPocDigest: actual.digest
+    contextPocDigest: actual.digest,
+    ...redistributed
   });
 }
 
@@ -338,7 +460,8 @@ function probeAsar(options = {}) {
     try {
       contextPocReceipt = verifyPackagedContextPoc({
         asar,
-        resources: options.resources
+        resources: options.resources,
+        inventory
       });
     } catch (error) {
       throw packagedError('PROBE', `context-poc 成品信任根失败：${error.message}`);
@@ -421,7 +544,8 @@ function validateProbeReport(
   report,
   inventory,
   expectedAppVersion = null,
-  expectedContextPocBaseline = null
+  expectedContextPocBaseline = null,
+  expectedRedistributedSources = null
 ) {
   inventoryContract(inventory);
   const exportsExpected = ['EventDispatcher', 'WSClient'];
@@ -436,10 +560,18 @@ function validateProbeReport(
   }
   if (expectedContextPocBaseline !== null) {
     const expected = contextPocManifest.validateBaseline(expectedContextPocBaseline);
+    const redistributed = appRuntimeCompliance.validateRedistributedSources(
+      expectedRedistributedSources
+    );
     if (report.contextPocBaselineVerified !== true
         || report.contextPocFiles !== expected.files.length
         || report.contextPocBytes !== expected.totalBytes
-        || report.contextPocDigest !== expected.digest) {
+        || report.contextPocDigest !== expected.digest
+        || report.redistributedForksVerified !== true
+        || report.redistributedForkCount !== redistributed.components.length
+        || report.redistributedForksTreeSha256 !== redistributedForksTreeSha256(redistributed)
+        || report.redistributedSourcesSha256 !== sha256(canonicalJson(redistributed))
+        || report.redistributedLicenseSha256 !== redistributed.license.sha256) {
       throw packagedError('PROBE', '成品 context-poc receipt 无效或与固定信任根不一致');
     }
   }
@@ -455,6 +587,14 @@ function verifyApp(options = {}) {
   const repositoryBaselinePath = path.join(root, 'lib', 'context-poc-baseline.json');
   const expectedContextPocBaseline = fs.existsSync(repositoryBaselinePath)
     ? contextPocManifest.readBaseline(repositoryBaselinePath) : null;
+  const redistributed = expectedContextPocBaseline
+    ? appRuntimeCompliance.verifyRedistributedSources({ root }) : null;
+  if (redistributed) {
+    appRuntimeCompliance.validateRedistributedInventory(
+      inventory.redistributedComponents,
+      redistributed.sources
+    );
+  }
   if (rootPackage.version === HOTFIX_VERSION) {
     verifyHotfixResources(layout.resources);
   }
@@ -483,7 +623,8 @@ function verifyApp(options = {}) {
     report,
     inventory,
     rootPackage.version,
-    expectedContextPocBaseline
+    expectedContextPocBaseline,
+    redistributed && redistributed.sources
   );
   return Object.freeze({
     ...report,
@@ -539,6 +680,8 @@ module.exports = Object.freeze({
   inventoryContract,
   nodeModulesPackages,
   packagedPackageFiles,
+  redistributedForksTreeSha256,
+  verifyPackagedRedistributedForks,
   verifyPackagedContextPoc,
   probeAsar,
   validateProbeReport,

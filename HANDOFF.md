@@ -1,19 +1,23 @@
 # HANDOFF.md — WhaleDock v0.10+ 当前交接
 
-更新：2026-08-25 · 公开稳定版为 v0.9.1；v0.10 Batch 1 已完成本地 alpha 收口，下一步是 Batch 2
+更新：2026-08-25 · 公开稳定版为 v0.9.1；v0.10 Batch 2 已完成 refork 与双合规闭环，下一步是 Batch 3.0
 
 ## v0.10+ 当前执行线
 
 - 工作树：`harness-desktop-v010-forward`；分支：`codex/v010-forward`；基线：`main@670e32c1abd45f5cb355dfd6e6eeaa9ee18ff27c`；应用身份：`0.10.0-alpha.1`。
 - 新功能不再落到 v0.9.x。v0.9.1 只作为公开稳定/恢复入口；本地 alpha 使用独立 preview builder 与 `release-preview/`，没有 tag、没有 Release、没有发布授权。
-- Batch 1 已完成固定资产清单、受管页面认证/重载重签、官方 SidebarRoot/三栏对齐、Host↔main 偏好协议与 core journal 隔离、官方草稿填充链、迟到 align/fillDraft 失效和可见降级。最终统一 smoke 为 **735 PASS / 42 个 ALL PASS**，未留下 Batch 1 P0/P1 代码审查项。
+- Batch 1 已完成固定资产清单、受管页面认证/重载重签、官方 SidebarRoot/三栏对齐、Host↔main 偏好协议与 core journal 隔离、官方草稿填充链、迟到 align/fillDraft 失效和可见降级；真实 rc.2 持久性证据保持有效。
+- Batch 2 已将 `ui-layout` / `ui-conversation` 收口为一条可复现 refork 命令：锁定 rc.2 npm 上游、网络前验 lock/patch、拒绝 redirect/超时/超限、严格解析 ustar 和 zero-fuzz unified patch，并校验终态摘要、差异预算与并发回滚。布局 fork 为 `42+/5-`，对话 fork 为 `19+/3-`；`--check` 从 `lib/config` 读取生产版本且不写工作树。
+- Batch 2 最终全仓 smoke 为 **773 PASS / 43 个 ALL PASS**，末行 `ALL PASS`；refork 专测 16/16、app-runtime 6/6、packaged app-runtime 12/12、context manifest 与 `git diff --check` 均通过，最终 P0/P1 审查无阻断项。
 - 可信静态资产与可变 dsh 数据已经拆根：摘要绑定、只读的 asset root 可跨启动复用；稳定数据根为 `userData/context-poc/v1/dsh-home`，必须跨后端/App 重启和工作区切换保留 sessions、settings、credentials、attachments、storages 与 presets。退出和启动 sweep 都不得触达数据根。
 - 受管 v0.10 不读取、不写入、不迁移、不清理 `~/.dsh`，也不自动导入旧数据；设置页明确提示首次使用可能需要重新配置模型。该隔离边界是产品合同，不得写成历史数据丢失或已迁移。
-- 固定基线为 **14 文件 / 564,862 B**，digest `c5df6830be8d4240c08bf8e1783c1619203fc540308c6cf326fa6bde8bd7b79e`；context baseline 和 app-runtime verifier 均通过，后者为 52 包 / 830 文件，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`。
+- 当前固定基线为 **15 文件 / 575,921 B**，digest `7c5e774f416eb0801a3abf4397f2ea8168b6f5858fe1f0aaa1db7f245f50ef78`。根 App 源码 runtime 为 52 包 / 830 文件，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`；修改后 fork 通过 app-runtime `SOURCES` / NOTICE / MIT 许可材料独立登记，内置 dsh runtime 继续走根 `SOURCES` / NOTICE / licenses，两条合规边界不混合。
 - 真实 rc.2 双冷启动为 `RC2_PERSISTENCE_PASS`：Host 握手×2、HTTP×2、会话/cwd 恢复、home/asset root 复用、settings/credentials 哈希不变，收尾后回环端口关闭。
-- 本地 arm64 预览已以 Developer ID Application + Hardened Runtime 构建并安装，但 Gatekeeper 回读为未公证 Developer ID，App/DMG 均无 stapled ticket，不得写成正式成品。安装 App / 其内置 dsh runtime 磁盘占用为 `600,872 / 286,532 KiB`，普通文件逻辑字节为 `530,077,104 / 209,844,893 B`，`app.asar` 为 `19,632,101 B`，ZIP / DMG 为 `193,679,417 / 175,633,885 B`。
+- Batch 2 arm64 本地构建成功；成品 app-runtime 回读 `52 packages / 449 files`，tree `b363e6c80bca9296e566e0accae30143e6ce02dc53a660ec706bf8c9cfac1d02`，内置 dsh 合规回读 `copies=1`。当次 App 使用 `Developer ID Application: wang jie (CS4NK76DA5)` + Hardened Runtime 严格验签，并已替换安装到 `/Applications/WhaleDock.app`；安装版 `app.asar` 与构建归档同哈希，Spotlight 唯一发现该 App。
+- 当前 App / dsh runtime 占用 `615,216 / 300,776 KiB`，`app.asar` `19,632,375 B`，ZIP / DMG `193,689,020 / 175,628,511 B`。Gatekeeper 明确为 `Unnotarized Developer ID`，没有 stapled ticket；签名/安装 PASS 不得冒充 Apple 公证或公开发布。
+- 安装版程序化 UI 流确认归档会话不再生成重复卡（严格 1 张项目卡），并完成内容、会话、Settings、内容态原生侧栏、填草稿但不发送、清空并恢复发送禁用的 21 秒 MP4/GIF 证据链。
 - TCC 边界：安装态沿用 macOS 受保护文稿目录 cwd 时，自动验收不代用户授权；本轮只改用专用非受保护测试工作区完成运行验证。这不是产品绕过权限，也不是原目录 TCC 已通过。
-- 下一步直接进入 Batch 2 可复现 refork / 双闭包合规，再按内容卡片与回执条 → 概览 → 脚本 → 发布 → 复盘 → 拍摄的顺序回迁创作能力。v0.10 仍未打 tag、未公开发布；每个后续批次仍须把本地自动化、真实 GUI、三平台 CI、Windows/Intel 真机、Apple 公证与 SGD 人工验收分开报告。
+- 下一步直接进入 **Batch 3.0**，按内容卡片与回执条 → 概览 → 脚本 → 发布 → 复盘 → 拍摄的顺序回迁创作能力。v0.10 仍未打 tag、未公开发布；每个后续批次仍须把本地自动化、当次本地包回读、真实 GUI、三平台 CI、Windows/Intel 真机、Apple 签名/公证、公开发布与 SGD 人工验收分开报告。
 
 ## v0.9.1 已公开发布与恢复入口
 

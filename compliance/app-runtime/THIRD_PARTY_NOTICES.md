@@ -4,6 +4,15 @@
 
 本次根运行时精确锁定 `@larksuiteoapi/node-sdk@1.73.0`，生产可达包 52 个。本文件不是法律意见。
 
+## Modified redistributed forks
+
+下列已修改 UI fork 在 `inventory.json` 的 `redistributedComponents` 中独立登记，但不计入上述根 npm `packageCount`，也不计入内置 dsh runtime inventory。精确 patch 与逐文件摘要见 [`SOURCES.json`](./SOURCES.json)。
+
+| 组件 | 版本 | 许可 | modified | 归属 | 最终树 SHA-256 |
+| --- | --- | --- | --- | --- | --- |
+| @deepseek-ai/dsh-client-ui-layout | 0.1.1-rc.2 | MIT | `true` | Copyright (c) 2026 DeepSeek | `14a4594b08b7620ba5cf411274524982bc92c9cb48aeca5c6a783e1e30e98208` |
+| @deepseek-ai/dsh-client-ui-conversation | 0.1.1-rc.2 | MIT | `true` | Copyright (c) 2026 DeepSeek | `ba596cc232017d32b15d785618e62066ec580cd274fbdf8cd458dbdcbfb78b72` |
+
 ## 闭包快照
 
 - 根 package-lock SHA-256：`3e9469413ad49f09f280c645f0e086d553ef1a80e589e1af519f6797cc75318a`

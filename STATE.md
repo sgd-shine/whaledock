@@ -1,21 +1,25 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-25（公开稳定版 v0.9.1；v0.10 Batch 1 已完成本地 alpha 收口，下一步为 Batch 2）
+更新：2026-08-25（公开稳定版 v0.9.1；v0.10 Batch 2 已完成 refork 与双合规闭环，下一步为 Batch 3.0）
 
 ## 阶段结论
 
-**公开稳定/恢复入口已经升到 v0.9.1；所有新功能工作都在 `codex/v010-forward` 的 `0.10.0-alpha.1` 上继续。v0.10 Batch 1 已完成本地信任根、持久数据根、上下文协议与布局守门收口；Batch 2 是下一步，v0.10 尚未公开发布。**
+**公开稳定/恢复入口已经升到 v0.9.1；所有新功能工作都在 `codex/v010-forward` 的 `0.10.0-alpha.1` 上继续。v0.10 Batch 1 的信任根、持久数据根、上下文协议与布局守门已稳定；Batch 2 的可复现 refork 和修改后 UI fork 双合规链已收口。下一步是 Batch 3.0，v0.10 尚未公开发布。**
 
 - v0.9.1 PR [#18](https://github.com/sgd-shine/whaledock/pull/18) 合入 `main@670e32c1abd45f5cb355dfd6e6eeaa9ee18ff27c`；[main CI 32869008546](https://github.com/sgd-shine/whaledock/actions/runs/32869008546) 三平台全绿，[Release run 32869263514](https://github.com/sgd-shine/whaledock/actions/runs/32869263514) attempt 2 成功，[公开 v0.9.1 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.1) 为非 draft、非 prerelease且含 8 项资产。
 - 官方 macOS arm64 v0.9.1 已安装并完成版本、架构、签名、公证、Gatekeeper、两条成品合规链与 Spotlight 唯一安装回读；v0.9.1 ZIP/DMG 已另存为可恢复基线。本地 alpha 替换正式 App 前必须继续保留这份恢复路径。
 - v0.10 工作树为 `harness-desktop-v010-forward`，分支 `codex/v010-forward`，基线是上述 `main@670e32c`。当前版本 `0.10.0-alpha.1` 使用专属 `electron-builder.v0.10-preview.cjs` 和 `release-preview/`，不会沿用正式版本的发布输出。
 - Batch 1 已完成官方会话侧栏与内容视图共存、三栏项目/会话对齐、零会话显式连接、官方 `connect → input/migrate → sessions.open` 草稿链、偏好同步与 core journal 隔离、受管/非受管发送分流、桥不可用可见降级、认证重放/限流/尺寸门、受管页面重载重签，以及对齐/填草稿的迟到操作失效边界。
 - 受管内容模式的数据根固定为 WhaleDock-owned `userData/context-poc/v1/dsh-home`；可信前端资产另存为摘要绑定、只读、可复用的 asset root。正常退出、后端重启、App 重启或工作区切换不得删除数据根。用户 `~/.dsh` 始终不读、不写、不迁移、不清理，也不会自动导入；首次使用可能要重新配置模型。
-- 最终固定资产基线为 **14 个文件 / 564,862 B**，digest `c5df6830be8d4240c08bf8e1783c1619203fc540308c6cf326fa6bde8bd7b79e`；全量 `npm run smoke` 为 **735 PASS / 42 个 ALL PASS**，`git diff --check`、context baseline verifier 与 app-runtime verifier 均通过。app-runtime 仍是 52 包 / 830 文件，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`。
+- Batch 2 已将两个修改后 dsh UI fork 收口为可复现重建：仅接受锁定的 rc.2 版本与 npm HTTPS URL，在网络前验证 lock/patch，并对下载时限与大小、ustar 路径/类型、zero-fuzz patch、EOF 换行、终态摘要、差异预算及并发提交/回滚 fail-closed。布局 fork 差异为 `42+/5-`，对话 fork 为 `19+/3-`。
+- 当前固定资产基线为 **15 个文件 / 575,921 B**，digest `7c5e774f416eb0801a3abf4397f2ea8168b6f5858fe1f0aaa1db7f245f50ef78`；全量 `npm run smoke` 为 **773 PASS / 43 个 ALL PASS**，末行 `ALL PASS`，`git diff --check`、真实无显式版本的 `refork:dsh -- --check`、context baseline 与双合规 verifier 均通过。
+- 根 App 源码 runtime 仍为 52 包 / 830 文件，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`；修改后 fork 的上游 lock、patch、MIT 归属、许可原文与终态摘要已进入 `compliance/app-runtime/` 的独立来源材料，不计入 npm 包数，也不与内置 dsh runtime 合规链混合。
 - 真实内置 rc.2 在同一鲸坞持久 home 上完成两次冷启动：Host 握手与 HTTP 均两次成功，会话/cwd 恢复，home 和固定 asset root 复用，settings/credentials 哈希不变，退出后回环端口已关闭；结论为 `RC2_PERSISTENCE_PASS`。
-- 本地 arm64 预览已构建、安装并回读 Developer ID Application / Hardened Runtime；Gatekeeper 明确标记为未公证 Developer ID，App 与 DMG 都没有 stapled ticket。这是本地 alpha，不是正式成品或公开发布。安装 App 磁盘占用 `600,872 KiB`，其中 dsh runtime `286,532 KiB`；按普通文件逻辑字节计为 `530,077,104 B` / `209,844,893 B`，`app.asar` 为 `19,632,101 B`；arm64 ZIP / DMG 为 `193,679,417 B` / `175,633,885 B`。
+- Batch 2 arm64 本地构建成功；成品 app-runtime verifier 回读 `52 packages / 449 files`，tree `b363e6c80bca9296e566e0accae30143e6ce02dc53a660ec706bf8c9cfac1d02`，内置 dsh 成品合规回读 `copies=1`。当次 App 已由 `Developer ID Application: wang jie (CS4NK76DA5)` 严格验签并启用 Hardened Runtime，随后替换安装到 `/Applications/WhaleDock.app`；安装版 `app.asar` 与归档同为 `1b97fda6…a2dd`，Spotlight 只发现该一份 App。
+- 当前 App / dsh runtime 磁盘占用为 `615,216 / 300,776 KiB`，`app.asar` `19,632,375 B`，ZIP / DMG `193,689,020 / 175,628,511 B`。Gatekeeper 回读 `Unnotarized Developer ID`，App 没有 stapled ticket；本地签名和安装通过不等于 Apple 公证或公开发布。
+- 安装版程序化 UI 取证回读严格 1 张项目卡；会话、Settings、内容态侧栏可切换，草稿填入后没有发送，清空后发送按钮禁用。21 秒 MP4/GIF 可解码；这是本机 GUI 操作证据，不是三平台或真实模型证据。
 - 安装态首次沿用 macOS 受保护文稿目录 cwd 时，自动验收不代用户授予 TCC 权限；本轮改用专用、非受保护的测试工作区后完成运行验证。这只是验收环境调整，不是产品绕过 TCC，也不证明原受保护目录已获授权。
-- v0.10 尚未打 tag、没有公开 Release。下一步是 Batch 2 可复现 refork / 双闭包合规，之后才是创作页签回迁；本地 alpha、三平台 CI、Windows/Intel 真机、Apple 公证、公开发布和 SGD 人工验收继续分开报告。
+- v0.10 尚未打 tag、没有公开 Release。下一步是 **Batch 3.0** 创作能力回迁；本地源码自动化、当次本地包回读、真实 GUI、三平台 CI、Windows/Intel 真机、Apple 签名/公证、公开发布和 SGD 人工验收继续分开报告。
 
 ### v0.9.0 与早期侦察历史（以下为当时证据）
 

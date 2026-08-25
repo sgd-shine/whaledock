@@ -8,6 +8,11 @@
       "sha256": "32e892d2cbf1bce5a5262f1a1af80cb9f1a03794707a0c34425dd2d0810e5e68"
     },
     {
+      "path": "FORK-NOTICE.md",
+      "size": 2986,
+      "sha256": "612e69768a25759da733364c50225c8a166cde974372c858be2f3fd4788890f9"
+    },
+    {
       "path": "plugin/package.json",
       "size": 681,
       "sha256": "9d93b452d89af349c86bbb7cfa7a7fa2c78fad89f3021414a83a5691d38b82a4"
@@ -19,8 +24,8 @@
     },
     {
       "path": "plugin/lib/client.js",
-      "size": 16883,
-      "sha256": "84628a46cfd8c5d885cc835dbdf5b8137a516f10f074b37df2aabf12e11c6352"
+      "size": 51941,
+      "sha256": "8cf2abc48fc9ac8615e70e7875ae58b2b67f32ddd64527183c5cf5d002b38bf8"
     },
     {
       "path": "forks/ui-layout/package.json",
@@ -44,8 +49,8 @@
     },
     {
       "path": "forks/ui-layout/lib/client.js",
-      "size": 48436,
-      "sha256": "f5a749fbad51c036cf541f5e087e72f97d9ab6cbf8082efe3816f49fdcf9cf4f"
+      "size": 21451,
+      "sha256": "c8b38be72ed5bc2e253159a64b4e6532bf04b558b75ef814b008b444ba8adff3"
     },
     {
       "path": "forks/ui-conversation/package.json",
@@ -73,6 +78,6 @@
       "sha256": "0190da000df07a64e55566e84dd8f57c8135f2eacd7f7a461bda33cc6c7150c2"
     }
   ],
-  "totalBytes": 564862,
-  "digest": "c5df6830be8d4240c08bf8e1783c1619203fc540308c6cf326fa6bde8bd7b79e"
+  "totalBytes": 575921,
+  "digest": "7c5e774f416eb0801a3abf4397f2ea8168b6f5858fe1f0aaa1db7f245f50ef78"
 }

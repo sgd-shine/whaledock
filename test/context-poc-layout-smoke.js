@@ -46,7 +46,9 @@ function makeRenderer(React, jsxRuntime, options = {}) {
       const { index, cell } = cellAt('useState');
       if (cell === undefined) {
         let value = typeof initial === 'function' ? initial() : initial;
-        if (options.creatorTab === 'toString' && value === 'overview') value = 'toString';
+        if (typeof options.creatorTab === 'string' && value === 'overview') {
+          value = options.creatorTab;
+        }
         active.fiber.cells[index] = { kind: 'state', value };
       }
       const state = active.fiber.cells[index];
@@ -153,10 +155,13 @@ function makeRenderer(React, jsxRuntime, options = {}) {
 }
 
 function loadBundle(services = {}, options = {}) {
-  const source = fs.readFileSync(path.join(
+  const layoutSource = fs.readFileSync(path.join(
     __dirname, '..', 'context-poc', 'forks', 'ui-layout', 'lib', 'client.js'
   ), 'utf8');
-  let definition;
+  const pluginSource = fs.readFileSync(path.join(
+    __dirname, '..', 'context-poc', 'plugin', 'lib', 'client.js'
+  ), 'utf8');
+  const definitions = new Map();
   const Fragment = Symbol('Fragment');
   const makeElement = (type, props, key) => ({ $$element: true, type, key, props: props || {} });
   const jsxRuntime = { Fragment, jsx: makeElement, jsxs: makeElement };
@@ -164,7 +169,9 @@ function loadBundle(services = {}, options = {}) {
   const timerLog = [];
   const sandbox = {
     AbortController,
-    window: { innerWidth: options.width || 1400, __ModuleLoader__: { load(value) { definition = value; } } },
+    window: { innerWidth: options.width || 1400, __ModuleLoader__: {
+      load(value) { definitions.set(value.id, value); }
+    } },
     setTimeout(fn, delay) {
       timerLog.push(delay);
       options.onTimer?.(delay);
@@ -175,19 +182,28 @@ function loadBundle(services = {}, options = {}) {
     console
   };
   sandbox.globalThis = sandbox;
-  vm.runInNewContext(source, sandbox, { filename: 'ui-layout/client.js' });
-  assert(definition, 'layout module definition was not registered');
-  const plugin = definition.factory((specifier) => {
+  vm.runInNewContext(pluginSource, sandbox, { filename: 'context-poc/client.js' });
+  vm.runInNewContext(layoutSource, sandbox, { filename: 'ui-layout/client.js' });
+  const requireModule = (specifier) => {
     if (specifier === 'react') return React;
     if (specifier === 'react/jsx-runtime') return jsxRuntime;
     if (specifier === '@deepseek-ai/dsh-client-runtime/client') {
       return { defineStore: (value) => value };
     }
     throw new Error(`unexpected import: ${specifier}`);
-  });
+  };
+  const contextDefinition = definitions.get('@whaledock/context-bridge-poc');
+  const layoutDefinition = definitions.get('@deepseek-ai/dsh-client-ui-layout');
+  assert(contextDefinition, 'context module definition was not registered');
+  assert(layoutDefinition, 'layout module definition was not registered');
+  const contextPlugin = contextDefinition.factory(requireModule);
+  const integration = options.noShell ? undefined : contextPlugin.createContentShell({
+    get: (name) => services[name]
+  }, services.whaledockShellPreferences);
+  const plugin = layoutDefinition.factory(requireModule);
   let registration;
   plugin.apply({
-    get: (name) => services[name],
+    get: (name) => (name === 'whaledockContentShell' ? integration : services[name]),
     effect(factory, label) {
       if (label === 'ui-layout: service + root registration') return factory();
       return undefined;
@@ -205,9 +221,11 @@ function loadBundle(services = {}, options = {}) {
     setSidebar() {}, setDetails() {}, toggleSidebar() {}, setNarrow() {}, openDetails() {}, closeDetails() {}
   };
   const injected = registration.spec.inject(layoutActions);
+  assert.equal(injected.getWhaleDockShell(), integration);
   return {
     AppFrame: registration.component,
-    projectActions: injected.projectActions,
+    integration,
+    projectActions: integration?.projectActions,
     renderer: makeRenderer(React, jsxRuntime, options),
     timerLog,
     jsxRuntime
@@ -267,7 +285,7 @@ function session(id, cwd, extra = {}) {
   };
 }
 
-function uiProps(state, projectActions, slotCalls) {
+function uiProps(state, integration, slotCalls) {
   return {
     useStore: (selector) => selector(state.panels),
     useSessions: (selector) => selector(state.sessions),
@@ -279,7 +297,7 @@ function uiProps(state, projectActions, slotCalls) {
       slotCalls.push({ name, props });
       return { $$element: true, type: 'slot', props: { name, ...props } };
     },
-    projectActions
+    getWhaleDockShell: () => integration
   };
 }
 
@@ -320,7 +338,7 @@ async function main() {
     };
     const harness = loadBundle(services);
     const slots = [];
-    const props = uiProps(state, harness.projectActions, slots);
+    const props = uiProps(state, harness.integration, slots);
     let tree = harness.renderer.render(harness.AppFrame, props);
     const projects = findAll(tree, (node) => node.type === 'button' && node.props.className === 'wd10-project');
     assert.equal(projects.length, 2);
@@ -345,6 +363,39 @@ async function main() {
     assert.equal(state.sessions.current, 'a');
   });
 
+  await test('WorkspaceListState archivedSessionIds 同时过滤工作区与孤立项目卡', async () => {
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: {
+        ids: ['active', 'archived'],
+        current: 'active',
+        byId: {
+          active: session('active', '/projects/live'),
+          archived: session('archived', '/projects/archived')
+        }
+      },
+      workspaces: {
+        items: [{
+          workspaceId: 'workspace-live', title: '现用项目', path: '/projects/live',
+          sessionIds: ['active', 'archived']
+        }],
+        archivedSessionIds: ['archived']
+      }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref, sessions: { open() {} } });
+    const tree = harness.renderer.render(
+      harness.AppFrame, uiProps(state, harness.integration, [])
+    );
+    const projects = findAll(tree, (node) => (
+      node.type === 'button' && node.props.className === 'wd10-project'
+    ));
+    assert.equal(projects.length, 1, '归档会话不得再形成第二张 cwd 项目卡');
+    assert.match(textOf(projects[0]), /现用项目/u);
+    assert.match(textOf(projects[0]), /1 个会话/u);
+    assert.doesNotMatch(textOf(tree), /projects\/archived/u);
+  });
+
   await test('零会话项目仅显式对齐时 connect，迟到结果不覆盖新选择', async () => {
     const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
     const pending = deferred();
@@ -361,7 +412,7 @@ async function main() {
       workspaces: { connectWorkspace(id) { connected.push(id); return pending.promise; } }
     };
     const harness = loadBundle(services);
-    const props = uiProps(state, harness.projectActions, []);
+    const props = uiProps(state, harness.integration, []);
     let tree = harness.renderer.render(harness.AppFrame, props);
     const empty = findAll(tree, (node) => node.type === 'button' && node.props.className === 'wd10-project')
       .find((node) => textOf(node).includes('空项目'));
@@ -406,7 +457,7 @@ async function main() {
       workspaces: { connectWorkspace() { return pending.promise; } }
     };
     const harness = loadBundle(services);
-    const props = uiProps(state, harness.projectActions, []);
+    const props = uiProps(state, harness.integration, []);
     let tree = harness.renderer.render(harness.AppFrame, props);
     const empty = findAll(tree, (node) => node.type === 'button' && node.props.className === 'wd10-project')
       .find((node) => textOf(node).includes('空项目 A'));
@@ -436,7 +487,7 @@ async function main() {
     };
     const harness = loadBundle({ whaledockShellPreferences: pref, sessions: { open() {} } });
     const slots = [];
-    const props = uiProps(state, harness.projectActions, slots);
+    const props = uiProps(state, harness.integration, slots);
     let tree = harness.renderer.render(harness.AppFrame, props);
     assert(slots.some((call) => call.name === 'sidebar'));
     assert(slots.some((call) => call.name === 'details'));
@@ -473,11 +524,29 @@ async function main() {
     const noPreference = loadBundle({ sessions: { open() {} } });
     const defaultTree = noPreference.renderer.render(
       noPreference.AppFrame,
-      uiProps(state, noPreference.projectActions, [])
+      uiProps(state, noPreference.integration, [])
     );
     const frame = findAll(defaultTree, (node) => node.props?.['data-whaledock-layout'] === 'v0.10-p1')[0];
     assert(frame);
     assert.equal(frame.props['data-whaledock-mode'], undefined);
+  });
+
+  await test('content-shell 缺失时回退 rc.2 官方三栏且 SidebarRoot 仍由原 slot 渲染', async () => {
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [], archivedSessionIds: [] }
+    };
+    const harness = loadBundle({}, { noShell: true });
+    const slots = [];
+    const tree = harness.renderer.render(
+      harness.AppFrame, uiProps(state, undefined, slots)
+    );
+    assert.equal(findAll(tree, (node) => node.props?.['data-whaledock-layout']).length, 0);
+    assert.equal(findAll(tree, (node) => node.type === 'button' && textOf(node) === '内容').length, 0);
+    assert.equal(slots.filter((call) => call.name === 'sidebar').length, 1);
+    assert.equal(slots.filter((call) => call.name === 'conversation').length, 1);
+    assert.equal(slots.filter((call) => call.name === 'details').length, 1);
   });
 
   await test('fillDraft 严格 connect→input→setDraft→open，且轮询有界', async () => {
@@ -617,6 +686,31 @@ async function main() {
     assert.equal(current, 'c');
   });
 
+  await test('stageCopy 对 constructor/__proto__ 原型键始终回退概览文案', async () => {
+    for (const creatorTab of ['constructor', '__proto__']) {
+      const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+      const copies = [];
+      const projectActions = {
+        preferences: pref,
+        open: () => ({ ok: true }),
+        connect: async () => ({ ok: false }),
+        async fillDraft(_sessionId, copy) { copies.push(copy); return { ok: true }; }
+      };
+      const state = {
+        panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+        sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+        workspaces: { items: [], archivedSessionIds: [] }
+      };
+      const harness = loadBundle({}, { creatorTab });
+      const integration = { ...harness.integration, preferences: pref, projectActions };
+      const tree = harness.renderer.render(harness.AppFrame, uiProps(state, integration, []));
+      await classNode(tree, 'wd10-action').props.onClick();
+      assert.equal(copies.length, 1);
+      assert.match(copies[0], /当前进展/u);
+      assert.doesNotMatch(copies[0], /function|native code/u);
+    }
+  });
+
   await test('填草稿 UI 同 tick 单飞、切回会话卸载时中止旧操作且 finally 不串扰', async () => {
     const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
     const pending = deferred();
@@ -633,7 +727,7 @@ async function main() {
       workspaces: { items: [] }
     };
     const harness = loadBundle({}, { creatorTab: 'toString' });
-    const props = uiProps(state, projectActions, []);
+    const props = uiProps(state, { ...harness.integration, preferences: pref, projectActions }, []);
     let tree = harness.renderer.render(harness.AppFrame, props);
     const fill = classNode(tree, 'wd10-action');
     assert.match(textOf(fill), /^填入右侧草稿/u);

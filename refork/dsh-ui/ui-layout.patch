@@ -1,0 +1,106 @@
+diff --git a/package.json b/package.json
+index 4703e03..660bb78 100644
+--- a/package.json
++++ b/package.json
+@@ -2,6 +2,10 @@
+   "name": "@deepseek-ai/dsh-client-ui-layout",
+   "description": "Shell plugin: three-column AppFrame with drag handles, ctx.layout viewing-state service (navigation + panels)",
+   "version": "0.1.1-rc.2",
++  "whaledockFork": {
++    "purpose": "v0.10 same-screen creator layout seam",
++    "upstreamClientSha256": "16f001f89a9bc19c54cfa90e37cf52e191113af0abe5efd593e57d7ab30060ad"
++  },
+   "publishConfig": {
+     "access": "public"
+   },
+@@ -65,4 +69,4 @@
+     "bundle": "tsdown",
+     "watch": "tsdown --watch"
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/client.js b/lib/client.js
+index 21d631b..e4a43a2 100644
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -94,7 +94,8 @@ window.__ModuleLoader__.load({
+ 		/** Details column grid item; width 0 keeps the subtree mounted (never unmount on close). */
+ 		function DetailsColumn(props) {
+ 			return (0, react_jsx_runtime.jsx)("div", {
+-				className: AppFrame_module_css_default.detailsCol,
++				...props,
++				className: props.className ? `${AppFrame_module_css_default.detailsCol} ${props.className}` : AppFrame_module_css_default.detailsCol,
+ 				children: props.children
+ 			});
+ 		}
+@@ -154,8 +155,13 @@ window.__ModuleLoader__.load({
+ 				onPointerUp
+ 			});
+ 		}
+-		/** The three-column frame (see module doc). */
+-		function AppFrame({ useStore, useSessions, actions, renderSlot }) {
++		const WHALEDOCK_SHELL_CONTRACT = "whaledock.content-shell/v1";
++		/**
++		* WhaleDock may replace only the visual assembly through this versioned mount
++		* object. Layout keeps the official root registration, sizing, handles and
++		* child-slot authority; a missing or mismatched plugin falls back upstream.
++		*/
++		function AppFrame({ useStore, useSessions, useWorkspaces, actions, renderSlot, getWhaleDockShell }) {
+ 			const panels = useStore((s) => s);
+ 			const detailsSession = useSessions((s) => {
+ 				const current = s.current;
+@@ -215,6 +221,37 @@ window.__ModuleLoader__.load({
+ 			const onDetailsDrag = (0, react.useCallback)((dx) => {
+ 				actions.setDetails(detailsBase.current - dx);
+ 			}, [actions]);
++			const extension = typeof getWhaleDockShell === "function" ? getWhaleDockShell() : void 0;
++			if (extension?.contract === WHALEDOCK_SHELL_CONTRACT && typeof extension.Component === "function") {
++				const mount = Object.freeze({
++					frameRef,
++					frameClassName: AppFrame_module_css_default.frame,
++					viewport,
++					columns: cols,
++					sidebarCollapsed,
++					dragging,
++					renderSidebar(width = cols.sidebar) {
++						return renderSlot("sidebar", { collapsed: sidebarCollapsed, width });
++					},
++					renderConversation(bare = false) {
++						const content = renderSlot("conversation", {});
++						return bare ? content : (0, react_jsx_runtime.jsx)(CenterColumn, { children: content });
++					},
++					renderDetails(props = {}) {
++						return (0, react_jsx_runtime.jsx)(DetailsColumn, { ...props, children: renderSlot("details", {}) });
++					},
++					renderOverlay() {
++						return (0, react_jsx_runtime.jsx)("div", { className: AppFrame_module_css_default.overlayLayer, "data-shell-overlay": true, children: renderSlot("shell.overlay", {}) });
++					},
++					renderSidebarHandle() {
++						return !sidebarCollapsed && (0, react_jsx_runtime.jsx)(DragHandle, { side: "sidebar", left: cols.sidebar, onStart: onSidebarStart, onDrag: onSidebarDrag, onEnd: onDragEnd });
++					},
++					renderDetailsHandle() {
++						return cols.details > 0 && (0, react_jsx_runtime.jsx)(DragHandle, { side: "details", left: viewport - cols.details, onStart: onDetailsStart, onDrag: onDetailsDrag, onEnd: onDragEnd });
++					}
++				});
++				return (0, react_jsx_runtime.jsx)(extension.Component, { useSessions, useWorkspaces, mount, integration: extension });
++			}
+ 			return (0, react_jsx_runtime.jsxs)("div", {
+ 				ref: frameRef,
+ 				className: AppFrame_module_css_default.frame,
+@@ -425,7 +462,7 @@ window.__ModuleLoader__.load({
+ 					store: createLayoutStore,
+ 					inject: (actions) => {
+ 						layout.attachPanels(actions);
+-						return {};
++						return { getWhaleDockShell: () => ctx.get("whaledockContentShell") };
+ 					}
+ 				}, AppFrame);
+ 				return () => {
+@@ -453,4 +490,4 @@ window.__ModuleLoader__.load({
+ 	}
+ });
+ 
+-//# sourceMappingURL=client.js.map
+\ No newline at end of file
++//# sourceMappingURL=client.js.map

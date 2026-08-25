@@ -15,6 +15,12 @@ const SELECTION_TOKEN = 'cd'.repeat(32);
 const controllerProofs = new Map();
 let registerNonceSequence = 0;
 
+function clientImport(specifier) {
+  if (specifier === 'react') return {};
+  if (specifier === 'react/jsx-runtime') return {};
+  throw new Error(`unexpected client import: ${specifier}`);
+}
+
 function bridgeHmac(secret, label, clientNonce, hostInstanceId) {
   return createHmac('sha256', secret)
     .update(`${label}\0${CONTRACT}\0${clientNonce}\0${hostInstanceId}`)
@@ -92,10 +98,21 @@ async function main() {
     const layoutFork = fs.readFileSync(path.join(
       sourceRoot, 'forks', 'ui-layout', 'lib', 'client.js'
     ), 'utf8');
-    assert.match(layoutFork, /data-whaledock-layout/);
-    assert.match(layoutFork, /useWorkspaces/);
-    assert.match(layoutFork, /workspaces\.connectWorkspace\(workspaceId\)/);
-    assert.match(layoutFork, /右侧已有未发送内容/);
+    const pluginClient = fs.readFileSync(path.join(
+      sourceRoot, 'plugin', 'lib', 'client.js'
+    ), 'utf8');
+    assert.match(layoutFork, /whaledock\.content-shell\/v1/);
+    assert.match(layoutFork, /getWhaleDockShell/);
+    assert.match(layoutFork, /ctx\.get\("whaledockContentShell"\)/);
+    assert.doesNotMatch(layoutFork, /creatorProjects|stageCopy|whaledockShellPreferences|wd10-/,
+      '上游 layout fork 只能保留窄 mount seam，不再持有鲸坞业务 UI');
+    assert.match(pluginClient, /data-whaledock-layout/);
+    assert.match(pluginClient, /function creatorProjects/);
+    assert.match(pluginClient, /archivedSessionIds/);
+    assert.match(pluginClient, /const STAGE_COPY = new Map/);
+    assert.match(pluginClient, /workspaces\.connectWorkspace\(workspaceId\)/);
+    assert.match(pluginClient, /右侧已有未发送内容/);
+    assert.match(pluginClient, /whaledockContentShell/);
     const conversationFork = fs.readFileSync(path.join(
       sourceRoot, 'forks', 'ui-conversation', 'lib', 'client.js'
     ), 'utf8');
@@ -150,7 +167,7 @@ async function main() {
     sandbox.globalThis = sandbox;
     vm.runInNewContext(source, sandbox, { filename: 'context-poc/client.js' });
     assert.equal(definition.id, '@whaledock/context-bridge-poc');
-    const plugin = definition.factory(() => { throw new Error('no imports expected'); });
+    const plugin = definition.factory(clientImport);
     assert.deepEqual(Array.from(plugin.inject), ['connection', 'sessions']);
 
     const calls = [];
@@ -162,6 +179,8 @@ async function main() {
     let gateDisposed = false;
     let preferences = null;
     let preferencesDisposed = false;
+    let contentShell = null;
+    let contentShellDisposed = false;
     let registerCalls = 0;
     let failPreferenceGet = false;
     let preferenceHostSnapshot = {
@@ -225,9 +244,13 @@ async function main() {
             gate = value;
             return () => { gateDisposed = true; };
           }
-          assert.equal(name, 'whaledockShellPreferences');
-          preferences = value;
-          return () => { preferencesDisposed = true; };
+          if (name === 'whaledockShellPreferences') {
+            preferences = value;
+            return () => { preferencesDisposed = true; };
+          }
+          assert.equal(name, 'whaledockContentShell');
+          contentShell = value;
+          return () => { contentShellDisposed = true; };
         }
       },
       effect: (factory) => { dispose = factory(); }
@@ -378,10 +401,14 @@ async function main() {
     unsubscribePreference();
     assert.equal(timers.size, 1);
     assert.equal(typeof gate.beforeSend, 'function');
+    assert.equal(contentShell.contract, 'whaledock.content-shell/v1');
+    assert.equal(typeof contentShell.Component, 'function');
+    assert.equal(contentShell.preferences, preferences);
     dispose();
     assert.equal(timers.size, 0);
     assert.equal(gateDisposed, true);
     assert.equal(preferencesDisposed, true);
+    assert.equal(contentShellDisposed, true);
   });
 
   await test('Client revision 0 以 50/100/200/400/800ms 有界快速重试并立即采用 rev1', async () => {
@@ -450,7 +477,7 @@ async function main() {
       };
       sandbox.globalThis = sandbox;
       vm.runInNewContext(clientSource, sandbox, { filename: 'context-poc/bootstrap-client.js' });
-      const plugin = definition.factory(() => { throw new Error('no imports expected'); });
+      const plugin = definition.factory(clientImport);
       const connection = {
         isLoopback: true,
         rpc: {

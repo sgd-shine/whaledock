@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "scope": "modified-redistributed-dsh-ui-forks",
+  "version": "0.1.1-rc.2",
+  "separation": {
+    "rootAppRuntimeInventory": "inventory.json",
+    "bundledDshRuntimeSources": "../SOURCES.json",
+    "includedInRootNpmPackageCount": false,
+    "includedInBundledDshRuntimeInventory": false
+  },
+  "upstreamLock": {
+    "path": "refork/dsh-ui/upstream-lock.json",
+    "schemaVersion": 1,
+    "sha256": "72b22c244c1e9e55207f4a8cb0fd6f6bcfaf1c3780159235df097d556e4f3aab"
+  },
+  "forkNotice": {
+    "path": "context-poc/FORK-NOTICE.md",
+    "sha256": "612e69768a25759da733364c50225c8a166cde974372c858be2f3fd4788890f9"
+  },
+  "license": {
+    "expression": "MIT",
+    "attribution": "Copyright (c) 2026 DeepSeek",
+    "materialPath": "licenses/redistributed-forks/DeepSeek-MIT.txt",
+    "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"
+  },
+  "contextPocBaseline": {
+    "path": "lib/context-poc-baseline.json",
+    "schema": 1,
+    "package": "@whaledock/context-bridge-poc",
+    "fileOrder": [
+      "context-bridge.patch.yml",
+      "FORK-NOTICE.md",
+      "plugin/package.json",
+      "plugin/lib/index.js",
+      "plugin/lib/client.js",
+      "forks/ui-layout/package.json",
+      "forks/ui-layout/LICENSE",
+      "forks/ui-layout/lib/index.js",
+      "forks/ui-layout/lib/invariant.js",
+      "forks/ui-layout/lib/client.js",
+      "forks/ui-conversation/package.json",
+      "forks/ui-conversation/LICENSE",
+      "forks/ui-conversation/lib/index.js",
+      "forks/ui-conversation/lib/invariant.js",
+      "forks/ui-conversation/lib/client.js"
+    ],
+    "fileCount": 15,
+    "totalBytes": 575921,
+    "digest": "7c5e774f416eb0801a3abf4397f2ea8168b6f5858fe1f0aaa1db7f245f50ef78",
+    "canonicalSha256": "6bea866a908c44427e0fe6bccf8b6c6f86f224a14bf02d44dbe1700402ee88ec"
+  },
+  "components": [
+    {
+      "key": "ui-layout",
+      "name": "@deepseek-ai/dsh-client-ui-layout",
+      "version": "0.1.1-rc.2",
+      "upstream": {
+        "url": "https://registry.npmjs.org/@deepseek-ai/dsh-client-ui-layout/-/dsh-client-ui-layout-0.1.1-rc.2.tgz",
+        "tarballBytes": 16082,
+        "tarballSha256": "42145ca99ad1e87ee35585b25697a350a9fad9a474d8c4e205f2b86a33f0a4db",
+        "integrity": "sha512-y7xSQyQYGuahLyJcSXpB+JbH1F5lGEc3L9K8cjLy5vd/L9N6gLFLWyeGdlGxxM4jxRt1+rAHDDZ/zl7b8GC5zQ=="
+      },
+      "license": "MIT",
+      "attribution": "Copyright (c) 2026 DeepSeek",
+      "modified": true,
+      "forkPath": "context-poc/forks/ui-layout",
+      "modifiedFiles": [
+        "package.json",
+        "lib/client.js"
+      ],
+      "patch": {
+        "path": "refork/dsh-ui/ui-layout.patch",
+        "sha256": "eb88c973abeaca460cf9628a2d147e4bfe457aea2fe70bfa0e8f8c08a6e82200"
+      },
+      "files": {
+        "package.json": {
+          "size": 2056,
+          "sha256": "1bd253f6e9eb0591a7b919d2e4957812ea4e42dcf21099f3c6773e803f9e67ce"
+        },
+        "LICENSE": {
+          "size": 1065,
+          "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"
+        },
+        "lib/index.js": {
+          "size": 180,
+          "sha256": "c62669c2bcf72075724aa3d4c90bb6064f8b5952322c7950640cc8ca95389859"
+        },
+        "lib/invariant.js": {
+          "size": 975,
+          "sha256": "bcb99fc9bc5099c92ca2aeb97fd2da3cddbc3854d6864c954a32ed9cca8f9e4c"
+        },
+        "lib/client.js": {
+          "size": 21451,
+          "sha256": "c8b38be72ed5bc2e253159a64b4e6532bf04b558b75ef814b008b444ba8adff3"
+        }
+      },
+      "treeSha256": "14a4594b08b7620ba5cf411274524982bc92c9cb48aeca5c6a783e1e30e98208"
+    },
+    {
+      "key": "ui-conversation",
+      "name": "@deepseek-ai/dsh-client-ui-conversation",
+      "version": "0.1.1-rc.2",
+      "upstream": {
+        "url": "https://registry.npmjs.org/@deepseek-ai/dsh-client-ui-conversation/-/dsh-client-ui-conversation-0.1.1-rc.2.tgz",
+        "tarballBytes": 183752,
+        "tarballSha256": "9403b33b02f9d5daf564764f9a615dc5eb31cc1b449384c0a793b0bc5a9354bd",
+        "integrity": "sha512-5PCyHw2Y7nz9geEUT23et3h2XghJm7/3iWDAKa1/4ldIfCnjfxiZ5ZNRdZ9Xxpj32tBmh2lc6yxIJwrtepIyTg=="
+      },
+      "license": "MIT",
+      "attribution": "Copyright (c) 2026 DeepSeek",
+      "modified": true,
+      "forkPath": "context-poc/forks/ui-conversation",
+      "modifiedFiles": [
+        "package.json",
+        "lib/client.js"
+      ],
+      "patch": {
+        "path": "refork/dsh-ui/ui-conversation.patch",
+        "sha256": "89117fac21f7a27b573579abcd483fadd03b699c7413144dfe80e35cfe75e681"
+      },
+      "files": {
+        "package.json": {
+          "size": 4396,
+          "sha256": "3419e5ccb98c61702c4b3afbb1e1ce12efd3e6e3f00cea4710e759d5c05e14ae"
+        },
+        "LICENSE": {
+          "size": 1065,
+          "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"
+        },
+        "lib/index.js": {
+          "size": 1514,
+          "sha256": "eef46c73e65c2fa3c28808b6cf1337aaad60806605b92e7d3d24ab3b5cd02c2a"
+        },
+        "lib/invariant.js": {
+          "size": 1079,
+          "sha256": "29569c60ec03133e7c1cdf9ffc18b0939def737f1809e8a97805e95beeb2ebd3"
+        },
+        "lib/client.js": {
+          "size": 449211,
+          "sha256": "0190da000df07a64e55566e84dd8f57c8135f2eacd7f7a461bda33cc6c7150c2"
+        }
+      },
+      "treeSha256": "ba596cc232017d32b15d785618e62066ec580cd274fbdf8cd458dbdcbfb78b72"
+    }
+  ]
+}
