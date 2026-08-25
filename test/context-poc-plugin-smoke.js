@@ -111,6 +111,10 @@ async function main() {
     const pluginClient = fs.readFileSync(path.join(
       sourceRoot, 'plugin', 'lib', 'client.js'
     ), 'utf8');
+    const pluginHost = fs.readFileSync(path.join(
+      sourceRoot, 'plugin', 'lib', 'index.js'
+    ), 'utf8');
+    const mainSource = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
     assert.match(layoutFork, /whaledock\.content-shell\/v1/);
     assert.match(layoutFork, /getWhaleDockShell/);
     assert.match(layoutFork, /ctx\.get\("whaledockContentShell"\)/);
@@ -120,13 +124,27 @@ async function main() {
     assert.match(pluginClient, /function creatorProjects/);
     assert.match(pluginClient, /archivedSessionIds/);
     assert.doesNotMatch(pluginClient, /const STAGE_COPY = new Map/);
-    for (const operation of [
+    const workspaceOperations = [
       'catalog.read', 'overview.read', 'document.read', 'topic.choose',
       'project.action.prepare', 'project.action.submit',
       'block.action.prepare', 'block.action.submit',
       'proposal.read', 'proposal.decide', 'proposal.undo',
+      'publish.read', 'publish.create', 'publish.update',
       'receipts.read', 'receipts.ack', 'receipts.open'
-    ]) assert.match(pluginClient, new RegExp(`'${operation.replace('.', '\\.')}'`));
+    ];
+    const operationSet = (source, name) => {
+      const match = source.match(new RegExp(`const ${name} = new Set\\(\\[([\\s\\S]*?)\\]\\);`));
+      assert(match, `${name} missing`);
+      return [...match[1].matchAll(/'([^']+)'/g)].map((item) => item[1]);
+    };
+    const assertOperationSet = (actual, message) => {
+      assert.equal(new Set(actual).size, actual.length, `${message}: duplicate`);
+      assert.deepEqual([...actual].sort(), [...workspaceOperations].sort(), message);
+    };
+    assertOperationSet(operationSet(pluginClient, 'WORKSPACE_FILE_OPERATIONS'), 'Client operation set');
+    assertOperationSet(operationSet(pluginHost, 'WORKSPACE_FILE_OPERATIONS'), 'Host operation set');
+    assertOperationSet(operationSet(mainSource, 'CONTEXT_POC_WORKSPACE_FILE_OPERATIONS'),
+      'Main/Host/Client 三处 operation exact set 必须同步');
     assert.match(pluginClient, /contentRef/);
     assert.match(pluginClient, /这一格还没做/);
     assert.match(pluginClient, /workspaces\.connectWorkspace\(workspaceId\)/);

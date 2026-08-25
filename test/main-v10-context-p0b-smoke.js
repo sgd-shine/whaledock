@@ -992,8 +992,9 @@ async function mainTest() {
     assert.deepEqual(Object.keys(ops).sort(), [
       'block.action.prepare', 'block.action.submit', 'catalog.read', 'document.read',
       'overview.read', 'project.action.prepare', 'project.action.submit',
-      'proposal.decide', 'proposal.read', 'proposal.undo', 'receipts.ack',
-      'receipts.open', 'receipts.read', 'topic.choose'
+      'proposal.decide', 'proposal.read', 'proposal.undo', 'publish.create',
+      'publish.read', 'publish.update', 'receipts.ack', 'receipts.open',
+      'receipts.read', 'topic.choose'
     ]);
     const mainSource = source('main.js');
     assert.equal((mainSource.match(
@@ -1943,6 +1944,334 @@ async function mainTest() {
     } finally {
       fs.rmSync(cleanupTmp, { recursive: true, force: true });
     }
+  });
+
+  await test('发布页绑定 source/checklist 身份，七灯、AI、去重与写后回读 fail-closed', async () => {
+    const sourceContentRef = `content-${'1'.repeat(24)}`;
+    const sourceProjectToken = `project-${'2'.repeat(24)}`;
+    const publishContentRef = `content-${'3'.repeat(24)}`;
+    const publishTokens = Array.from({ length: 20 }, (_unused, index) => (
+      `project-${(index + 3).toString(16).repeat(24).slice(0, 24)}`
+    ));
+    let publishVersion = 0;
+    let publishExists = false;
+    let createWrites = 0;
+    let actionCalls = 0;
+    let nowMs = Date.parse('2026-08-25T12:00:00.000Z');
+    const checklistText = () => [
+      '---', 'title: 项目 A · 发布检查', 'stage: publish',
+      'status: needs-decision', 'aiDisclosure: unknown',
+      'source: 02_脚本/项目A.md',
+      'updated: 2026-08-25T11:59:59.000Z', '---', '',
+      '- [ ] 封面已确认 <!-- whaledock:cover -->',
+      '- [ ] 标题已确认 <!-- whaledock:title -->',
+      '- [ ] 标签话题已确认 <!-- whaledock:topics -->',
+      '- [ ] 发布时间由本人确认 <!-- whaledock:timing -->',
+      '- [ ] 置顶评论已准备 <!-- whaledock:pinned-comment -->',
+      '- [ ] 平台 AI 内容标识已准备 <!-- whaledock:ai-label -->',
+      '- [ ] 已由本人在平台发布 <!-- whaledock:published -->', ''
+    ].join('\n');
+    let publishText = checklistText();
+    const publishDocument = () => ({
+      stage: 'publish', text: publishText, hash: cockpit.hashText(publishText),
+      fields: cockpit.parseFrontMatter(publishText).fields
+    });
+    const card = (contentRef, projectToken, stage, title) => ({
+      contentRef, projectToken, stage, title,
+      stageLabel: stage === 'publish' ? '发布' : '写稿'
+    });
+    const catalog = () => ({
+      generation: 70 + publishVersion,
+      projects: [
+        card(sourceContentRef, sourceProjectToken, 'script', '项目 A'),
+        ...(publishExists
+          ? [card(publishContentRef, publishTokens[publishVersion], 'publish', '项目 A · 发布检查')]
+          : [])
+      ]
+    });
+    const publishSurface = (contentRef, projectToken) => {
+      if (contentRef === sourceContentRef && projectToken === sourceProjectToken) {
+        return {
+          kind: 'publish', contentRef, projectToken, title: '项目 A',
+          stage: 'script', stageLabel: '写稿',
+          updated: '2026-08-25T11:00:00.000Z', canCreate: true, checklist: null
+        };
+      }
+      if (!publishExists || contentRef !== publishContentRef
+          || projectToken !== publishTokens[publishVersion]) {
+        const error = new Error('项目已变化');
+        error.code = 'ERR_CONTEXT_PROJECT_STALE';
+        throw error;
+      }
+      const document = publishDocument();
+      return {
+        kind: 'publish', contentRef, projectToken, title: '项目 A · 发布检查',
+        stage: 'publish', stageLabel: '发布', updated: document.fields.updated,
+        canCreate: false,
+        checklist: main.publishChecklistSurface(document.text, document.fields.aiDisclosure)
+      };
+    };
+    const publishAction = async (input) => {
+      actionCalls += 1;
+      if (input.type === 'create') {
+        const created = !publishExists;
+        if (created) {
+          publishExists = true;
+          createWrites += 1;
+        }
+        return {
+          kind: 'ok', created, contentRef: publishContentRef,
+          projectToken: publishTokens[publishVersion],
+          text: created ? '已创建发布检查单。' : '已复用唯一检查单。'
+        };
+      }
+      nowMs += 1000;
+      const request = input.type === 'light'
+        ? { action: 'toggle-publish-light', lightId: input.lightId, checked: input.checked }
+        : { action: 'set-ai-disclosure', value: input.value };
+      const mutation = main.patchVideoPublishDocument(publishDocument(), request, nowMs);
+      publishText = mutation.text;
+      publishVersion += 1;
+      return { kind: 'ok', text: '已写回发布检查单。' };
+    };
+    const ops = main.contextPocWorkspaceFileOperations({
+      catalog, publishSurface, publishAction
+    });
+    const current = { assertCurrent: () => true };
+
+    const identityInput = { contentRef: sourceContentRef, projectToken: sourceProjectToken };
+    assert.deepEqual(ops['publish.read'].validate(identityInput), identityInput);
+    assert.deepEqual(ops['publish.create'].validate(identityInput), identityInput);
+    assert.throws(() => ops['publish.read'].validate({ ...identityInput, path: '/private/a.md' }));
+    assert.deepEqual(ops['publish.update'].validate({
+      contentRef: publishContentRef, projectToken: publishTokens[0],
+      type: 'light', lightId: 'cover', checked: true
+    }), {
+      contentRef: publishContentRef, projectToken: publishTokens[0],
+      type: 'light', lightId: 'cover', checked: true
+    });
+    assert.deepEqual(ops['publish.update'].validate({
+      contentRef: publishContentRef, projectToken: publishTokens[0],
+      type: 'ai-disclosure', value: 'ai'
+    }), {
+      contentRef: publishContentRef, projectToken: publishTokens[0],
+      type: 'ai-disclosure', value: 'ai'
+    });
+    for (const invalid of [
+      { contentRef: publishContentRef, projectToken: publishTokens[0], type: 'light', lightId: 'cover' },
+      { contentRef: publishContentRef, projectToken: publishTokens[0], type: 'light', lightId: 'cover', checked: true, value: 'ai' },
+      { contentRef: publishContentRef, projectToken: publishTokens[0], type: 'ai-disclosure', value: 'yes' },
+      { contentRef: publishContentRef, projectToken: publishTokens[0], type: 'ai-disclosure', value: 'ai', checked: true }
+    ]) assert.throws(() => ops['publish.update'].validate(invalid));
+
+    const sourceRead = ops['publish.read'].redact(await ops['publish.read'].handle({
+      input: identityInput, context: current
+    }));
+    assert.deepEqual(sourceRead, {
+      kind: 'publish', contentRef: sourceContentRef, projectToken: sourceProjectToken,
+      title: '项目 A', stage: 'script', stageLabel: '写稿',
+      updated: '2026-08-25T11:00:00.000Z', canCreate: true, checklist: null
+    });
+
+    const createdPair = await Promise.all([1, 2].map(async () => {
+      const raw = await ops['publish.create'].handle({ input: identityInput, context: current });
+      return ops['publish.create'].redact(raw);
+    }));
+    assert.deepEqual(createdPair.map((result) => result.created).sort(), [false, true]);
+    assert.equal(createWrites, 1, '同源并发创建不得双写');
+    for (const result of createdPair) {
+      assert.equal(result.sourceContentRef, sourceContentRef);
+      assert.equal(result.sourceProjectToken, sourceProjectToken);
+      assert.equal(result.surface.contentRef, publishContentRef);
+      assert.equal(result.surface.stage, 'publish');
+      assert.equal(result.surface.checklist.structureValid, true);
+      assert.equal(result.surface.checklist.ready, false);
+      assert.deepEqual(result.surface.checklist.lights.map((light) => light.id), [
+        'cover', 'title', 'topics', 'timing', 'pinned-comment', 'ai-label', 'published'
+      ]);
+      assert.equal(Buffer.byteLength(JSON.stringify(result), 'utf8') <= 5600, true);
+      assert.doesNotMatch(JSON.stringify(result),
+        /(?:source:|relativePath|absolutePath|frontmatter|binding|root|hash|rawPrompt|SECRET)/i);
+    }
+
+    let token = publishTokens[publishVersion];
+    const mutate = async (patch) => {
+      const raw = await ops['publish.update'].handle({
+        input: { contentRef: publishContentRef, projectToken: token, ...patch },
+        context: current
+      });
+      const result = ops['publish.update'].redact(raw);
+      assert.notEqual(result.surface.projectToken, token);
+      token = result.surface.projectToken;
+      assert.equal(Buffer.byteLength(JSON.stringify(result), 'utf8') <= 5600, true);
+      return result;
+    };
+    let mutation = await mutate({ type: 'ai-disclosure', value: 'ai' });
+    assert.equal(mutation.surface.checklist.aiDisclosure, 'ai');
+    assert.equal(mutation.surface.checklist.ready, false,
+      'ai + AI 灯未勾是合法未 ready 态');
+    mutation = await mutate({ type: 'light', lightId: 'ai-label', checked: true });
+    assert.equal(mutation.surface.checklist.lights[5].checked, true);
+    mutation = await mutate({ type: 'ai-disclosure', value: 'not-ai' });
+    assert.equal(mutation.surface.checklist.aiDisclosure, 'not-ai');
+    assert.equal(mutation.surface.checklist.lights[5].checked, false,
+      'not-ai 不得伪装成已打平台 AI 标识');
+    assert.equal(mutation.surface.checklist.lights[5].satisfied, true);
+    for (const lightId of ['cover', 'title', 'topics', 'timing', 'pinned-comment']) {
+      mutation = await mutate({ type: 'light', lightId, checked: true });
+    }
+    assert.equal(mutation.surface.checklist.ready, true);
+    mutation = await mutate({ type: 'light', lightId: 'published', checked: true });
+    assert.equal(mutation.surface.checklist.published, true);
+    publishText = main.patchPublishLight(
+      publishText, 'ai-label', true, cockpit.hashText(publishText)
+    );
+    publishVersion += 1;
+    token = publishTokens[publishVersion];
+    assert.equal(publishSurface(publishContentRef, token).checklist.published, true,
+      '外部脏 not-ai + AI 灯不得使结构整体失效');
+    mutation = await mutate({ type: 'ai-disclosure', value: 'not-ai' });
+    assert.equal(mutation.surface.checklist.lights[5].checked, false);
+    assert.equal(mutation.surface.checklist.lights[6].checked, false,
+      '同值披露清理脏 AI 灯时，operation 终态也必须确认 raw published 已清');
+    assert.equal(mutation.surface.checklist.published, false);
+    mutation = await mutate({ type: 'light', lightId: 'published', checked: true });
+    assert.equal(mutation.surface.checklist.published, true);
+    mutation = await mutate({ type: 'light', lightId: 'cover', checked: false });
+    assert.equal(mutation.surface.checklist.published, false);
+    assert.equal(mutation.surface.checklist.lights[6].checked, false,
+      '任一前置灯改变必须清 raw published');
+
+    const callsBeforeStale = actionCalls;
+    let staleError;
+    try {
+      await ops['publish.update'].handle({
+        input: {
+          contentRef: publishContentRef, projectToken: publishTokens[0],
+          type: 'light', lightId: 'cover', checked: true
+        }, context: current
+      });
+    } catch (error) { staleError = error; }
+    assert.equal(ops['publish.update'].errorCode(staleError), 'operation-stale');
+    assert.equal(actionCalls, callsBeforeStale, '旧 token 不得进入写回');
+
+    const malformedText = publishText.replace(
+      '<!-- whaledock:cover -->',
+      '<!-- whaledock:cover --> <!--  whaledock: title -->'
+    );
+    const malformedToken = token;
+    const malformedOps = main.contextPocWorkspaceFileOperations({
+      catalog,
+      publishSurface: (contentRef, projectToken) => {
+        const base = publishSurface(contentRef, projectToken);
+        if (contentRef !== publishContentRef) return base;
+        const fields = cockpit.parseFrontMatter(malformedText).fields;
+        return {
+          ...base,
+          checklist: main.publishChecklistSurface(malformedText, fields.aiDisclosure)
+        };
+      },
+      publishAction: async () => { throw new Error('不应写入'); }
+    });
+    const malformed = malformedOps['publish.read'].redact(
+      await malformedOps['publish.read'].handle({
+        input: { contentRef: publishContentRef, projectToken: malformedToken },
+        context: current
+      })
+    );
+    assert.equal(malformed.checklist.structureValid, false);
+    let malformedError;
+    try {
+      await malformedOps['publish.update'].handle({
+        input: {
+          contentRef: publishContentRef, projectToken: malformedToken,
+          type: 'light', lightId: 'cover', checked: true
+        }, context: current
+      });
+    } catch (error) { malformedError = error; }
+    assert.equal(malformedOps['publish.update'].errorCode(malformedError), 'operation-failed');
+
+    let uncertainCalls = 0;
+    const uncertainOps = main.contextPocWorkspaceFileOperations({
+      catalog,
+      publishSurface,
+      publishAction: async () => {
+        uncertainCalls += 1;
+        return { kind: 'ok', text: '已写回但 token 未轮换' };
+      }
+    });
+    let uncertainError;
+    try {
+      await uncertainOps['publish.update'].handle({
+        input: {
+          contentRef: publishContentRef, projectToken: token,
+          type: 'light', lightId: 'cover', checked: true
+        }, context: current
+      });
+    } catch (error) { uncertainError = error; }
+    assert.equal(uncertainOps['publish.update'].errorCode(uncertainError), 'outcome-unknown');
+    assert.equal(uncertainCalls, 1, '写后不确定绝不重试');
+
+    let staleSideEffects = 0;
+    const staleOps = main.contextPocWorkspaceFileOperations({
+      catalog: () => { staleSideEffects += 1; return catalog(); },
+      publishSurface: () => { staleSideEffects += 1; return sourceRead; },
+      publishAction: () => { staleSideEffects += 1; return {}; }
+    });
+    for (const operation of ['publish.read', 'publish.create']) {
+      await assert.rejects(staleOps[operation].handle({
+        input: identityInput, context: { assertCurrent: () => false }
+      }));
+    }
+    await assert.rejects(staleOps['publish.update'].handle({
+      input: {
+        contentRef: publishContentRef, projectToken: token,
+        type: 'light', lightId: 'cover', checked: true
+      }, context: { assertCurrent: () => false }
+    }));
+    assert.equal(staleSideEffects, 0, '换绑后三个发布 operation 都必须零副作用');
+
+    for (const code of ['ERR_ROOT_CHANGED', 'ERR_ROOT_UNREADABLE',
+      'ERR_PATH_SYMLINK', 'ERR_PATH_OUTSIDE', 'ERR_PATH_NOT_FILE', 'ERR_CAS_MISMATCH']) {
+      assert.equal(ops['publish.update'].errorCode({ code }), 'operation-stale', code);
+    }
+    assert.throws(() => ops['publish.read'].redact({
+      ...sourceRead, relativePath: '02_脚本/项目A.md'
+    }));
+    assert.throws(() => ops['publish.create'].redact({
+      ...createdPair[0], rawPrompt: 'SECRET'
+    }));
+
+    const mainSource = source('main.js');
+    const sceneActionStart = mainSource.indexOf('async function runVideoSceneAction');
+    const createFlow = mainSource.slice(
+      mainSource.indexOf("if (request.action === 'create-publish-checklist')", sceneActionStart),
+      mainSource.indexOf("if (request.action === 'toggle-publish-light')", sceneActionStart)
+    );
+    assert.match(createFlow, /\['script', 'shoot', 'edit'\]\.includes\(document\.stage\)/);
+    assert.match(createFlow, /findVideoPublishDocumentsBySource/);
+    assert.match(createFlow,
+      /videoPublishChecklistRelativePath\(document\.relativePath\)[\s\S]*writeVideoExclusive/,
+      '仅由 canonical source 定位的独占目标 + wx 才能将并发创建收口到一份');
+    assert.doesNotMatch(createFlow, /videoFileStem\(document\.title\)/,
+      '创建 claim 不得依赖可变 title');
+    const publishTargetFlow = mainSource.slice(
+      mainSource.indexOf('function videoPublishChecklistRelativePath'),
+      mainSource.indexOf('function patchVideoPublishDocument')
+    );
+    assert.match(publishTargetFlow,
+      /safeRelativePath\(sourceRelativePath\)[\s\S]*createHash\('sha256'\)[\s\S]*digest\('hex'\)/);
+    assert.doesNotMatch(publishTargetFlow, /\.slice\(/,
+      '独占 claim 使用完整 source hash，不得使用可碰撞的短后缀');
+    assert.match(createFlow, /error\.code !== 'EEXIST'[\s\S]*findVideoPublishDocumentsBySource/);
+    assert.equal((createFlow.match(/assertVideoPublishIdentitySource/g) || []).length, 4,
+      '新建、首读/写前复用与 EEXIST 竞态均必须终态回读 source 绑定');
+    const dedupeFlow = mainSource.slice(
+      mainSource.indexOf('function findVideoPublishDocumentsBySource'),
+      mainSource.indexOf('function videoPublishIdentityForRelativePath')
+    );
+    assert.match(dedupeFlow, /scanned\.truncated/);
+    assert.match(dedupeFlow, /08_发布检查/);
   });
 
   await test('shell 公开面按当前 sessionRef 投影，不泄露 ref、路径或标题', async () => {

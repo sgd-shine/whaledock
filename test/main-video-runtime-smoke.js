@@ -128,9 +128,18 @@ async function run() {
       '- [ ] AI 标识 <!-- whaledock:ai-label -->',
       '- [ ] 本人发布 <!-- whaledock:published -->', ''
     ].join('\n');
-    assert.equal(main.publishChecklistSurface(checklist, 'unknown').ready, false);
-    assert.equal(main.publishChecklistSurface(checklist, 'not-ai').ready, true);
-    assert.equal(main.publishChecklistSurface(checklist, 'not-ai').published, false);
+    const unknown = main.publishChecklistSurface(checklist, 'unknown');
+    assert.equal(unknown.structureValid, true);
+    assert.deepEqual(unknown.lights.map((light) => light.id), [
+      'cover', 'title', 'topics', 'timing', 'pinned-comment', 'ai-label', 'published'
+    ]);
+    assert.equal(unknown.ready, false);
+    assert.equal(unknown.lights.find((light) => light.id === 'ai-label').satisfied, false);
+    const notAi = main.publishChecklistSurface(checklist, 'not-ai');
+    assert.equal(notAi.ready, true);
+    assert.equal(notAi.published, false);
+    assert.equal(notAi.lights.find((light) => light.id === 'ai-label').checked, false);
+    assert.equal(notAi.lights.find((light) => light.id === 'ai-label').satisfied, true);
     assert.equal(main.publishChecklistSurface(checklist, 'ai').ready, false);
     const aiChecked = main.patchPublishLight(
       checklist, 'ai-label', true, cockpit.hashText(checklist)
@@ -140,12 +149,280 @@ async function run() {
   });
 
   await test('单灯写回只改目标 marker，错误 hash 原文不动', async () => {
-    const text = '- [ ] 封面 <!-- whaledock:cover -->\n- [ ] 标题 <!-- whaledock:title -->\n';
+    const text = [
+      '- [ ] 封面 <!-- whaledock:cover -->',
+      '- [ ] 标题 <!-- whaledock:title -->',
+      '- [ ] 话题 <!-- whaledock:topics -->',
+      '- [ ] 时间 <!-- whaledock:timing -->',
+      '- [ ] 置顶 <!-- whaledock:pinned-comment -->',
+      '- [ ] AI 标识 <!-- whaledock:ai-label -->',
+      '- [ ] 本人发布 <!-- whaledock:published -->', ''
+    ].join('\n');
     const patched = main.patchPublishLight(text, 'cover', true, cockpit.hashText(text));
-    assert.equal(patched, '- [x] 封面 <!-- whaledock:cover -->\n- [ ] 标题 <!-- whaledock:title -->\n');
+    assert.equal(patched.split('\n')[0], '- [x] 封面 <!-- whaledock:cover -->');
+    assert.equal(patched.split('\n').slice(1).join('\n'), text.split('\n').slice(1).join('\n'));
     assert.throws(() => main.patchPublishLight(text, 'cover', true, '0'.repeat(64)), (error) => (
       error && error.code === 'ERR_CAS_MISMATCH'
     ));
+  });
+
+  await test('七灯 marker 缺失、重复、空白变体与同行双 marker 均 fail-closed', async () => {
+    const lines = [
+      '- [ ] 封面 <!-- whaledock:cover -->',
+      '- [ ] 标题 <!-- whaledock:title -->',
+      '- [ ] 话题 <!-- whaledock:topics -->',
+      '- [ ] 时间 <!-- whaledock:timing -->',
+      '- [ ] 置顶 <!-- whaledock:pinned-comment -->',
+      '- [ ] AI 标识 <!-- whaledock:ai-label -->',
+      '- [ ] 本人发布 <!-- whaledock:published -->', ''
+    ];
+    const missing = lines.filter((line) => !line.includes('whaledock:title')).join('\n');
+    const duplicate = `${lines.join('\n')}- [ ] 封面备份 <!--  whaledock: cover  -->\n`;
+    const unknown = `${lines.join('\n')}- [ ] 未知 <!-- whaledock:extra -->\n`;
+    const doubleOnOneLine = lines.join('\n').replace(
+      '- [ ] 封面 <!-- whaledock:cover -->\n- [ ] 标题 <!-- whaledock:title -->',
+      '- [ ] 封面与标题 <!-- whaledock:cover --> <!-- whaledock:title -->'
+    );
+    for (const text of [missing, duplicate, unknown, doubleOnOneLine]) {
+      assert.equal(main.publishChecklistSurface(text, 'unknown').structureValid, false);
+      assert.throws(() => main.patchPublishLight(
+        text, 'cover', true, cockpit.hashText(text)
+      ));
+    }
+  });
+
+  await test('脏 published 不假绿且任一前置灯或 AI 状态变化都清除原始勾选', async () => {
+    const makeDocument = (aiDisclosure, cover = false, aiLabel = false) => {
+      const text = [
+        '---', 'title: 发布检查', 'stage: publish', `aiDisclosure: ${aiDisclosure}`,
+        'updated: 2026-08-25T10:00:00.000Z', '---', '',
+        `- [${cover ? 'x' : ' '}] 封面 <!-- whaledock:cover -->`,
+        '- [x] 标题 <!-- whaledock:title -->',
+        '- [x] 话题 <!-- whaledock:topics -->',
+        '- [x] 时间 <!-- whaledock:timing -->',
+        '- [x] 置顶 <!-- whaledock:pinned-comment -->',
+        `- [${aiLabel ? 'x' : ' '}] AI 标识 <!-- whaledock:ai-label -->`,
+        '- [x] 本人发布 <!-- whaledock:published -->', ''
+      ].join('\n');
+      return {
+        stage: 'publish', text, hash: cockpit.hashText(text),
+        fields: cockpit.parseFrontMatter(text).fields
+      };
+    };
+    const dirty = makeDocument('not-ai', false);
+    const dirtySurface = main.publishChecklistSurface(dirty.text, 'not-ai');
+    assert.equal(dirtySurface.structureValid, true);
+    assert.equal(dirtySurface.lights.find((light) => light.id === 'published').checked, true);
+    assert.equal(dirtySurface.published, false, '原始勾选不得绕过 ready');
+    const completed = main.patchVideoPublishDocument(dirty, {
+      action: 'toggle-publish-light', lightId: 'cover', checked: true
+    }, Date.parse('2026-08-25T10:00:01.000Z'));
+    assert.equal(completed.surface.ready, true);
+    assert.equal(completed.surface.published, false);
+    assert.equal(completed.surface.lights.find((light) => light.id === 'published').checked, false,
+      '补最后一盏灯不得自动复活旧 published');
+    assert.equal(cockpit.parseFrontMatter(completed.text).fields.updated,
+      '2026-08-25T10:00:01.000Z');
+
+    const unknown = makeDocument('unknown', true);
+    const disclosed = main.patchVideoPublishDocument(unknown, {
+      action: 'set-ai-disclosure', value: 'not-ai'
+    }, Date.parse('2026-08-25T10:00:02.000Z'));
+    assert.equal(disclosed.surface.ready, true);
+    assert.equal(disclosed.surface.published, false);
+    assert.equal(disclosed.surface.lights.find((light) => light.id === 'published').checked, false,
+      'AI 状态变化也必须清旧 published');
+    const dirtyNotAi = makeDocument('not-ai', true, true);
+    const normalizedNotAi = main.patchVideoPublishDocument(dirtyNotAi, {
+      action: 'set-ai-disclosure', value: 'not-ai'
+    }, Date.parse('2026-08-25T10:00:03.000Z'));
+    assert.equal(normalizedNotAi.surface.aiDisclosure, 'not-ai');
+    assert.equal(normalizedNotAi.surface.lights.find(
+      (light) => light.id === 'ai-label'
+    ).checked, false, 'not-ai 同值写回也必须清理外部脏 AI 灯');
+    assert.equal(normalizedNotAi.surface.lights.find(
+      (light) => light.id === 'published'
+    ).checked, false, '同值披露引发前置 AI 灯变化时也必须清 raw published');
+    assert.equal(normalizedNotAi.surface.published, false);
+    assert.throws(() => main.patchVideoPublishDocument(makeDocument('ai', false), {
+      action: 'toggle-publish-light', lightId: 'published', checked: true
+    }));
+  });
+
+  await test('发布检查单终态回读再次验证 08 目录与 canonical source', async () => {
+    const runtime = { epoch: 9 };
+    const relativePath = '08_发布检查/项目A-发布检查.md';
+    const sourceRelativePath = '02_脚本/项目A.md';
+    const identity = {
+      projectToken: `project-${'a'.repeat(24)}`,
+      contentRef: main.videoContentRef(runtime.epoch, relativePath)
+    };
+    const read = () => ({
+      record: { relativePath },
+      document: { stage: 'publish', fields: { source: sourceRelativePath } }
+    });
+    assert.equal(main.assertVideoPublishIdentitySource(
+      runtime, identity, sourceRelativePath, read
+    ), true);
+    for (const changed of [
+      { record: { relativePath }, document: { stage: 'publish', fields: { source: '02_脚本/B.md' } } },
+      { record: { relativePath: '02_脚本/假发布.md' }, document: { stage: 'publish', fields: { source: sourceRelativePath } } },
+      { record: { relativePath }, document: { stage: 'script', fields: { source: sourceRelativePath } } }
+    ]) {
+      assert.throws(() => main.assertVideoPublishIdentitySource(
+        runtime, identity, sourceRelativePath, () => changed
+      ), (error) => error && error.code === 'ERR_OPERATION_OUTCOME_UNKNOWN');
+    }
+
+    const longSource = `02_脚本/${'a'.repeat(150)}/${'b'.repeat(150)}/${'c'.repeat(80)}  two  spaces---x.md`;
+    assert.equal(longSource.length > 400, true);
+    assert.equal(cockpit.safeRelativePath(longSource), longSource);
+    const longText = main.videoPublishChecklistText({
+      stage: 'script', relativePath: longSource, title: '长路径项目'
+    }, Date.parse('2026-08-25T10:00:03.000Z'));
+    const parsed = cockpit.parseFrontMatter(longText);
+    assert.equal(parsed.fields.source, longSource,
+      'source 身份字段不得裁剪、折叠空格或改写 ---');
+    assert.equal(main.publishChecklistSurface(
+      longText, parsed.fields.aiDisclosure
+    ).structureValid, true);
+    assert.equal(main.assertVideoPublishIdentitySource(
+      runtime, identity, longSource,
+      () => ({
+        record: { relativePath },
+        document: {
+          stage: 'publish', fields: { source: longSource }, issues: []
+        }
+      })
+    ), true, '长 canonical source 必须能在创建后终态回读');
+    const lossyWhitespaceSource = `\u00a0script.md`;
+    assert.equal(cockpit.safeRelativePath(lossyWhitespaceSource), lossyWhitespaceSource,
+      '回归覆盖 safeRelativePath 仍放行但 front matter 会 trim 的边界');
+    assert.throws(() => main.videoPublishChecklistText({
+      stage: 'script', relativePath: lossyWhitespaceSource, title: '空白路径'
+    }), /无法无损写入/,
+    'source 不能 front matter 无损往返时必须在创建前拒绝');
+  });
+
+  await test('独占创建绑定父目录与新 fd，open 后失败一律 outcome-unknown', async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-exclusive-')));
+    const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-outside-')));
+    const stat = fs.lstatSync(root, { bigint: true });
+    const rootIdentity = { dev: String(stat.dev), ino: String(stat.ino) };
+    const outcomeUnknown = (error) => error && error.code === 'ERR_OPERATION_OUTCOME_UNKNOWN';
+    try {
+      const sameSource = '02_脚本/同一来源.md';
+      const oldTitleDocument = { stage: 'script', relativePath: sameSource, title: '旧标题' };
+      const newTitleDocument = { stage: 'script', relativePath: sameSource, title: '新标题' };
+      const oldTitleTarget = main.videoPublishChecklistRelativePath(
+        oldTitleDocument.relativePath
+      );
+      const newTitleTarget = main.videoPublishChecklistRelativePath(
+        newTitleDocument.relativePath
+      );
+      assert.equal(newTitleTarget, oldTitleTarget,
+        '同一 canonical source 的独占目标不得随 title 变化');
+      main.writeVideoExclusive(root, oldTitleTarget,
+        main.videoPublishChecklistText(oldTitleDocument), { rootIdentity });
+      assert.throws(() => main.writeVideoExclusive(root, newTitleTarget,
+        main.videoPublishChecklistText(newTitleDocument), { rootIdentity }),
+      (error) => error && error.code === 'EEXIST');
+      assert.equal(fs.readdirSync(path.join(root, '08_发布检查'))
+        .filter((name) => name === path.basename(oldTitleTarget)).length, 1,
+      '标题竞态只能争用同一 wx 目标');
+
+      const success = main.writeVideoExclusive(
+        root, '08_发布检查/success.md', '# success\n', { rootIdentity }
+      );
+      assert.equal(fs.readFileSync(success, 'utf8'), '# success\n');
+
+      assert.throws(() => main.writeVideoExclusive(
+        root, '08_发布检查/post-open.md', '# must-not-write\n', {
+          rootIdentity,
+          afterExclusiveOpen() { throw new Error('模拟 open 后失败'); }
+        }
+      ), outcomeUnknown);
+      assert.equal(fs.statSync(path.join(root, '08_发布检查/post-open.md')).size, 0,
+        'open 后复验失败前不得写入内容');
+
+      assert.throws(() => main.writeVideoExclusive(
+        root, '08_发布检查/fsync-failure.md', '# written-before-fsync\n', {
+          rootIdentity,
+          fsyncExclusiveFile() { throw new Error('模拟文件 fsync 失败'); }
+        }
+      ), outcomeUnknown);
+      assert.throws(() => main.writeVideoExclusive(
+        root, '08_发布检查/close-failure.md', '# written-before-close\n', {
+          rootIdentity,
+          closeExclusiveFile(fd) {
+            fs.closeSync(fd);
+            throw new Error('模拟 close 结果不可确认');
+          }
+        }
+      ), outcomeUnknown);
+      assert.throws(() => main.writeVideoExclusive(
+        root, '08_发布检查/directory-fsync-failure.md', '# written-before-dir-fsync\n', {
+          rootIdentity,
+          fsyncExclusiveDirectory() { throw new Error('模拟目录 fsync 失败'); }
+        }
+      ), outcomeUnknown);
+
+      assert.throws(() => main.writeVideoExclusive(
+        root, '08_发布检查/post-write.md', '# maybe-written\n', {
+          rootIdentity,
+          afterExclusiveWrite() { throw new Error('模拟 fsync 后失败'); }
+        }
+      ), outcomeUnknown);
+
+      const finalTarget = path.join(root, '08_发布检查/final-swap.md');
+      assert.throws(() => main.writeVideoExclusive(
+        root, '08_发布检查/final-swap.md', '# original\n', {
+          rootIdentity,
+          beforeExclusiveFinalVerify(target) {
+            fs.renameSync(target, `${target}.opened`);
+            fs.writeFileSync(target, '# replaced\n', 'utf8');
+          }
+        }
+      ), outcomeUnknown);
+      assert.equal(fs.readFileSync(finalTarget, 'utf8'), '# replaced\n',
+        '同盘、等长 regular file 替换也不得返回成功');
+      assert.equal(Buffer.byteLength('# original\n'), Buffer.byteLength('# replaced\n'),
+        '回归必须排除仅由 size 差异拦截的假阳性');
+
+      const controlled = path.join(root, '08_发布检查');
+      const beforeMoved = path.join(root, '08_发布检查-before-old');
+      assert.throws(() => main.writeVideoExclusive(
+        root, '08_发布检查/before-parent-swap.md', '# never-created\n', {
+          rootIdentity,
+          beforeExclusiveOpen() {
+            fs.renameSync(controlled, beforeMoved);
+            fs.symlinkSync(outside, controlled);
+          }
+        }
+      ), (error) => error && error.code === 'ERR_PATH_CHANGED');
+      assert.equal(fs.existsSync(path.join(outside, 'before-parent-swap.md')), false);
+      assert.equal(fs.existsSync(path.join(beforeMoved, 'before-parent-swap.md')), false,
+        'open 前 parent swap 必须零目标文件副作用');
+      fs.unlinkSync(controlled);
+      fs.renameSync(beforeMoved, controlled);
+
+      const moved = path.join(root, '08_发布检查-after-old');
+      assert.throws(() => main.writeVideoExclusive(
+        root, '08_发布检查/parent-swap.md', '# outside-forbidden\n', {
+          rootIdentity,
+          afterExclusiveOpen() {
+            fs.renameSync(controlled, moved);
+            fs.symlinkSync(outside, controlled);
+          }
+        }
+      ), outcomeUnknown);
+      assert.equal(fs.existsSync(path.join(outside, 'parent-swap.md')), false,
+        '父目录 swap 在内容写入前必须被拒绝');
+      assert.equal(fs.statSync(path.join(moved, 'parent-swap.md')).size, 0);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   await test('拍摄命令支持缺口且拒绝额外键，重复设置模式保持幂等', async () => {

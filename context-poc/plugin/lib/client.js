@@ -22,6 +22,7 @@ window.__ModuleLoader__.load({
       'project.action.prepare', 'project.action.submit',
       'block.action.prepare', 'block.action.submit',
       'proposal.read', 'proposal.decide', 'proposal.undo',
+      'publish.read', 'publish.create', 'publish.update',
       'receipts.read', 'receipts.ack', 'receipts.open'
     ]);
     const WORKSPACE_FILE_STATES = new Set([
@@ -42,6 +43,7 @@ window.__ModuleLoader__.load({
     const WORKSPACE_FILE_POLL_MS = 120;
     const MAX_WORKSPACE_FILE_INPUT_BYTES = 4 * 1024;
     const MAX_WORKSPACE_FILE_RESULT_BYTES = 6 * 1024;
+    const MAX_CONTENT_CATALOG_PAGES = 128;
     const PROJECT_TOKEN_RE = /^project-[a-f0-9]{24}$/;
     const CONTENT_REF_RE = /^content-[a-f0-9]{24}$/;
     const BLOCK_TOKEN_RE = /^block-[a-f0-9]{24}$/;
@@ -51,6 +53,15 @@ window.__ModuleLoader__.load({
     const BLOCK_ACTIONS = Object.freeze([
       ['revise', '改这段'], ['spoken', '更口语'],
       ['shorten', '压时长'], ['ask', '问一句']
+    ]);
+    const PUBLISH_LIGHTS = Object.freeze([
+      ['cover', '封面'], ['title', '标题'], ['topics', '标签话题'],
+      ['timing', '发布时间'], ['pinned-comment', '置顶评论'],
+      ['ai-label', 'AI 内容标识'], ['published', '已由本人发布']
+    ]);
+    const PUBLISH_CREATABLE_STAGES = new Set(['script', 'shoot', 'edit']);
+    const AI_DISCLOSURES = Object.freeze([
+      ['unknown', '未选择'], ['ai', '包含 AI 内容'], ['not-ai', '不包含 AI 内容']
     ]);
     const OVERVIEW_STAGES = new Set([
       'inspiration', 'topic', 'script', 'shoot', 'edit',
@@ -63,6 +74,7 @@ window.__ModuleLoader__.load({
 
     const SHELL_CSS = `.wd10-left{background:var(--dsw-specific-sidebar-fill);border-right:1px solid var(--dsw-alias-border-l1);min-width:0;height:100%;display:flex;flex-direction:column;overflow:hidden}.wd10-switch{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:12px;padding:4px;border-radius:10px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1)}.wd10-switch button{border:0;border-radius:7px;padding:7px 10px;color:var(--dsw-alias-fg-secondary);background:transparent;font:inherit;font-size:13px;cursor:pointer}.wd10-switch button[aria-selected=true]{background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);box-shadow:0 1px 3px rgba(0,0,0,.08)}.wd10-library{min-height:0;overflow:auto;padding:0 10px 18px}.wd10-libraryHead{padding:8px 6px 10px}.wd10-eyebrow{font-size:11px;letter-spacing:.08em;color:var(--dsw-alias-fg-tertiary);text-transform:uppercase}.wd10-libraryHead h2{font-size:17px;line-height:1.35;margin:4px 0;color:var(--dsw-alias-fg-primary)}.wd10-libraryHead p{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-refresh,.wd10-loadMore{margin-top:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;padding:5px 8px;background:transparent;color:var(--dsw-alias-fg-secondary);font:inherit;font-size:11px;cursor:pointer}.wd10-refresh:disabled,.wd10-loadMore:disabled{opacity:.55;cursor:default}.wd10-loadMore{width:100%;padding:8px}.wd10-workspaceList{margin:0 0 10px;padding:8px 6px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}.wd10-workspaceChoice{width:100%;text-align:left;border:1px solid transparent;border-radius:8px;padding:7px 8px;margin-top:4px;background:transparent;color:inherit;cursor:pointer}.wd10-workspaceChoice:hover,.wd10-workspaceChoice[aria-current=true]{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l1)}.wd10-projectPath{display:block;margin-top:3px;font-size:10px;color:var(--dsw-alias-fg-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wd10-project{width:100%;text-align:left;border:1px solid transparent;border-radius:10px;padding:10px;margin:2px 0 6px;background:transparent;color:inherit;cursor:pointer}.wd10-project:hover{background:var(--dsw-alias-bg-layer-1)}.wd10-project[aria-current=true]{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l2)}.wd10-projectTitle{display:block;font-size:13px;font-weight:600;color:var(--dsw-alias-fg-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wd10-projectMeta{display:flex;align-items:center;gap:7px;margin-top:5px;font-size:11px;color:var(--dsw-alias-fg-tertiary)}.wd10-stageBadge{border-radius:999px;padding:1px 7px;background:var(--dsw-alias-state-business-tertiary);color:var(--dsw-alias-state-business-primary)}.wd10-detail{min-width:0;height:100%;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base);border-right:1px solid var(--dsw-alias-border-l2);overflow:hidden}.wd10-detailHead{padding:22px 24px 12px}.wd10-detailHead h1{font-size:22px;line-height:1.25;margin:5px 0 7px;color:var(--dsw-alias-fg-primary)}.wd10-detailHead p{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-projectActions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.wd10-projectActions button,.wd10-receipt button,.wd10-choice,.wd10-nextAction{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 9px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:11px;cursor:pointer}.wd10-projectActions button:disabled,.wd10-receipt button:disabled,.wd10-choice:disabled,.wd10-nextAction:disabled{opacity:.55;cursor:default}.wd10-tabs{display:flex;gap:3px;padding:0 20px;border-bottom:1px solid var(--dsw-alias-border-l1);overflow:auto}.wd10-tabs button{border:0;border-bottom:2px solid transparent;padding:10px 8px 9px;background:transparent;color:var(--dsw-alias-fg-secondary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}.wd10-tabs button[aria-selected=true]{border-bottom-color:var(--dsw-alias-fg-primary);color:var(--dsw-alias-fg-primary)}.wd10-receipts{flex:none;max-height:188px;overflow:auto;padding:10px 18px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}.wd10-receiptTitle{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-receipt{margin-top:7px;padding:8px 10px;border-radius:9px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-receiptHead,.wd10-receiptFoot{display:flex;align-items:center;justify-content:space-between;gap:8px}.wd10-receipt strong{color:var(--dsw-alias-fg-primary)}.wd10-receipt p{margin:5px 0 0;line-height:1.45}.wd10-preflight{border-color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-state-warn-tertiary)}.wd10-pulse{color:var(--dsw-alias-state-business-primary);font-weight:600}.wd10-panel{min-height:0;overflow:auto;padding:20px 24px 28px}.wd10-card{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:16px;background:var(--dsw-alias-bg-layer-1);margin-bottom:12px}.wd10-card h3{font-size:14px;margin:0 0 7px;color:var(--dsw-alias-fg-primary)}.wd10-card p{font-size:12px;line-height:1.65;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-overviewMeta{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}.wd10-overviewMeta div{border:1px solid var(--dsw-alias-border-l1);border-radius:9px;padding:9px;background:var(--dsw-alias-bg-base)}.wd10-overviewMeta span,.wd10-currentChoice span{display:block;font-size:10px;color:var(--dsw-alias-fg-tertiary);margin-bottom:3px}.wd10-overviewMeta strong,.wd10-currentChoice strong{font-size:12px;color:var(--dsw-alias-fg-primary)}.wd10-currentChoices{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}.wd10-currentChoice{border-left:3px solid var(--dsw-alias-state-business-primary);padding:7px 9px;background:var(--dsw-alias-bg-base);border-radius:0 8px 8px 0}.wd10-choiceGroup{margin-top:14px}.wd10-choiceGroup h4{font-size:11px;margin:0 0 7px;color:var(--dsw-alias-fg-secondary)}.wd10-choiceList{display:flex;flex-wrap:wrap;gap:6px}.wd10-choice[aria-pressed=true]{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-tertiary);font-weight:600}.wd10-incomplete{color:var(--dsw-alias-state-warn-primary)!important;margin-top:10px!important}.wd10-next{margin-top:16px;padding-top:14px;border-top:1px solid var(--dsw-alias-border-l1)}.wd10-nextAction{margin-top:8px;border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-bg-base);font-weight:600}.wd10-unfinished strong{display:block;margin:8px 0;color:var(--dsw-alias-fg-primary)}.wd10-feedback{font-size:12px;line-height:1.5;margin:8px 0 0;color:var(--dsw-alias-fg-secondary)}.wd10-chat{min-width:0;height:100%;display:flex;overflow:hidden}.wd10-chatMain{min-width:0;flex:1;display:flex;flex-direction:column;overflow:hidden}.wd10-empty{padding:24px;color:var(--dsw-alias-fg-secondary);font-size:13px;line-height:1.6}@media(max-width:1120px){.wd10-detailHead{padding:18px 18px 10px}.wd10-panel{padding:16px 18px}.wd10-detailHead h1{font-size:19px}.wd10-tabs{padding:0 14px}.wd10-receipts{padding:9px 14px}.wd10-overviewMeta,.wd10-currentChoices{grid-template-columns:1fr}}.wd10-leftViews,.wd10-leftView,.wd10-nativeSidebar{min-height:0;flex:1;overflow:hidden}.wd10-leftView[hidden],.wd10-nativeSidebar[hidden]{display:none}.wd10-subSwitch{margin-top:0}.wd10-banner,.wd10-hint{display:flex;align-items:center;gap:8px;margin:10px 18px 0;padding:9px 10px;border:1px solid var(--dsw-alias-state-warn-primary);border-radius:9px;color:var(--dsw-alias-fg-primary);background:var(--dsw-alias-state-warn-tertiary);font-size:12px;line-height:1.45}.wd10-banner span,.wd10-hint span{min-width:0;flex:1}.wd10-banner button,.wd10-hint button{flex:none;border:1px solid currentColor;border-radius:7px;padding:4px 8px;background:transparent;color:inherit;cursor:pointer}.wd10-banner button:disabled{opacity:.55;cursor:default}.wd10-prefStatus{margin:0 14px 8px;color:var(--dsw-alias-state-warn-primary);font-size:11px}.wd10-contentDetails{transition:width var(--ds-transition-duration-slow) var(--ds-ease-in-out);flex-shrink:0}`;
     const SCRIPT_CSS = `.wd10-script{display:flex;flex-direction:column;gap:10px}.wd10-scriptHead,.wd10-blockMeta{display:flex;align-items:center;justify-content:space-between;gap:8px}.wd10-scriptHead h3{margin:0;color:var(--dsw-alias-fg-primary);font-size:14px}.wd10-scriptHead span,.wd10-blockMeta span{font-size:10px;color:var(--dsw-alias-fg-tertiary)}.wd10-block{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:13px;background:var(--dsw-alias-bg-layer-1)}.wd10-blockMeta strong{font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-block pre,.wd10-compare pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:9px 0 0;font:inherit;font-size:12px;line-height:1.6;color:var(--dsw-alias-fg-primary)}.wd10-blockActions,.wd10-proposalActions{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}.wd10-blockActions button,.wd10-proposalActions button,.wd10-undo{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 9px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:11px;cursor:pointer}.wd10-blockActions button:disabled,.wd10-proposalActions button:disabled,.wd10-undo:disabled{opacity:.5;cursor:default}.wd10-proposal{border-color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-state-warn-tertiary)}.wd10-compare{margin-top:10px;border-radius:9px;padding:10px;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1)}.wd10-compare h4{margin:0;font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-proposalActions button:first-child,.wd10-undo{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);font-weight:600}.wd10-undo{margin-top:11px}`;
+    const PUBLISH_CSS = `.wd10-publish{display:flex;flex-direction:column;gap:12px}.wd10-publishHead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.wd10-publishHead h3{margin:0 0 5px;font-size:14px;color:var(--dsw-alias-fg-primary)}.wd10-publishState{flex:none;border-radius:999px;padding:3px 8px;font-size:10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-secondary);border:1px solid var(--dsw-alias-border-l1)}.wd10-publishState[data-ready=true]{color:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary)}.wd10-publishLights{display:grid;gap:7px;margin-top:12px}.wd10-publishLight{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--dsw-alias-border-l1);border-radius:9px;padding:9px 10px;background:var(--dsw-alias-bg-base)}.wd10-publishLight span{font-size:12px;color:var(--dsw-alias-fg-primary)}.wd10-publishLight input{margin:0}.wd10-publishLight[data-satisfied=true]{border-color:var(--dsw-alias-state-business-primary)}.wd10-aiChoices{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}.wd10-aiChoices button,.wd10-createPublish{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:7px 10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:11px;cursor:pointer}.wd10-aiChoices button[aria-pressed=true]{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-tertiary);font-weight:600}.wd10-aiChoices button:disabled,.wd10-createPublish:disabled{opacity:.5;cursor:default}.wd10-createPublish{margin-top:12px;border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);font-weight:600}.wd10-publishInvalid{border-color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-state-warn-tertiary)}.wd10-publishNotice{border-left:3px solid var(--dsw-alias-state-warn-primary);padding:8px 10px;border-radius:0 8px 8px 0;background:var(--dsw-alias-state-warn-tertiary)}`;
     const CREATOR_TABS = Object.freeze([
       ['overview', '概览'], ['script', '脚本'], ['shoot', '拍摄'],
       ['publish', '发布'], ['review', '复盘']
@@ -77,7 +89,7 @@ window.__ModuleLoader__.load({
       const tag = document.createElement('style');
       tag.dataset.plugin = '@whaledock/context-bridge-poc';
       tag.dataset.pluginCss = tagId;
-      tag.textContent = `${SHELL_CSS}${SCRIPT_CSS}`;
+      tag.textContent = `${SHELL_CSS}${SCRIPT_CSS}${PUBLISH_CSS}`;
       document.head.appendChild(tag);
       return () => { tag.remove(); };
     }
@@ -298,6 +310,104 @@ window.__ModuleLoader__.load({
         projectToken: value.projectToken, field: value.field, value: value.value,
         updated, message
       });
+    }
+
+    function publishChecklist(value) {
+      if (!exact(value, [
+        'structureValid', 'ready', 'published', 'aiDisclosure', 'lights'
+      ]) || typeof value.structureValid !== 'boolean'
+          || typeof value.ready !== 'boolean' || typeof value.published !== 'boolean'
+          || !AI_DISCLOSURES.some(([id]) => id === value.aiDisclosure)
+          || !Array.isArray(value.lights) || value.lights.length !== PUBLISH_LIGHTS.length) return null;
+      const lights = value.lights.map((light, index) => {
+        const expected = PUBLISH_LIGHTS[index];
+        if (!exact(light, ['id', 'label', 'available', 'checked', 'satisfied'])
+            || light.id !== expected[0] || light.label !== expected[1]
+            || typeof light.available !== 'boolean' || typeof light.checked !== 'boolean'
+            || typeof light.satisfied !== 'boolean') return null;
+        return Object.freeze({ ...light });
+      });
+      if (lights.some((light) => light === null)) return null;
+      if (lights.slice(0, 5).some((light) => (
+        light.satisfied !== (light.available && light.checked)
+      ))) return null;
+      const aiSatisfied = value.aiDisclosure === 'not-ai'
+        || value.aiDisclosure === 'ai' && lights[5].available && lights[5].checked;
+      const ready = value.structureValid
+        && lights.slice(0, 5).every((light) => light.satisfied) && aiSatisfied;
+      const published = value.structureValid && ready
+        && lights[6].available && lights[6].checked;
+      if (value.structureValid && lights.some((light) => !light.available)
+          || lights[5].satisfied !== aiSatisfied || value.ready !== ready
+          || lights[6].satisfied !== published || value.published !== published) return null;
+      return Object.freeze({
+        structureValid: value.structureValid, ready: value.ready,
+        published: value.published, aiDisclosure: value.aiDisclosure,
+        lights: Object.freeze(lights)
+      });
+    }
+
+    function publishSurface(value, expected = null) {
+      if (!exact(value, [
+        'kind', 'contentRef', 'projectToken', 'title', 'stage', 'stageLabel',
+        'updated', 'canCreate', 'checklist'
+      ]) || value.kind !== 'publish'
+          || !CONTENT_REF_RE.test(String(value.contentRef || ''))
+          || expected !== null && value.contentRef !== expected.contentRef
+          || !PROJECT_TOKEN_RE.test(String(value.projectToken || ''))
+          || expected !== null && value.projectToken !== expected.projectToken
+          || !(value.stage === null || OVERVIEW_STAGES.has(value.stage))
+          || typeof value.canCreate !== 'boolean') return null;
+      const title = strictOverviewText(value.title, 120, false);
+      const stageLabel = strictOverviewText(value.stageLabel, 24, false);
+      const updated = strictOverviewText(value.updated, 64);
+      if ([title, stageLabel, updated].includes(undefined)) return null;
+      const checklist = value.checklist === null ? null : publishChecklist(value.checklist);
+      if (value.checklist !== null && checklist === null) return null;
+      const canCreate = value.stage !== null && PUBLISH_CREATABLE_STAGES.has(value.stage);
+      if (value.canCreate !== canCreate
+          || (value.stage === 'publish') !== (checklist !== null)) return null;
+      return Object.freeze({
+        kind: 'publish', contentRef: value.contentRef, projectToken: value.projectToken,
+        title, stage: value.stage, stageLabel, updated,
+        canCreate: value.canCreate, checklist
+      });
+    }
+
+    function publishReadResult(snapshot, expected) {
+      const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+      return publishSurface(value, expected);
+    }
+
+    function publishCreateResult(snapshot, expected) {
+      const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+      if (!exact(value, [
+        'kind', 'created', 'sourceContentRef', 'sourceProjectToken', 'surface', 'message'
+      ]) || value.kind !== 'publish-create' || typeof value.created !== 'boolean'
+          || value.sourceContentRef !== expected.contentRef
+          || value.sourceProjectToken !== expected.projectToken) return null;
+      const surface = publishSurface(value.surface);
+      const message = strictOverviewText(value.message, 160, false);
+      if (!surface || message === undefined || surface.stage !== 'publish'
+          || surface.checklist === null || surface.canCreate
+          || surface.contentRef === expected.contentRef) return null;
+      return Object.freeze({
+        kind: 'publish-create', created: value.created,
+        sourceContentRef: value.sourceContentRef,
+        sourceProjectToken: value.sourceProjectToken, surface, message
+      });
+    }
+
+    function publishMutationResult(snapshot, expected) {
+      const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+      if (!exact(value, ['kind', 'changed', 'surface', 'message'])
+          || value.kind !== 'publish-mutation' || value.changed !== true) return null;
+      const surface = publishSurface(value.surface);
+      const message = strictOverviewText(value.message, 160, false);
+      if (!surface || message === undefined || surface.stage !== 'publish'
+          || surface.checklist === null || surface.contentRef !== expected.contentRef
+          || surface.projectToken === expected.projectToken) return null;
+      return Object.freeze({ kind: 'publish-mutation', changed: true, surface, message });
     }
 
     function documentPageResult(snapshot, expectedProjectToken, expectedCursor) {
@@ -1312,8 +1422,357 @@ window.__ModuleLoader__.load({
       ] });
     }
 
+    function PublishPanel({ project, workspaceFiles, workspaceIdentity,
+      onProjectMutation, onPublishCreated, onCatalogRefresh }) {
+      const [surfaceState, setSurfaceState] = react.useState({ status: 'idle', surface: null });
+      const [feedback, setFeedback] = react.useState('');
+      const [pending, setPending] = react.useState(false);
+      const [readRefreshKey, setReadRefreshKey] = react.useState(0);
+      const readAttempt = react.useRef(0);
+      const readAbort = react.useRef(null);
+      const mutationAttempt = react.useRef(0);
+      const mutationAbort = react.useRef(null);
+      const pendingRef = react.useRef(false);
+      const lastSurfaceRef = react.useRef(null);
+      const lastSurfaceIdentityRef = react.useRef(null);
+      const lastFeedbackRef = react.useRef('');
+
+      const showFeedback = (message) => {
+        lastFeedbackRef.current = message;
+        setFeedback(message);
+      };
+      const showSurface = (surface, status = 'ready') => {
+        lastSurfaceRef.current = surface;
+        lastSurfaceIdentityRef.current = workspaceIdentity;
+        setSurfaceState({ status, surface });
+      };
+      const clearStale = (message) => {
+        lastSurfaceRef.current = null;
+        lastSurfaceIdentityRef.current = null;
+        setSurfaceState({ status: 'error', surface: null });
+        showFeedback(message);
+        onCatalogRefresh?.();
+      };
+
+      react.useLayoutEffect(() => {
+        const attempt = ++readAttempt.current;
+        readAbort.current?.abort();
+        const controller = new AbortController();
+        readAbort.current = controller;
+        mutationAttempt.current += 1;
+        mutationAbort.current?.abort();
+        mutationAbort.current = null;
+        pendingRef.current = false;
+        setPending(false);
+        const cached = project && lastSurfaceRef.current
+          && lastSurfaceIdentityRef.current === workspaceIdentity
+          && lastSurfaceRef.current.contentRef === project.contentRef
+          && lastSurfaceRef.current.projectToken === project.projectToken
+          ? lastSurfaceRef.current : null;
+        if (!cached) {
+          lastSurfaceRef.current = null;
+          lastSurfaceIdentityRef.current = null;
+          lastFeedbackRef.current = '';
+          setFeedback('');
+        } else setFeedback(lastFeedbackRef.current);
+        setSurfaceState({ status: project ? 'loading' : 'idle', surface: cached });
+        if (!project || !workspaceFiles || typeof workspaceFiles.execute !== 'function') {
+          if (project) setSurfaceState({ status: 'error', surface: null });
+          return () => controller.abort();
+        }
+        const expected = Object.freeze({
+          contentRef: project.contentRef, projectToken: project.projectToken
+        });
+        const read = async () => {
+          let snapshot = null;
+          try {
+            snapshot = await workspaceFiles.execute('publish.read', expected, controller.signal);
+          } catch (_error) { snapshot = null; }
+          if (controller.signal.aborted || readAttempt.current !== attempt) return;
+          const surface = publishReadResult(snapshot, expected);
+          if (surface) {
+            showSurface(surface);
+            return;
+          }
+          if (snapshot?.code === 'operation-stale') {
+            clearStale('项目文件已变化；已清空旧发布检查单并刷新内容库。');
+            return;
+          }
+          const prior = lastSurfaceRef.current;
+          if (prior && prior.contentRef === expected.contentRef
+              && prior.projectToken === expected.projectToken) {
+            setSurfaceState({ status: 'stale-read', surface: prior });
+            showFeedback(snapshot?.code === 'outcome-unknown'
+              ? '读取结果未知；以下保留上次检查单。请核对项目文件，不要重复点击。'
+              : '发布检查单暂时读不到；以下保留上次成功结果，不代表当前状态。');
+          } else {
+            setSurfaceState({ status: 'error', surface: null });
+            showFeedback('发布检查单暂时读不到；没有推断文件状态。');
+          }
+        };
+        void read();
+        return () => {
+          controller.abort();
+          if (readAbort.current === controller) readAbort.current = null;
+        };
+      }, [project?.contentRef, project?.projectToken, workspaceIdentity,
+        workspaceFiles, readRefreshKey]);
+
+      react.useEffect(() => () => {
+        readAttempt.current += 1;
+        readAbort.current?.abort();
+        readAbort.current = null;
+        mutationAttempt.current += 1;
+        mutationAbort.current?.abort();
+        mutationAbort.current = null;
+        pendingRef.current = false;
+      }, []);
+
+      const createChecklist = async () => {
+        const surface = surfaceState.surface;
+        if (surfaceState.status !== 'ready' || !surface?.canCreate
+            || surface.checklist !== null || pendingRef.current) return;
+        pendingRef.current = true;
+        setPending(true);
+        showFeedback('正在创建本地发布检查单…');
+        const controller = new AbortController();
+        mutationAbort.current = controller;
+        const attempt = ++mutationAttempt.current;
+        const expected = Object.freeze({
+          contentRef: surface.contentRef, projectToken: surface.projectToken
+        });
+        try {
+          const snapshot = await workspaceFiles.execute('publish.create', expected, controller.signal);
+          if (controller.signal.aborted || mutationAttempt.current !== attempt) return;
+          const result = publishCreateResult(snapshot, expected);
+          if (!result) {
+            if (snapshot?.code === 'operation-stale') {
+              clearStale('源文件已变化；已清空旧结果并刷新内容库。');
+            } else if (snapshot?.code === 'outcome-unknown') {
+              setSurfaceState({ status: 'stale-write', surface });
+              showFeedback('创建结果未知；以下保留创建前状态。请核对项目文件，不要重复点击。');
+            } else showFeedback(operationError(snapshot,
+              '创建结果无效；请核对项目文件，不要重复点击。'));
+            return;
+          }
+          showSurface(result.surface);
+          showFeedback(result.created ? result.message : `已打开既有检查单。${result.message}`);
+          onPublishCreated?.(result.surface);
+        } catch (_error) {
+          if (!controller.signal.aborted && mutationAttempt.current === attempt) {
+            setSurfaceState({ status: 'stale-write', surface });
+            showFeedback('创建结果未知；以下保留创建前状态。请核对项目文件，不要重复点击。');
+          }
+        } finally {
+          if (mutationAbort.current === controller) mutationAbort.current = null;
+          if (mutationAttempt.current === attempt) {
+            pendingRef.current = false;
+            setPending(false);
+          }
+        }
+      };
+
+      const updateChecklist = async (input) => {
+        const surface = surfaceState.surface;
+        if (surfaceState.status !== 'ready' || !surface?.checklist?.structureValid
+            || pendingRef.current) return;
+        pendingRef.current = true;
+        setPending(true);
+        showFeedback('正在写入本地发布检查单…');
+        const controller = new AbortController();
+        mutationAbort.current = controller;
+        const attempt = ++mutationAttempt.current;
+        const expected = Object.freeze({
+          contentRef: surface.contentRef, projectToken: surface.projectToken
+        });
+        try {
+          const snapshot = await workspaceFiles.execute('publish.update', {
+            ...expected, ...input
+          }, controller.signal);
+          if (controller.signal.aborted || mutationAttempt.current !== attempt) return;
+          const result = publishMutationResult(snapshot, expected);
+          if (!result) {
+            if (snapshot?.code === 'operation-stale') {
+              clearStale('发布文件已变化；已清空旧检查单并刷新内容库。');
+            } else if (snapshot?.code === 'outcome-unknown') {
+              setSurfaceState({ status: 'stale-write', surface });
+              showFeedback('写入结果未知；以下保留写入前检查单。请核对项目文件，不要重复点击。');
+            } else showFeedback(operationError(snapshot,
+              '写入结果无效；请刷新后核对项目文件。'));
+            return;
+          }
+          showSurface(result.surface);
+          showFeedback(result.message);
+          onProjectMutation?.({
+            contentRef: result.surface.contentRef,
+            projectToken: result.surface.projectToken,
+            updated: result.surface.updated
+          });
+        } catch (_error) {
+          if (!controller.signal.aborted && mutationAttempt.current === attempt) {
+            setSurfaceState({ status: 'stale-write', surface });
+            showFeedback('写入结果未知；以下保留写入前检查单。请核对项目文件，不要重复点击。');
+          }
+        } finally {
+          if (mutationAbort.current === controller) mutationAbort.current = null;
+          if (mutationAttempt.current === attempt) {
+            pendingRef.current = false;
+            setPending(false);
+          }
+        }
+      };
+
+      if (surfaceState.status === 'idle') return react_jsx_runtime.jsx('section', {
+        className: 'wd10-card', children: react_jsx_runtime.jsx('p', {
+          children: '请从左侧选择一张真实内容卡。'
+        })
+      });
+      if (surfaceState.status === 'loading' && !surfaceState.surface) {
+        return react_jsx_runtime.jsx('section', { className: 'wd10-card', children:
+          react_jsx_runtime.jsx('p', { children: '正在读取发布状态…' }) });
+      }
+      if (surfaceState.status === 'error' || !surfaceState.surface) {
+        return react_jsx_runtime.jsxs('section', { className: 'wd10-card', children: [
+          react_jsx_runtime.jsx('p', { role: 'status', children:
+            '发布状态暂时读不到；没有用内容卡摘要冒充检查单。' }),
+          feedback && react_jsx_runtime.jsx('p', {
+            className: 'wd10-feedback', role: 'status', children: feedback
+          }),
+          react_jsx_runtime.jsx('button', { type: 'button', className: 'wd10-refresh',
+            onClick: () => setReadRefreshKey((current) => current + 1),
+            children: '重新读取检查单' })
+        ] });
+      }
+      const surface = surfaceState.surface;
+      if (surface.checklist === null) {
+        return react_jsx_runtime.jsxs('section', {
+          className: 'wd10-card wd10-publish', 'data-whaledock-publish': true, children: [
+            react_jsx_runtime.jsx('h3', { children: '发布检查单' }),
+            surface.canCreate ? react_jsx_runtime.jsx('p', { children:
+              `当前是${surface.stageLabel}阶段，可从这份真实文件创建一张本地发布检查单。`
+            }) : react_jsx_runtime.jsx('p', { role: 'status', children:
+              `当前“${surface.stageLabel}”阶段不能创建发布检查单。只有脚本、拍摄或剪辑阶段可创建。`
+            }),
+            surface.canCreate && react_jsx_runtime.jsx('button', {
+              type: 'button', className: 'wd10-createPublish',
+              disabled: pending || surfaceState.status !== 'ready',
+              onClick: () => { void createChecklist(); },
+              children: pending ? '正在创建…' : '创建发布检查单'
+            }),
+            react_jsx_runtime.jsx('p', { className: 'wd10-publishNotice', children:
+              '只写入本地检查单；鲸坞不会访问平台、代发或宣称已合规'
+            }),
+            feedback && react_jsx_runtime.jsx('p', {
+              className: 'wd10-feedback', role: 'status', children: feedback
+            })
+          ]
+        });
+      }
+
+      const checklist = surface.checklist;
+      const writeDisabled = pending || surfaceState.status !== 'ready'
+        || !checklist.structureValid;
+      const aiLight = checklist.lights[5];
+      const stateCopy = checklist.published ? '本地已标记为本人发布'
+        : checklist.ready ? '发布前检查已就绪' : '还有检查项未完成';
+      const lightControl = (light) => {
+        const isAiLabel = light.id === 'ai-label';
+        const isPublished = light.id === 'published';
+        const disabled = writeDisabled || !light.available
+          || isAiLabel && checklist.aiDisclosure !== 'ai' && !light.checked
+          || isPublished && !checklist.ready && !light.checked;
+        return react_jsx_runtime.jsxs('label', {
+          className: 'wd10-publishLight', 'data-light-id': light.id,
+          'data-satisfied': light.satisfied, children: [
+            react_jsx_runtime.jsx('span', { children: light.label }),
+            react_jsx_runtime.jsx('input', {
+              type: 'checkbox', checked: light.checked, disabled,
+              onChange: () => { void updateChecklist({
+                type: 'light', lightId: light.id, checked: !light.checked
+              }); }
+            })
+          ]
+        }, light.id);
+      };
+      return react_jsx_runtime.jsxs('section', {
+        className: 'wd10-publish', 'data-whaledock-publish': true, children: [
+          (surfaceState.status === 'stale-read' || surfaceState.status === 'stale-write')
+            && react_jsx_runtime.jsxs('div', { children: [
+              react_jsx_runtime.jsx('p', { className: 'wd10-incomplete', role: 'status',
+                children: surfaceState.status === 'stale-read'
+                  ? '以下是上次成功读取的检查单，不代表当前文件状态。'
+                  : '以下是写入前的检查单，不代表写入是否成功。' }),
+              react_jsx_runtime.jsx('button', { type: 'button', className: 'wd10-refresh',
+                onClick: () => setReadRefreshKey((current) => current + 1),
+                children: '重新读取检查单' })
+            ] }),
+          !checklist.structureValid && react_jsx_runtime.jsxs('section', {
+            className: 'wd10-card wd10-publishInvalid', role: 'alert', children: [
+              react_jsx_runtime.jsx('h3', { children: '发布检查单结构无效' }),
+              react_jsx_runtime.jsx('p', { children:
+                '检查项标记缺失、重复或存在歧义；已禁用全部写入控件，请先修复真实文件。'
+              })
+            ]
+          }),
+          checklist.lights[6].checked && !checklist.published
+            && react_jsx_runtime.jsx('p', { className: 'wd10-incomplete', role: 'status',
+              children: !writeDisabled && checklist.lights[6].available
+                ? '文件里的“已由本人发布”勾选已失效；当前不会显示为已发布，可直接取消该勾选。'
+                : '文件里的“已由本人发布”勾选已失效；当前不会显示为已发布，且未开放取消操作。'
+            }),
+          react_jsx_runtime.jsxs('section', { className: 'wd10-card', children: [
+            react_jsx_runtime.jsxs('div', { className: 'wd10-publishHead', children: [
+              react_jsx_runtime.jsxs('div', { children: [
+                react_jsx_runtime.jsx('h3', { children: '发布检查单 · 7 灯' }),
+                react_jsx_runtime.jsx('p', { children:
+                  `${surface.title} · ${surface.updated ? `更新 ${surface.updated}` : '更新时间未写明'}`
+                })
+              ] }),
+              react_jsx_runtime.jsx('span', {
+                className: 'wd10-publishState', 'data-ready': checklist.ready,
+                children: stateCopy
+              })
+            ] }),
+            react_jsx_runtime.jsx('div', { className: 'wd10-publishLights', children:
+              checklist.lights.map(lightControl) })
+          ] }),
+          react_jsx_runtime.jsxs('section', { className: 'wd10-card', children: [
+            react_jsx_runtime.jsx('h3', { children: 'AI 内容选择' }),
+            react_jsx_runtime.jsx('p', { children: checklist.aiDisclosure === 'unknown'
+              ? '必须先选择是否包含 AI 内容；未选择时发布前检查不会就绪。'
+              : checklist.aiDisclosure === 'ai'
+                ? '已选择包含 AI 内容；还必须勾选“AI 内容标识”。'
+                : aiLight.checked
+                  ? !writeDisabled && aiLight.available
+                    ? '已选择不包含 AI 内容；文件仍勾选了“AI 内容标识”，可以取消。'
+                    : '已选择不包含 AI 内容；当前只显示 AI 内容标识的原始勾选，未开放取消操作。'
+                  : '已选择不包含 AI 内容；无需勾选 AI 内容标识。'
+            }),
+            react_jsx_runtime.jsx('div', { className: 'wd10-aiChoices', children:
+              AI_DISCLOSURES.map(([value, label]) => react_jsx_runtime.jsx('button', {
+                type: 'button', 'aria-pressed': checklist.aiDisclosure === value,
+                disabled: writeDisabled || checklist.aiDisclosure === value
+                  || !aiLight.available,
+                onClick: () => { void updateChecklist({ type: 'ai-disclosure', value }); },
+                children: label
+              }, value)) })
+          ] }),
+          react_jsx_runtime.jsxs('section', { className: 'wd10-card wd10-publishNotice', children: [
+            react_jsx_runtime.jsx('h3', { children: '本人已发布不是平台回读' }),
+            react_jsx_runtime.jsx('p', { children:
+              '只写入本地检查单；鲸坞不会访问平台、代发或宣称已合规'
+            })
+          ] }),
+          feedback && react_jsx_runtime.jsx('p', {
+            className: 'wd10-feedback', role: 'status', children: feedback
+          })
+        ]
+      });
+    }
+
     function CreatorDetail({ routingProject, project, tab, onTab, workspaceFiles,
-      alignment, onAlign, onCatalogRefresh, onProjectMutation }) {
+      workspaceIdentity, alignment, onAlign, onCatalogRefresh,
+      onProjectMutation, onPublishCreated }) {
       const [preflight, setPreflight] = react.useState(null);
       const [feedback, setFeedback] = react.useState('');
       const [pending, setPending] = react.useState(false);
@@ -1528,7 +1987,10 @@ window.__ModuleLoader__.load({
             proposalRefreshKey: proposalRefresh,
             onProjectMutation
           })
-          : react_jsx_runtime.jsxs('section', {
+          : tab === 'publish' ? react_jsx_runtime.jsx(PublishPanel, {
+            project, workspaceFiles, workspaceIdentity,
+            onProjectMutation, onPublishCreated, onCatalogRefresh
+          }) : react_jsx_runtime.jsxs('section', {
             className: 'wd10-card wd10-unfinished', 'data-whaledock-unfinished': true, children: [
               react_jsx_runtime.jsx('h3', { children:
                 CREATOR_TABS.find(([id]) => id === tab)?.[1] || '概览' }),
@@ -1657,6 +2119,7 @@ window.__ModuleLoader__.load({
       const catalogLoadMoreAttempt = react.useRef(0);
       const catalogLoadMoreAbort = react.useRef(null);
       const selectedContentRef = react.useRef(null);
+      const catalogReadbackTarget = react.useRef(null);
       const alignmentCurrent = react.useRef(sessionState.current);
       const currentProject = sessionState.current === undefined ? undefined
         : projects.find((project) => project.sessionIds.includes(sessionState.current));
@@ -1730,6 +2193,7 @@ window.__ModuleLoader__.load({
         if (identityChanged) {
           catalogPages.current = 1;
           selectedContentRef.current = null;
+          catalogReadbackTarget.current = null;
           setSelectedContentToken(null);
           setCatalog({ status: identity ? 'loading' : 'idle', projects: [], nextCursor: null });
         }
@@ -1746,13 +2210,18 @@ window.__ModuleLoader__.load({
           let cursor = 0;
           let result = null;
           const merged = [];
+          let pagesRead = 0;
           try {
-            for (let page = 0; page < pageTarget && cursor !== null; page += 1) {
+            for (let page = 0; page < MAX_CONTENT_CATALOG_PAGES && cursor !== null; page += 1) {
+              const readbackRef = catalogReadbackTarget.current?.contentRef || null;
+              if (page >= pageTarget && (!readbackRef
+                  || merged.some((item) => item.contentRef === readbackRef))) break;
               const snapshot = await workspaceFiles.execute(
                 'catalog.read', { cursor, limit: 4 }, controller.signal
               );
               result = contentCatalogResult(snapshot);
               if (!result) throw new Error('catalog-invalid');
+              pagesRead += 1;
               for (const project of result.projects) {
                 if (!merged.some((item) => item.contentRef === project.contentRef)) merged.push(project);
               }
@@ -1767,6 +2236,11 @@ window.__ModuleLoader__.load({
               : { status: 'error', projects: [], nextCursor: null });
           } else {
             const prior = selectedContentRef.current;
+            const readback = catalogReadbackTarget.current;
+            if (readback && merged.some((item) => item.contentRef === readback.contentRef)) {
+              catalogPages.current = Math.max(catalogPages.current, pagesRead);
+              catalogReadbackTarget.current = null;
+            } else if (readback && cursor === null) catalogReadbackTarget.current = null;
             const selected = merged.find((project) => project.contentRef === prior?.contentRef)
               || merged[0] || null;
             selectedContentRef.current = selected ? {
@@ -1852,6 +2326,32 @@ window.__ModuleLoader__.load({
         }));
         refreshCatalog();
       }, [refreshCatalog]);
+
+      const applyPublishCreated = react.useCallback((surface) => {
+        const project = Object.freeze({
+          contentRef: surface.contentRef,
+          projectToken: surface.projectToken,
+          title: surface.title,
+          workflowLabel: surface.stageLabel,
+          updated: surface.updated,
+          actions: Object.freeze([])
+        });
+        selectedContentRef.current = {
+          contentRef: project.contentRef, token: project.projectToken
+        };
+        catalogReadbackTarget.current = project;
+        setSelectedContentToken(project.projectToken);
+        setCatalog((current) => {
+          const projects = current.projects.filter((item) => item.contentRef !== project.contentRef);
+          projects.push(project);
+          return {
+            ...current,
+            status: 'ready',
+            projects,
+            projectCount: Math.max(current.projectCount || 0, projects.length)
+          };
+        });
+      }, []);
 
       const writePreference = async (patch) => {
         if (preferences === undefined || typeof preferences.write !== 'function') {
@@ -1976,6 +2476,7 @@ window.__ModuleLoader__.load({
               tab: creatorTab,
               onTab: setCreatorTab,
               workspaceFiles,
+              workspaceIdentity: currentCatalogIdentity,
               alignment: mismatch ? {
                 currentTitle: currentProject?.title
                   || sessionState.byId[sessionState.current]?.displayTitle || '未选择会话',
@@ -1984,7 +2485,8 @@ window.__ModuleLoader__.load({
               } : null,
               onAlign: () => { void alignProject(activeProject, true); },
               onCatalogRefresh: refreshCatalog,
-              onProjectMutation: applyProjectMutation
+              onProjectMutation: applyProjectMutation,
+              onPublishCreated: applyPublishCreated
             }),
             react_jsx_runtime.jsxs('section', { className: 'wd10-chat',
               'aria-label': '原生对话', children: [

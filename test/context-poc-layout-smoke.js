@@ -387,6 +387,52 @@ function proposal(project, status = null, extra = {}) {
   });
 }
 
+const PUBLISH_LIGHT_DEFINITIONS = [
+  ['cover', '封面'], ['title', '标题'], ['topics', '标签话题'],
+  ['timing', '发布时间'], ['pinned-comment', '置顶评论'],
+  ['ai-label', 'AI 内容标识'], ['published', '已由本人发布']
+];
+
+function publishChecklist(extra = {}) {
+  const structureValid = extra.structureValid ?? true;
+  const aiDisclosure = extra.aiDisclosure || 'unknown';
+  const checked = { ...(extra.checked || {}) };
+  const unavailable = new Set(extra.unavailable || []);
+  const lights = PUBLISH_LIGHT_DEFINITIONS.map(([id, label]) => {
+    const available = !unavailable.has(id);
+    const rawChecked = checked[id] === true;
+    let satisfied = available && rawChecked;
+    if (id === 'ai-label') {
+      satisfied = aiDisclosure === 'not-ai'
+        || aiDisclosure === 'ai' && available && rawChecked;
+    }
+    return { id, label, available, checked: rawChecked, satisfied };
+  });
+  const ready = structureValid && lights.slice(0, 6).every((light) => light.satisfied);
+  lights[6].satisfied = structureValid && ready && lights[6].checked;
+  return {
+    structureValid, ready, published: lights[6].satisfied,
+    aiDisclosure, lights
+  };
+}
+
+function publishSurface(project, extra = {}) {
+  const stage = extra.stage || 'publish';
+  const checklist = Object.prototype.hasOwnProperty.call(extra, 'checklist')
+    ? extra.checklist : stage === 'publish' ? publishChecklist() : null;
+  return {
+    kind: 'publish', contentRef: project.contentRef,
+    projectToken: project.projectToken, title: project.title,
+    stage, stageLabel: extra.stageLabel || ({
+      script: '写稿', shoot: '拍摄', edit: '剪辑', publish: '发布',
+      topic: '选题', review: '复盘'
+    }[stage] || '未分类'),
+    updated: Object.prototype.hasOwnProperty.call(extra, 'updated')
+      ? extra.updated : '2026-08-25 12:00',
+    canCreate: ['script', 'shoot', 'edit'].includes(stage), checklist
+  };
+}
+
 function scriptBlock(hex, text, extra = {}) {
   return {
     blockToken: `block-${hex.repeat(24).slice(0, 24)}`,
@@ -862,7 +908,7 @@ async function main() {
     assert(calls.some((call) => call.operation === 'catalog.read' && call.input.cursor === 4));
   });
 
-  await test('概览和脚本接通真实文件且其余三阶段诚实标未完成，TaskReceiptStrip 不卸载', async () => {
+  await test('概览、脚本、发布接通真实文件且拍摄复盘诚实标未完成，TaskReceiptStrip 不卸载', async () => {
     const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
     const project = contentProject('8', '回执项目', '拍摄中');
     project.contentRef = `content-${'8'.repeat(24)}`;
@@ -875,6 +921,9 @@ async function main() {
         scriptBlock('1', '真实脚本文本')
       ]);
       if (operation === 'proposal.read') return proposal(project);
+      if (operation === 'publish.read') return fulfilled(publishSurface(project, {
+        stage: 'shoot', stageLabel: '拍摄', checklist: null
+      }));
       if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
         projectToken: input.projectToken, receipts: [{
           receiptId: 'receipt-opaque-01', targetLabel: '右栏会话', tracking: 'ready',
@@ -906,13 +955,20 @@ async function main() {
     assert.match(textOf(tree), /真实脚本文本/u);
     assert.doesNotMatch(textOf(tree), /这一格还没做/u);
     assert.equal(harness.renderer.fiberIds('TaskReceiptStrip')[0], receiptFiber);
-    for (const label of ['拍摄', '发布', '复盘']) {
+    for (const label of ['拍摄', '复盘']) {
       button(tree, label).props.onClick();
       tree = harness.renderer.render(harness.AppFrame, props);
       assert.match(textOf(tree), /这一格还没做/u);
       assert.match(textOf(tree), /投递中/u);
       assert.equal(harness.renderer.fiberIds('TaskReceiptStrip')[0], receiptFiber);
     }
+    button(tree, '发布').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    assert.doesNotMatch(textOf(tree), /这一格还没做/u);
+    assert.match(textOf(tree), /创建发布检查单/u);
+    assert.match(textOf(tree), /鲸坞不会访问平台、代发或宣称已合规/u);
+    assert.equal(harness.renderer.fiberIds('TaskReceiptStrip')[0], receiptFiber);
     assert.match(textOf(tree), /已用 3 秒/u);
     button(tree, '刚更新').props.onClick();
     tree = await settle(harness, props);
@@ -1697,6 +1753,432 @@ async function main() {
     assert.equal(undoCalls, 1);
     assert.deepEqual(undoInputs, [{ contentRef: project.contentRef, revisionToken: undoToken }]);
     assert.doesNotMatch(textOf(tree), /撤销这一次采用/u);
+  });
+
+  await test('发布七灯遵守 AI 三态硬门、脏发布勾选不冒充通过且更新轮换 token', async () => {
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const contentRef = `content-${'d'.repeat(24)}`;
+    let currentProject = contentProject('d', '发布项目', '发布', { contentRef });
+    const firstFive = {
+      cover: true, title: true, topics: true, timing: true, 'pinned-comment': true
+    };
+    let currentSurface = publishSurface(currentProject, { checklist: publishChecklist({
+      aiDisclosure: 'unknown', checked: { ...firstFive, published: true }
+    }) });
+    const updates = [];
+    const nextTokens = ['e', 'f', '1', '2', '3', '4'];
+    const workspaceFiles = { async execute(operation, input) {
+      if (operation === 'catalog.read') return catalog([currentProject]);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'publish.read') {
+        assert.deepEqual({ ...input }, {
+          contentRef: currentProject.contentRef, projectToken: currentProject.projectToken
+        });
+        return fulfilled(currentSurface);
+      }
+      if (operation === 'publish.update') {
+        updates.push({ ...input });
+        const nextHex = nextTokens.shift();
+        currentProject = { ...currentProject, projectToken: `project-${nextHex.repeat(24)}` };
+        const prior = currentSurface.checklist;
+        const checked = Object.fromEntries(prior.lights.map((light) => [light.id, light.checked]));
+        let aiDisclosure = prior.aiDisclosure;
+        if (input.type === 'ai-disclosure') {
+          aiDisclosure = input.value;
+          checked.published = false;
+        } else checked[input.lightId] = input.checked;
+        currentSurface = publishSurface(currentProject, { checklist: publishChecklist({
+          aiDisclosure, checked
+        }) });
+        return fulfilled({ kind: 'publish-mutation', changed: true,
+          surface: currentSurface, message: '本地检查单已更新。' });
+      }
+      throw new Error(operation);
+    } };
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } },
+    { creatorTab: 'publish' });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /发布检查单 · 7 灯/u);
+    for (const [, label] of PUBLISH_LIGHT_DEFINITIONS) assert.match(textOf(tree), new RegExp(label));
+    assert.match(textOf(tree), /本人已发布不是平台回读/u);
+    assert.match(textOf(tree), /只写入本地检查单；鲸坞不会访问平台、代发或宣称已合规/u);
+    assert.match(textOf(tree), /必须先选择是否包含 AI 内容/u);
+    assert.match(textOf(tree), /文件里的“已由本人发布”勾选已失效/u);
+    let publishedRow = findAll(tree, (node) => node.props?.['data-light-id'] === 'published')[0];
+    let publishedInput = findAll(publishedRow, (node) => node.type === 'input')[0];
+    assert.equal(publishedInput.props.checked, true, '保留文件原始脏勾选供核对');
+    assert.equal(publishedInput.props.disabled, false,
+      '未 ready 时必须允许取消原始 published 脏勾选');
+    publishedInput.props.onChange();
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    publishedRow = findAll(tree, (node) => node.props?.['data-light-id'] === 'published')[0];
+    publishedInput = findAll(publishedRow, (node) => node.type === 'input')[0];
+    assert.equal(publishedInput.props.checked, false);
+    assert.equal(publishedInput.props.disabled, true,
+      '未 ready 且 raw unchecked 时绝不能点亮 published');
+    assert.equal(button(tree, '未选择').props.disabled, true, '当前 AI 选择不可重复写');
+
+    button(tree, '包含 AI 内容').props.onClick();
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /还必须勾选“AI 内容标识”/u);
+    let aiRow = findAll(tree, (node) => node.props?.['data-light-id'] === 'ai-label')[0];
+    let aiInput = findAll(aiRow, (node) => node.type === 'input')[0];
+    assert.equal(aiInput.props.disabled, false);
+    aiInput.props.onChange();
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /发布前检查已就绪/u);
+
+    button(tree, '不包含 AI 内容').props.onClick();
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /文件仍勾选了“AI 内容标识”，可以取消/u);
+    assert.equal(button(tree, '不包含 AI 内容').props.disabled, true);
+    aiRow = findAll(tree, (node) => node.props?.['data-light-id'] === 'ai-label')[0];
+    aiInput = findAll(aiRow, (node) => node.type === 'input')[0];
+    assert.equal(aiInput.props.checked, true, '保留 not-ai 文件中的原始 AI 标识脏勾选');
+    assert.equal(aiInput.props.disabled, false,
+      'not-ai 时必须允许取消原始 AI 标识脏勾选');
+    aiInput.props.onChange();
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /无需勾选 AI 内容标识/u);
+    aiRow = findAll(tree, (node) => node.props?.['data-light-id'] === 'ai-label')[0];
+    aiInput = findAll(aiRow, (node) => node.type === 'input')[0];
+    assert.equal(aiInput.props.checked, false);
+    assert.equal(aiInput.props.disabled, true,
+      'not-ai 且 raw unchecked 时绝不能点亮 AI 标识');
+    publishedRow = findAll(tree, (node) => node.props?.['data-light-id'] === 'published')[0];
+    publishedInput = findAll(publishedRow, (node) => node.type === 'input')[0];
+    assert.equal(publishedInput.props.disabled, false);
+    assert.equal(publishedInput.props.checked, false);
+    publishedInput.props.onChange();
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /本地已标记为本人发布/u);
+    assert.equal(updates.length, 6);
+    assert.deepEqual(updates.map(({ type, lightId, checked, value }) => (
+      type === 'light' ? { type, lightId, checked } : { type, value }
+    )), [
+      { type: 'light', lightId: 'published', checked: false },
+      { type: 'ai-disclosure', value: 'ai' },
+      { type: 'light', lightId: 'ai-label', checked: true },
+      { type: 'ai-disclosure', value: 'not-ai' },
+      { type: 'light', lightId: 'ai-label', checked: false },
+      { type: 'light', lightId: 'published', checked: true }
+    ]);
+    assert(updates.every((input) => input.contentRef === contentRef));
+    for (const input of updates) assert.deepEqual(Object.keys(input).sort(),
+      (input.type === 'light'
+        ? ['checked', 'contentRef', 'lightId', 'projectToken', 'type']
+        : ['contentRef', 'projectToken', 'type', 'value']).sort(),
+    'publish.update outbound input 必须 exact');
+    assert.equal(findAll(tree, (node) => node.props?.className === 'wd10-project'
+      && node.props['aria-current'] === true).length, 1,
+    'publish.update 后必须按稳定 contentRef 保持选中');
+  });
+
+  await test('创建发布检查单双击单飞，created:false 直接 upsert 并选中既有发布卡', async () => {
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const source = contentProject('3', '源脚本', '写稿');
+    const existing = contentProject('4', '既有发布单', '发布');
+    const sourceSurface = publishSurface(source, {
+      stage: 'script', stageLabel: '写稿', checklist: null
+    });
+    const existingSurface = publishSurface(existing, { checklist: publishChecklist({
+      aiDisclosure: 'not-ai', checked: {
+        cover: true, title: true, topics: true, timing: true, 'pinned-comment': true
+      }
+    }) });
+    const creation = deferred();
+    const calls = [];
+    let createdResolved = false;
+    const deepCatalog = [source, ...Array.from({ length: 259 }, (_, index) => {
+      const hex = index.toString(16).padStart(24, '0');
+      return {
+        contentRef: `content-${hex}`, projectToken: `project-${hex}`,
+        title: `分页占位 ${index + 1}`, workflowLabel: '写稿',
+        updated: '2026-08-25 12:00', actions: []
+      };
+    }), existing];
+    const workspaceFiles = { async execute(operation, input) {
+      calls.push({ operation, input: { ...input } });
+      if (operation === 'catalog.read') {
+        if (!createdResolved) return catalog([source]);
+        const projects = deepCatalog.slice(input.cursor, input.cursor + 4);
+        const nextCursor = input.cursor + projects.length < deepCatalog.length
+          ? input.cursor + projects.length : null;
+        return catalog(projects, nextCursor, deepCatalog.length);
+      }
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'publish.read') return fulfilled(
+        input.contentRef === source.contentRef ? sourceSurface : existingSurface
+      );
+      if (operation === 'publish.create') return creation.promise;
+      throw new Error(operation);
+    } };
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } },
+    { creatorTab: 'publish' });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    const create = button(tree, '创建发布检查单');
+    create.props.onClick();
+    create.props.onClick();
+    assert.equal(calls.filter((call) => call.operation === 'publish.create').length, 1,
+      'pendingRef 必须在首个 await 前上锁');
+    createdResolved = true;
+    creation.resolve(fulfilled({
+      kind: 'publish-create', created: false,
+      sourceContentRef: source.contentRef, sourceProjectToken: source.projectToken,
+      surface: existingSurface, message: '已找到同源检查单。'
+    }));
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /已打开既有检查单/u);
+    const cards = findAll(tree, (node) => node.props?.className === 'wd10-project');
+    assert.equal(cards.length, 2, '返回 surface 必须直接 upsert，不能等待 catalog 分页');
+    const selected = cards.find((node) => node.props['aria-current'] === true);
+    assert.match(textOf(selected), /既有发布单/u);
+    assert.match(textOf(tree), /发布检查单 · 7 灯/u);
+    const createCall = calls.find((call) => call.operation === 'publish.create');
+    assert.deepEqual(createCall.input, {
+      contentRef: source.contentRef, projectToken: source.projectToken
+    });
+    tree = await fireTimers(harness, 4000, props);
+    const selectedAfterPoll = findAll(tree, (node) => node.props?.className === 'wd10-project')
+      .find((node) => node.props['aria-current'] === true);
+    assert.match(textOf(selectedAfterPoll), /既有发布单/u,
+      '后续 catalog 轮询必须扩页读回新检查单并保持选择');
+    assert(calls.some((call) => call.operation === 'catalog.read' && call.input.cursor >= 256),
+      'catalog readback 必须覆盖 backend 的 512 项上限，而不是停在前 256 项');
+  });
+
+  await test('发布页 A→B→A 的迟到 read 不覆盖最新同卡结果', async () => {
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const projectA = contentProject('5', '发布 A', '发布');
+    const projectB = contentProject('6', '发布 B', '发布');
+    const firstA = deferred();
+    const secondA = deferred();
+    let aReads = 0;
+    const workspaceFiles = { async execute(operation, input) {
+      if (operation === 'catalog.read') return catalog([projectA, projectB]);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'publish.read' && input.contentRef === projectA.contentRef) {
+        aReads += 1;
+        return aReads === 1 ? firstA.promise : secondA.promise;
+      }
+      if (operation === 'publish.read') return fulfilled({
+        ...publishSurface(projectB), title: 'B 当前结果'
+      });
+      throw new Error(operation);
+    } };
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } },
+    { creatorTab: 'publish' });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    let cards = findAll(tree, (node) => node.props?.className === 'wd10-project');
+    cards.find((node) => textOf(node).includes('发布 B')).props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /B 当前结果/u);
+    cards = findAll(tree, (node) => node.props?.className === 'wd10-project');
+    cards.find((node) => textOf(node).includes('发布 A')).props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    assert.equal(aReads, 2);
+    secondA.resolve(fulfilled({ ...publishSurface(projectA), title: 'A 最新结果' }));
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /A 最新结果/u);
+    firstA.resolve(fulfilled({ ...publishSurface(projectA), title: 'A 迟到旧结果' }));
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /A 最新结果/u);
+    assert.doesNotMatch(textOf(tree), /A 迟到旧结果/u);
+  });
+
+  await test('发布检查单结构无效禁用全部写控件且非可创建阶段明确拒绝', async () => {
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const project = contentProject('7', '坏检查单', '发布');
+    const invalidSurface = publishSurface(project, { checklist: publishChecklist({
+      structureValid: false, unavailable: ['cover'], aiDisclosure: 'not-ai',
+      checked: { 'ai-label': true, published: true }
+    }) });
+    let surface = invalidSurface;
+    const workspaceFiles = { async execute(operation, input) {
+      if (operation === 'catalog.read') return catalog([project]);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'publish.read') return fulfilled(surface);
+      throw new Error(operation);
+    } };
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } },
+    { creatorTab: 'publish' });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /发布检查单结构无效/u);
+    assert.match(textOf(tree), /标记缺失、重复或存在歧义/u);
+    assert.match(textOf(tree), /未开放取消操作/u);
+    assert.doesNotMatch(textOf(tree), /可直接取消|可以取消/u,
+      '结构无效时不得承诺 dirty 勾选可取消');
+    const controls = findAll(tree, (node) => node.type === 'input'
+      || node.type === 'button' && ['未选择', '包含 AI 内容', '不包含 AI 内容'].includes(textOf(node)));
+    assert(controls.length >= 10);
+    assert(controls.every((node) => node.props.disabled === true));
+
+    surface = publishSurface(project, {
+      stage: 'topic', stageLabel: '选题', checklist: null
+    });
+    const fresh = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } },
+    { creatorTab: 'publish' });
+    const freshProps = uiProps(state, fresh.integration, []);
+    tree = fresh.renderer.render(fresh.AppFrame, freshProps);
+    tree = await settle(fresh, freshProps);
+    tree = await settle(fresh, freshProps);
+    assert.match(textOf(tree), /当前“选题”阶段不能创建发布检查单/u);
+    assert.equal(findAll(tree, (node) => node.type === 'button'
+      && textOf(node) === '创建发布检查单').length, 0);
+  });
+
+  await test('发布 parser 拒绝多余字段且不把路径值显示到界面', async () => {
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const project = contentProject('a', '严格发布单', '发布');
+    const workspaceFiles = { async execute(operation, input) {
+      if (operation === 'catalog.read') return catalog([project]);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'publish.read') return fulfilled({
+        ...publishSurface(project), absolutePath: '/private/should-not-render.md'
+      });
+      throw new Error(operation);
+    } };
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } },
+    { creatorTab: 'publish' });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /发布状态暂时读不到/u);
+    assert.doesNotMatch(textOf(tree), /private|should-not-render/u);
+    assert.equal(findAll(tree, (node) => node.props?.['data-light-id']).length, 0);
+  });
+
+  await test('发布 update 的 outcome-unknown 保留旧面并禁重试，stale 清空并刷新', async () => {
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const project = contentProject('8', '不确定发布单', '发布');
+    const original = publishSurface(project, { checklist: publishChecklist({
+      aiDisclosure: 'not-ai', checked: { 'ai-label': true, published: true }
+    }) });
+    let mode = 'unknown';
+    let catalogReads = 0;
+    let updates = 0;
+    const workspaceFiles = { async execute(operation, input) {
+      if (operation === 'catalog.read') {
+        catalogReads += 1;
+        if (mode === 'stale' && catalogReads > 1) throw new Error('refresh failed');
+        return catalog([project]);
+      }
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'publish.read') return fulfilled(original);
+      if (operation === 'publish.update') {
+        updates += 1;
+        return { state: 'rejected', code: mode === 'unknown'
+          ? 'outcome-unknown' : 'operation-stale', result: null };
+      }
+      throw new Error(operation);
+    } };
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } },
+    { creatorTab: 'publish' });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    let coverRow = findAll(tree, (node) => node.props?.['data-light-id'] === 'cover')[0];
+    findAll(coverRow, (node) => node.type === 'input')[0].props.onChange();
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /写入结果未知/u);
+    assert.match(textOf(tree), /核对项目文件，不要重复点击/u);
+    assert.match(textOf(tree), /以下是写入前的检查单/u);
+    assert.match(textOf(tree), /未开放取消操作/u);
+    assert.doesNotMatch(textOf(tree), /可直接取消|可以取消/u,
+      'stale-write 时不得承诺 dirty 勾选可取消');
+    assert(findAll(tree, (node) => node.type === 'input').every((node) => node.props.disabled));
+    assert.equal(updates, 1);
+    button(tree, '重新读取检查单').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    coverRow = findAll(tree, (node) => node.props?.['data-light-id'] === 'cover')[0];
+    assert.equal(findAll(coverRow, (node) => node.type === 'input')[0].props.disabled, false,
+      'fresh read 后才重新开放本地写控件');
+    assert.equal(updates, 1, '重新读取不能伪装成 publish.update 重试');
+
+    mode = 'stale';
+    catalogReads = 0;
+    const staleHarness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } },
+    { creatorTab: 'publish' });
+    const staleProps = uiProps(state, staleHarness.integration, []);
+    tree = staleHarness.renderer.render(staleHarness.AppFrame, staleProps);
+    tree = await settle(staleHarness, staleProps);
+    tree = await settle(staleHarness, staleProps);
+    coverRow = findAll(tree, (node) => node.props?.['data-light-id'] === 'cover')[0];
+    findAll(coverRow, (node) => node.type === 'input')[0].props.onChange();
+    tree = await settle(staleHarness, staleProps);
+    tree = await settle(staleHarness, staleProps);
+    assert.match(textOf(tree), /已清空旧检查单并刷新内容库/u);
+    assert.match(textOf(tree), /发布状态暂时读不到/u);
+    assert.equal(findAll(tree, (node) => node.props?.['data-light-id']).length, 0);
+    assert(catalogReads >= 2, 'stale 必须触发 catalog refresh');
   });
 
   await test('动作先预检再明确确认，双击只提交一次并刷新 catalog', async () => {

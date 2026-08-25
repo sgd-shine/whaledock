@@ -46,6 +46,7 @@ const WORKSPACE_FILE_OPERATIONS = new Set([
   'project.action.prepare', 'project.action.submit',
   'block.action.prepare', 'block.action.submit',
   'proposal.read', 'proposal.decide', 'proposal.undo',
+  'publish.read', 'publish.create', 'publish.update',
   'receipts.read', 'receipts.ack', 'receipts.open'
 ]);
 const WORKSPACE_FILE_STATES = new Set([
