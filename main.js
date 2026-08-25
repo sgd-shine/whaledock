@@ -4237,7 +4237,9 @@ function writeVideoExclusive(root, relativePath, content, options = {}) {
   return target;
 }
 
-function removeOwnedVideoProposal(root, proposal, rootIdentity, expectedHash = null) {
+function removeOwnedVideoProposal(
+  root, proposal, rootIdentity, expectedHash = null, expectedBinding = null
+) {
   if (!proposal || !proposal.plan || !proposal.plan.record) return false;
   assertVideoCasRootIdentity(root, rootIdentity);
   const relativePath = proposal.plan.record.proposalRelativePath;
@@ -4249,14 +4251,28 @@ function removeOwnedVideoProposal(root, proposal, rootIdentity, expectedHash = n
   try {
     const stat = fs.lstatSync(target);
     if (stat.isSymbolicLink() || !stat.isFile()) return false;
-    if (expectedHash !== null
-        && (typeof expectedHash !== 'string' || videoCasHash(target) !== expectedHash)) {
-      return false;
+    if (expectedHash !== null || expectedBinding !== null) {
+      if (typeof expectedHash !== 'string' || !/^[a-f0-9]{64}$/.test(expectedHash)
+          || !isPlainObject(expectedBinding)) return false;
+      const current = videoCockpit.readDocument(root, relativePath);
+      if (current.hash !== expectedHash
+          || !sameVideoFileBinding(current.binding, expectedBinding)) return false;
+      assertVideoCasExpectedBinding(root, target, expectedBinding, rootIdentity);
     }
     assertVideoCasRootIdentity(root, rootIdentity);
     fs.unlinkSync(target);
     return true;
   } catch (_error) { return false; }
+}
+
+function requireVideoProposalRemoval(removed, afterOriginalWrite = false) {
+  if (removed === true) return true;
+  const error = new Error(afterOriginalWrite
+    ? '原稿已写回，但建议副本清理结果无法确认'
+    : '建议副本没有确认删除，原稿未改动');
+  error.code = afterOriginalWrite
+    ? 'ERR_OPERATION_OUTCOME_UNKNOWN' : 'ERR_PROPOSAL_REMOVE_FAILED';
+  throw error;
 }
 
 const VIDEO_CAS_JOURNAL_RE = /^\.whaledock-cas-([a-f0-9]{24})\.json$/;
@@ -4873,10 +4889,47 @@ function readVideoProposalDocuments(runtime, proposal) {
   };
 }
 
-function videoProposalSurface(runtime = videoWorkspaceRuntime) {
+function bindEstablishedVideoProposal(proposal, readProposal) {
+  if (!isPlainObject(proposal) || !proposal.plan
+      || typeof proposal.plan.text !== 'string'
+      || typeof readProposal !== 'function') {
+    throw new Error('建议副本绑定参数无效');
+  }
+  const expectedHash = videoCockpit.hashText(proposal.plan.text);
+  proposal.proposalHash = expectedHash;
+  proposal.proposalBinding = null;
+  try {
+    const stored = readProposal();
+    if (!stored || stored.hash !== expectedHash) throw new Error('建议副本初始内容不一致');
+    videoFileBindingKey(stored.binding);
+    proposal.proposalBinding = stored.binding;
+    return Object.freeze({ bound: true, code: null });
+  } catch (error) {
+    proposal.submitState = 'unknown';
+    return Object.freeze({
+      bound: false,
+      code: safeText(error && error.code, 'read-failed', 64)
+    });
+  }
+}
+
+function videoProposalMatchesContent(runtime, relativePath, expectedContentRef) {
+  if (expectedContentRef === null) return true;
+  try {
+    return videoContentRef(runtime.epoch, relativePath) === expectedContentRef;
+  } catch (_error) { return false; }
+}
+
+function videoProposalSurface(runtime = videoWorkspaceRuntime, expectedContentRef = null) {
   if (!runtime || runtime.closed) return null;
+  if (!(expectedContentRef === null
+      || (typeof expectedContentRef === 'string'
+        && /^content-[a-f0-9]{24}$/.test(expectedContentRef)))) return null;
   if (videoProposal && videoProposal.runtimeRoot === runtime.root
-      && videoProposal.runtimeIdentity === runtime.rootIdentityKey) {
+      && videoProposal.runtimeIdentity === runtime.rootIdentityKey
+      && videoProposalMatchesContent(
+        runtime, videoProposal.plan.record.sourceRelativePath, expectedContentRef
+      )) {
     let comparison = { ready: false, status: 'queued', reason: null };
     let documents = null;
     try {
@@ -4912,7 +4965,10 @@ function videoProposalSurface(runtime = videoWorkspaceRuntime) {
     };
   }
   if (videoUndo && videoUndo.runtimeRoot === runtime.root
-      && videoUndo.runtimeIdentity === runtime.rootIdentityKey) {
+      && videoUndo.runtimeIdentity === runtime.rootIdentityKey
+      && videoProposalMatchesContent(
+        runtime, videoUndo.record.sourceRelativePath, expectedContentRef
+      )) {
     let canUndo = false;
     try {
       const adopted = videoCockpit.readDocument(
@@ -5259,10 +5315,16 @@ async function submitVideoBlockAction(value) {
   if (!blockRecord || blockRecord.projectToken !== request.projectToken
       || blockRecord.documentHash !== document.hash
       || blockRecord.relativePath !== document.relativePath) {
-    throw new Error('这个内容块已过期，请重新打开文档');
+    const error = new Error('这个内容块已过期，请重新打开文档');
+    error.code = 'ERR_CONTEXT_PROJECT_STALE';
+    throw error;
   }
   const block = document.blocks.find((item) => item.id === blockRecord.blockId);
-  if (!block) throw new Error('找不到已选内容块');
+  if (!block) {
+    const error = new Error('找不到已选内容块');
+    error.code = 'ERR_CONTEXT_PROJECT_STALE';
+    throw error;
+  }
   const intent = VIDEO_BLOCK_INTENTS[request.action];
   if (request.action === 'ask') {
     const prompt = [
@@ -5338,12 +5400,17 @@ async function submitVideoBlockAction(value) {
       log.line('video', `建议副本创建失败：${error && error.code || 'unknown'}`);
       throw new Error('建议副本没建成，原稿没有变');
     }
+    // 只有新建议副本已经原子建立后，才消费上一张采用卡的一次撤销机会。
+    // 「问一句」不会进入这条分支，因此绝不会误清 undo。
+    videoUndo = null;
     videoProposal = {
       proposalToken: context.proposalToken,
       runtimeEpoch: activeRuntime.epoch,
       runtimeRoot: activeRuntime.root,
       runtimeIdentity: activeRuntime.rootIdentityKey,
       plan: storedPlan,
+      proposalHash: videoCockpit.hashText(storedPlan.text),
+      proposalBinding: null,
       title: context.title,
       intentLabel: context.intentLabel,
       submitState: 'sending',
@@ -5353,6 +5420,17 @@ async function submitVideoBlockAction(value) {
     createdProposalRuntime = activeRuntime;
     if (activeRuntime.snapshot) activeRuntime.snapshot.proposal = videoProposalSurface(activeRuntime);
     pushVideoWorkspaceState();
+    const binding = bindEstablishedVideoProposal(videoProposal, () => (
+      videoCockpit.readDocument(activeRuntime.root, storedPlan.relativePath)
+    ));
+    if (!binding.bound) {
+      if (activeRuntime.snapshot) {
+        activeRuntime.snapshot.proposal = videoProposalSurface(activeRuntime);
+      }
+      pushVideoWorkspaceState();
+      log.line('video', `建议副本绑定回读失败：${binding.code}`);
+      throw new Error('建议副本实体绑定未知，原稿没有变；请在建议卡中核对或退回');
+    }
     return {};
   });
   if (!createdProposal || !videoProposal || videoProposal !== createdProposal) return result;
@@ -5365,7 +5443,8 @@ async function submitVideoBlockAction(value) {
         createdProposalRuntime.root,
         createdProposal,
         createdProposalRuntime.rootIdentity,
-        videoCockpit.hashText(createdProposal.plan.text)
+        createdProposal.proposalHash,
+        createdProposal.proposalBinding
       );
     } catch (error) {
       log.line('video', `建议副本拒绝后清理失败：${error && error.code || 'unknown'}`);
@@ -5387,10 +5466,19 @@ function decideVideoProposal(value) {
   if (!videoProposal || videoProposal.runtimeRoot !== runtime.root
       || videoProposal.runtimeIdentity !== runtime.rootIdentityKey
       || videoProposal.proposalToken !== request.proposalToken) {
-    throw new Error('这张建议卡已过期');
+    const error = new Error('这张建议卡已过期');
+    error.code = 'ERR_CONTEXT_PROJECT_STALE';
+    throw error;
   }
   if (request.decision === 'reject') {
-    removeOwnedVideoProposal(runtime.root, videoProposal, runtime.rootIdentity);
+    const proposalDocument = videoCockpit.readDocument(
+      runtime.root, videoProposal.plan.record.proposalRelativePath
+    );
+    const removed = removeOwnedVideoProposal(
+      runtime.root, videoProposal, runtime.rootIdentity,
+      proposalDocument.hash, proposalDocument.binding
+    );
+    requireVideoProposalRemoval(removed, false);
     videoProposal = null;
     refreshVideoWorkspaceSnapshot();
     return { kind: 'ok', text: '已退回建议，原稿从未改动。' };
@@ -5406,7 +5494,9 @@ function decideVideoProposal(value) {
   ) : null;
   if (!comparison.ready || currentRevision !== request.proposalRevisionToken) {
     refreshVideoWorkspaceSnapshot();
-    throw new Error('建议内容已变化，请先重新查看对照卡');
+    const error = new Error('建议内容已变化，请先重新查看对照卡');
+    error.code = 'ERR_CONTEXT_PROJECT_STALE';
+    throw error;
   }
   const adopted = videoCockpit.adoptProposal(
     videoProposal.plan.record, documents.proposal.text, documents.original.text
@@ -5420,12 +5510,12 @@ function decideVideoProposal(value) {
   );
   if (adoptedWrite.hash !== adopted.undo.adoptedHash) {
     const error = new Error('采用后实体回读不一致');
-    error.code = 'ERR_CAS_MISMATCH';
+    error.code = 'ERR_OPERATION_OUTCOME_UNKNOWN';
     throw error;
   }
   const previous = videoProposal;
-  removeOwnedVideoProposal(runtime.root, previous, runtime.rootIdentity);
-  videoProposal = null;
+  // 原稿已写回后，先建立一次性撤销快照并切走 proposal。即使建议副本随后
+  // 清理失败，刷新后的 UI 也必须仍能看到 adopted + canUndo。
   videoUndo = {
     revisionToken: `revision-${crypto.randomBytes(12).toString('hex')}`,
     runtimeEpoch: runtime.epoch,
@@ -5435,6 +5525,20 @@ function decideVideoProposal(value) {
     record: adopted.undo,
     adoptedBinding: adoptedWrite.binding
   };
+  videoProposal = null;
+  try {
+    const removed = removeOwnedVideoProposal(
+      runtime.root, previous, runtime.rootIdentity,
+      comparison.proposalHash, documents.proposal.binding
+    );
+    requireVideoProposalRemoval(removed, true);
+  } catch (error) {
+    refreshVideoWorkspaceSnapshot();
+    if (error && error.code === 'ERR_OPERATION_OUTCOME_UNKNOWN') throw error;
+    throw contextPocWorkspaceOperationError(
+      'ERR_OPERATION_OUTCOME_UNKNOWN', '原稿已采用，但建议副本清理结果无法确认'
+    );
+  }
   refreshVideoWorkspaceSnapshot();
   return { kind: 'ok', text: '已采用这一块；原稿其他部分不动，仍可撤销一次。' };
 }
@@ -5452,12 +5556,18 @@ function undoVideoProposal(value) {
   const runtime = currentVideoRuntime();
   if (!videoUndo || videoUndo.runtimeRoot !== runtime.root
       || videoUndo.runtimeIdentity !== runtime.rootIdentityKey
-      || videoUndo.revisionToken !== request.revisionToken) throw new Error('这份撤销快照已过期');
+      || videoUndo.revisionToken !== request.revisionToken) {
+    const error = new Error('这份撤销快照已过期');
+    error.code = 'ERR_CONTEXT_PROJECT_STALE';
+    throw error;
+  }
   const current = videoCockpit.readDocument(
     runtime.root, videoUndo.record.sourceRelativePath
   );
   if (!sameVideoFileBinding(current.binding, videoUndo.adoptedBinding)) {
-    throw new Error('采用后的文件实体已变化，不能撤销');
+    const error = new Error('采用后的文件实体已变化，不能撤销');
+    error.code = 'ERR_PATH_CHANGED';
+    throw error;
   }
   const restored = videoCockpit.undoAdoption(videoUndo.record, current.text);
   atomicReplaceVideoText(
@@ -5778,6 +5888,8 @@ const CONTEXT_POC_WORKSPACE_FILE_EXECUTION_MARGIN_MS = 750;
 const CONTEXT_POC_MAX_WORKSPACE_FILE_READ_BATCH = 4;
 const CONTEXT_POC_WORKSPACE_FILE_OPERATIONS = new Set([
   'catalog.read', 'document.read', 'overview.read', 'topic.choose',
+  'block.action.prepare', 'block.action.submit',
+  'proposal.read', 'proposal.decide', 'proposal.undo',
   'project.action.prepare', 'project.action.submit',
   'receipts.read', 'receipts.ack', 'receipts.open'
 ]);
@@ -5788,6 +5900,16 @@ const CONTEXT_POC_WORKSPACE_FILE_REJECT_CODES = new Set([
 ]);
 const CONTEXT_POC_EVENT_TYPES = new Set([
   'ack', 'turn-start', 'turn-miss', 'delivery', 'turn-end'
+]);
+const CONTEXT_POC_PROPOSAL_STATUSES = new Set([
+  'queued', 'unchanged', 'ready', 'stale', 'invalid', 'adopted', 'conflict'
+]);
+const CONTEXT_POC_PROPOSAL_REASONS = new Set([
+  'target-unchanged', 'original-changed', 'outside-target-changed',
+  'proposal-too-large', 'read-failed', 'adopted-file-changed'
+]);
+const CONTEXT_POC_PROPOSAL_SUBMISSIONS = new Set([
+  'sending', 'accepted', 'rejected', 'unknown', 'error'
 ]);
 
 function contextPocExact(value, required, optional = []) {
@@ -5944,6 +6066,66 @@ function contextPocWorkspaceFileActionSubmitInput(value) {
     preflightToken: dispatch.confirmation.preflightToken,
     override: dispatch.confirmation.override
   });
+}
+
+function contextPocWorkspaceFileBlockPrepareInput(value) {
+  return Object.freeze(videoBlockActionRequest(value));
+}
+
+function contextPocWorkspaceFileBlockSubmitInput(value) {
+  if (!contextPocExact(value, [
+    'projectToken', 'blockToken', 'action', 'preflightToken', 'override'
+  ])) throw new Error('内容块动作提交请求无效');
+  const dispatch = videoBlockDispatchRequest(value);
+  if (!dispatch.confirmation) throw new Error('内容块动作提交缺少预检');
+  return Object.freeze({
+    ...dispatch.request,
+    preflightToken: dispatch.confirmation.preflightToken,
+    override: dispatch.confirmation.override
+  });
+}
+
+function contextPocWorkspaceFileProposalReadInput(value) {
+  if (!contextPocExact(value, ['contentRef'])
+      || typeof value.contentRef !== 'string'
+      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)) {
+    throw new Error('建议卡读取请求无效');
+  }
+  return Object.freeze({ contentRef: value.contentRef });
+}
+
+function contextPocWorkspaceFileProposalDecisionInput(value) {
+  if (!isPlainObject(value) || !['adopt', 'reject'].includes(value.decision)
+      || !contextPocExact(value, value.decision === 'adopt'
+        ? ['contentRef', 'proposalToken', 'decision', 'proposalRevisionToken']
+        : ['contentRef', 'proposalToken', 'decision'])
+      || typeof value.contentRef !== 'string'
+      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)) {
+    throw new Error('建议卡决策请求无效');
+  }
+  const decision = videoProposalDecisionRequest({
+    proposalToken: value.proposalToken,
+    decision: value.decision,
+    ...(value.decision === 'adopt'
+      ? { proposalRevisionToken: value.proposalRevisionToken } : {})
+  });
+  return Object.freeze({
+    contentRef: value.contentRef,
+    proposalToken: decision.proposalToken,
+    decision: decision.decision,
+    ...(decision.decision === 'adopt'
+      ? { proposalRevisionToken: decision.proposalRevisionToken } : {})
+  });
+}
+
+function contextPocWorkspaceFileProposalUndoInput(value) {
+  if (!contextPocExact(value, ['contentRef', 'revisionToken'])
+      || typeof value.contentRef !== 'string'
+      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)) {
+    throw new Error('建议撤销请求无效');
+  }
+  const undo = videoUndoRequest({ revisionToken: value.revisionToken });
+  return Object.freeze({ contentRef: value.contentRef, revisionToken: undo.revisionToken });
 }
 
 function contextPocWorkspaceFileReceiptsInput(value) {
@@ -6227,6 +6409,203 @@ function contextPocWorkspaceActionSubmitResult(value) {
   });
 }
 
+function contextPocWorkspaceBlockIdentity(value) {
+  return Boolean(isPlainObject(value)
+    && typeof value.contentRef === 'string'
+    && /^content-[a-f0-9]{24}$/.test(value.contentRef)
+    && typeof value.projectToken === 'string'
+    && /^project-[a-f0-9]{24}$/.test(value.projectToken)
+    && typeof value.blockToken === 'string'
+    && /^block-[a-f0-9]{24}$/.test(value.blockToken)
+    && Object.prototype.hasOwnProperty.call(VIDEO_BLOCK_INTENTS, value.action));
+}
+
+function contextPocWorkspaceBlockPrepareResult(value) {
+  if (!contextPocExact(value, [
+    'kind', 'contentRef', 'projectToken', 'blockToken', 'action', 'state',
+    'preflightToken', 'targetLabel', 'workspaceLabel', 'workspaceMatch',
+    'targetRunning', 'eventTracking', 'expiresAt', 'message'
+  ]) || value.kind !== 'preflight' || !contextPocWorkspaceBlockIdentity(value)
+      || !['ready', 'error'].includes(value.state)) {
+    throw new Error('内容块动作预检投影无效');
+  }
+  if (value.state === 'error') {
+    if (![value.preflightToken, value.targetLabel, value.workspaceLabel,
+      value.workspaceMatch, value.targetRunning, value.eventTracking,
+      value.expiresAt].every((item) => item === null)
+        || typeof value.message !== 'string' || !value.message) {
+      throw new Error('内容块动作失败投影无效');
+    }
+    return Object.freeze({
+      ...value,
+      message: contextPocWorkspaceSafeMessage(value.message, '无法完成内容块动作预检。')
+    });
+  }
+  if (!deliveryToken(value.preflightToken)
+      || typeof value.targetLabel !== 'string'
+      || typeof value.workspaceLabel !== 'string'
+      || !['match', 'mismatch', 'unknown'].includes(value.workspaceMatch)
+      || typeof value.targetRunning !== 'boolean'
+      || !['ready', 'unavailable'].includes(value.eventTracking)
+      || !contextPocWorkspaceIsoTime(value.expiresAt)
+      || value.message !== null) {
+    throw new Error('内容块动作预检投影无效');
+  }
+  return Object.freeze({
+    ...value,
+    targetLabel: safeText(value.targetLabel, '目标会话', 96),
+    workspaceLabel: safeText(value.workspaceLabel, '当前工作区', 96)
+  });
+}
+
+function contextPocWorkspaceBlockSubmitResult(value) {
+  if (!contextPocExact(value, [
+    'kind', 'contentRef', 'projectToken', 'blockToken', 'action', 'state',
+    'reason', 'target', 'receiptId', 'message'
+  ]) || value.kind !== 'submission' || !contextPocWorkspaceBlockIdentity(value)
+      || !['accepted', 'rejected', 'unknown', 'error'].includes(value.state)) {
+    throw new Error('内容块动作提交投影无效');
+  }
+  if (value.state === 'error') {
+    if (![value.reason, value.target, value.receiptId].every((item) => item === null)
+        || typeof value.message !== 'string' || !value.message) {
+      throw new Error('内容块动作失败投影无效');
+    }
+    return Object.freeze({
+      ...value,
+      message: contextPocWorkspaceSafeMessage(value.message, '内容块动作没有发送。')
+    });
+  }
+  if (typeof value.reason !== 'string'
+      || !/^[a-z][a-z0-9-]{0,63}$/.test(value.reason)
+      || typeof value.target !== 'string'
+      || !(value.receiptId === null || deliveryToken(value.receiptId))
+      || value.message !== null) {
+    throw new Error('内容块动作提交投影无效');
+  }
+  return Object.freeze({
+    ...value,
+    target: safeText(value.target, '目标会话', 96)
+  });
+}
+
+function contextPocWorkspaceProposalResult(value) {
+  if (!contextPocExact(value, [
+    'kind', 'contentRef', 'projectToken', 'status', 'reason', 'proposalToken',
+    'proposalRevisionToken', 'revisionToken', 'title', 'intentLabel',
+    'before', 'beforeTruncated', 'after', 'afterTruncated', 'canAdopt',
+    'canReject', 'canUndo', 'submitted', 'target'
+  ]) || value.kind !== 'proposal'
+      || typeof value.contentRef !== 'string'
+      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
+      || typeof value.projectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
+      || !(value.status === null || CONTEXT_POC_PROPOSAL_STATUSES.has(value.status))
+      || !(value.reason === null || CONTEXT_POC_PROPOSAL_REASONS.has(value.reason))
+      || !(value.proposalToken === null
+        || (typeof value.proposalToken === 'string'
+          && /^proposal-[A-Za-z0-9_-]{1,80}$/.test(value.proposalToken)))
+      || !(value.proposalRevisionToken === null
+        || (typeof value.proposalRevisionToken === 'string'
+          && /^proposal-revision-[a-f0-9]{24}$/.test(value.proposalRevisionToken)))
+      || !(value.revisionToken === null
+        || (typeof value.revisionToken === 'string'
+          && /^revision-[a-f0-9]{24}$/.test(value.revisionToken)))
+      || !(value.title === null || typeof value.title === 'string')
+      || !(value.intentLabel === null || typeof value.intentLabel === 'string')
+      || !(value.before === null || (typeof value.before === 'string'
+        && Buffer.byteLength(value.before, 'utf8') <= 1600))
+      || typeof value.beforeTruncated !== 'boolean'
+      || !(value.after === null || (typeof value.after === 'string'
+        && Buffer.byteLength(value.after, 'utf8') <= 1600))
+      || typeof value.afterTruncated !== 'boolean'
+      || ![value.canAdopt, value.canReject, value.canUndo]
+        .every((item) => typeof item === 'boolean')
+      || !(value.submitted === null
+        || CONTEXT_POC_PROPOSAL_SUBMISSIONS.has(value.submitted))
+      || !(value.target === null || typeof value.target === 'string')) {
+    throw new Error('建议卡投影无效');
+  }
+  if ((value.before === null && value.beforeTruncated)
+      || (value.after === null && value.afterTruncated)) {
+    throw new Error('建议卡截断标记无效');
+  }
+  if (value.status === null) {
+    if (![value.reason, value.proposalToken, value.proposalRevisionToken,
+      value.revisionToken, value.title, value.intentLabel, value.before,
+      value.after, value.submitted, value.target].every((item) => item === null)
+        || value.beforeTruncated || value.afterTruncated
+        || value.canAdopt || value.canReject || value.canUndo) {
+      throw new Error('空建议卡投影无效');
+    }
+  } else if (['adopted', 'conflict'].includes(value.status)) {
+    if (value.proposalToken !== null || value.proposalRevisionToken !== null
+        || !value.revisionToken || value.canAdopt || value.canReject
+        || value.canUndo !== (value.status === 'adopted')) {
+      throw new Error('撤销建议卡投影无效');
+    }
+  } else if (!value.proposalToken || value.revisionToken !== null
+      || value.canUndo || !value.canReject) {
+    throw new Error('待决建议卡投影无效');
+  } else if (value.status === 'ready') {
+    const comparisonTruncated = value.beforeTruncated || value.afterTruncated;
+    if (comparisonTruncated
+      ? (value.canAdopt || value.proposalRevisionToken !== null)
+      : (!value.canAdopt || !value.proposalRevisionToken)) {
+      throw new Error('可采用建议的完整可见性与 revision 不一致');
+    }
+  } else if (value.canAdopt || value.proposalRevisionToken !== null) {
+    throw new Error('非 ready 建议不得下发采用能力');
+  }
+  return Object.freeze({
+    ...value,
+    title: value.title === null ? null : safeText(value.title, '未命名文档', 120),
+    intentLabel: value.intentLabel === null ? null : safeText(value.intentLabel, '', 64) || null,
+    target: value.target === null ? null : safeText(value.target, '目标会话', 96)
+  });
+}
+
+function contextPocWorkspaceProposalDecisionResult(value) {
+  if (!contextPocExact(value, [
+    'kind', 'contentRef', 'projectToken', 'decision', 'changed',
+    'revisionToken', 'message'
+  ]) || value.kind !== 'decision'
+      || typeof value.contentRef !== 'string'
+      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
+      || typeof value.projectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
+      || !['adopt', 'reject'].includes(value.decision)
+      || value.changed !== (value.decision === 'adopt')
+      || !(value.revisionToken === null
+        || (typeof value.revisionToken === 'string'
+          && /^revision-[a-f0-9]{24}$/.test(value.revisionToken)))
+      || (value.decision === 'adopt') !== (value.revisionToken !== null)
+      || typeof value.message !== 'string' || !value.message) {
+    throw new Error('建议决策结果投影无效');
+  }
+  return Object.freeze({
+    ...value,
+    message: contextPocWorkspaceSafeMessage(value.message, '建议决策已完成。')
+  });
+}
+
+function contextPocWorkspaceProposalUndoResult(value) {
+  if (!contextPocExact(value, [
+    'kind', 'contentRef', 'projectToken', 'changed', 'message'
+  ]) || value.kind !== 'undo' || value.changed !== true
+      || typeof value.contentRef !== 'string'
+      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
+      || typeof value.projectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
+      || typeof value.message !== 'string' || !value.message) {
+    throw new Error('建议撤销结果投影无效');
+  }
+  return Object.freeze({
+    ...value,
+    message: contextPocWorkspaceSafeMessage(value.message, '已撤销上一次采用。')
+  });
+}
+
 function contextPocWorkspaceReceipt(value) {
   if (!isPlainObject(value) || !deliveryToken(value.receiptId)
       || typeof value.targetLabel !== 'string'
@@ -6310,7 +6689,8 @@ function contextPocWorkspaceReceiptOpenResult(value) {
 function contextPocWorkspaceOperationErrorCode(error) {
   const code = error && error.code;
   if (code === 'ERR_WORKSPACE_UNAVAILABLE') return 'workspace-unavailable';
-  if (code === 'ERR_OPERATION_OUTCOME_UNKNOWN') return 'outcome-unknown';
+  if (['ERR_OPERATION_OUTCOME_UNKNOWN',
+    'ERR_VIDEO_RECOVERY_REQUIRED'].includes(code)) return 'outcome-unknown';
   if (['ERR_WORKSPACE_BINDING_STALE', 'ERR_VIDEO_RUNTIME_STALE',
     'ERR_VIDEO_ROOT_CHANGED', 'ERR_CAS_MISMATCH',
     'ERR_PATH_CHANGED', 'ERR_PATH_NOT_FOUND',
@@ -6339,6 +6719,80 @@ function contextPocAssertWorkspaceOperationCurrent(context) {
     error.code = 'ERR_WORKSPACE_BINDING_STALE';
     throw error;
   }
+}
+
+function contextPocWorkspaceOperationError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function contextPocWorkspaceProjectIdentity(snapshot, selector) {
+  const projects = Array.isArray(snapshot && snapshot.projects) ? snapshot.projects : [];
+  const matches = projects.filter((project) => isPlainObject(project)
+    && (selector.projectToken === undefined
+      || project.projectToken === selector.projectToken)
+    && (selector.contentRef === undefined || project.contentRef === selector.contentRef));
+  if (matches.length !== 1
+      || typeof matches[0].projectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(matches[0].projectToken)
+      || typeof matches[0].contentRef !== 'string'
+      || !/^content-[a-f0-9]{24}$/.test(matches[0].contentRef)) {
+    throw contextPocWorkspaceOperationError(
+      'ERR_CONTEXT_PROJECT_STALE', '内容身份已变化，请重新选择'
+    );
+  }
+  return Object.freeze({
+    projectToken: matches[0].projectToken,
+    contentRef: matches[0].contentRef
+  });
+}
+
+function contextPocWorkspaceProposalProjection(identity, surface) {
+  if (!surface) {
+    return {
+      kind: 'proposal', ...identity,
+      status: null, reason: null,
+      proposalToken: null, proposalRevisionToken: null, revisionToken: null,
+      title: null, intentLabel: null,
+      before: null, beforeTruncated: false,
+      after: null, afterTruncated: false,
+      canAdopt: false, canReject: false, canUndo: false,
+      submitted: null, target: null
+    };
+  }
+  const status = CONTEXT_POC_PROPOSAL_STATUSES.has(surface.status)
+    ? surface.status : 'invalid';
+  const reason = CONTEXT_POC_PROPOSAL_REASONS.has(surface.reason)
+    ? surface.reason : (status === 'invalid' ? 'read-failed' : null);
+  const before = surface.before === null || surface.before === undefined
+    ? null : contextPocUtf8Clip(surface.before, 1600);
+  const after = surface.after === null || surface.after === undefined
+    ? null : contextPocUtf8Clip(surface.after, 1600);
+  const comparisonTruncated = Boolean(
+    (before && before.truncated) || (after && after.truncated)
+  );
+  return {
+    kind: 'proposal', ...identity,
+    status,
+    reason,
+    proposalToken: surface.proposalToken || null,
+    proposalRevisionToken: comparisonTruncated
+      ? null : (surface.proposalRevisionToken || null),
+    revisionToken: surface.revisionToken || null,
+    title: typeof surface.title === 'string' ? surface.title : null,
+    intentLabel: typeof surface.intentLabel === 'string' ? surface.intentLabel : null,
+    before: before ? before.text : null,
+    beforeTruncated: before ? before.truncated : false,
+    after: after ? after.text : null,
+    afterTruncated: after ? after.truncated : false,
+    canAdopt: surface.canAdopt === true && !comparisonTruncated,
+    canReject: surface.canReject === true,
+    canUndo: surface.canUndo === true,
+    submitted: surface.submitted === null || surface.submitted === undefined
+      ? null : surface.submitted,
+    target: typeof surface.target === 'string' ? surface.target : null
+  };
 }
 
 function contextPocWorkspaceFileOperations(options = {}) {
@@ -6374,6 +6828,13 @@ function contextPocWorkspaceFileOperations(options = {}) {
     action: 'choose-topic', ...input
   }));
   const projectAction = options.projectAction || submitVideoProjectAction;
+  const blockAction = options.blockAction || submitVideoBlockAction;
+  const proposalSurface = options.proposalSurface || ((contentRef) => {
+    const surface = videoProposalSurface(currentVideoRuntime(), contentRef);
+    return surface ? { ...surface, contentRef } : null;
+  });
+  const proposalDecision = options.proposalDecision || decideVideoProposal;
+  const proposalUndo = options.proposalUndo || undoVideoProposal;
   const verifyProject = options.verifyProject || readVideoDocumentByToken;
   const receiptSnapshot = options.receiptSnapshot || (() => (
     deliveryReceiptService.snapshot({ owner: VIDEO_DELIVERY_OWNER })
@@ -6450,6 +6911,90 @@ function contextPocWorkspaceFileOperations(options = {}) {
         };
       },
       redact: contextPocWorkspaceDocumentResult,
+      errorCode: contextPocWorkspaceOperationErrorCode
+    }),
+    'block.action.prepare': Object.freeze({
+      validate: contextPocWorkspaceFileBlockPrepareInput,
+      async handle({ input, context }) {
+        contextPocAssertWorkspaceOperationCurrent(context);
+        const identity = contextPocWorkspaceProjectIdentity(catalog(), {
+          projectToken: input.projectToken
+        });
+        const prepared = contextPocWorkspaceActionPrepareResult(
+          await blockAction(input)
+        );
+        const latest = contextPocWorkspaceProjectIdentity(catalog(), {
+          contentRef: identity.contentRef
+        });
+        if (latest.projectToken !== identity.projectToken) {
+          throw contextPocWorkspaceOperationError(
+            'ERR_CONTEXT_PROJECT_STALE', '内容块在预检期间已变化，请重新打开'
+          );
+        }
+        if (prepared.state === 'error') {
+          return {
+            kind: 'preflight', ...identity,
+            blockToken: input.blockToken, action: input.action, state: 'error',
+            preflightToken: null, targetLabel: null, workspaceLabel: null,
+            workspaceMatch: null, targetRunning: null, eventTracking: null,
+            expiresAt: null, message: prepared.message
+          };
+        }
+        return {
+          kind: 'preflight', ...identity,
+          blockToken: input.blockToken, action: input.action, state: 'ready',
+          preflightToken: prepared.preflightToken,
+          targetLabel: prepared.targetLabel,
+          workspaceLabel: prepared.workspaceLabel,
+          workspaceMatch: prepared.workspaceMatch,
+          targetRunning: prepared.targetRunning,
+          eventTracking: prepared.eventTracking,
+          expiresAt: prepared.expiresAt,
+          message: null
+        };
+      },
+      redact: contextPocWorkspaceBlockPrepareResult,
+      errorCode: contextPocWorkspaceOperationErrorCode
+    }),
+    'block.action.submit': Object.freeze({
+      validate: contextPocWorkspaceFileBlockSubmitInput,
+      async handle({ input, context }) {
+        contextPocAssertWorkspaceOperationCurrent(context);
+        const identity = contextPocWorkspaceProjectIdentity(catalog(), {
+          projectToken: input.projectToken
+        });
+        const submitted = contextPocWorkspaceActionSubmitResult(
+          await blockAction(input)
+        );
+        if (submitted.state === 'error') {
+          return {
+            kind: 'submission', ...identity,
+            blockToken: input.blockToken, action: input.action,
+            state: 'error', reason: null, target: null, receiptId: null,
+            message: submitted.message
+          };
+        }
+        let latest;
+        try {
+          latest = contextPocWorkspaceProjectIdentity(catalog(), {
+            contentRef: identity.contentRef
+          });
+        } catch (_error) {
+          throw contextPocWorkspaceOperationError(
+            'ERR_OPERATION_OUTCOME_UNKNOWN',
+            '动作已提交，但当前内容身份无法确认'
+          );
+        }
+        return {
+          kind: 'submission', ...latest,
+          blockToken: input.blockToken, action: input.action,
+          state: submitted.state, reason: submitted.reason,
+          target: submitted.target,
+          receiptId: submitted.receiptId || null,
+          message: null
+        };
+      },
+      redact: contextPocWorkspaceBlockSubmitResult,
       errorCode: contextPocWorkspaceOperationErrorCode
     }),
     'overview.read': Object.freeze({
@@ -6571,6 +7116,161 @@ function contextPocWorkspaceFileOperations(options = {}) {
         };
       },
       redact: contextPocWorkspaceMutationResult,
+      errorCode: contextPocWorkspaceOperationErrorCode
+    }),
+    'proposal.read': Object.freeze({
+      validate: contextPocWorkspaceFileProposalReadInput,
+      async handle({ input, context }) {
+        contextPocAssertWorkspaceOperationCurrent(context);
+        const identity = contextPocWorkspaceProjectIdentity(catalog(), {
+          contentRef: input.contentRef
+        });
+        const candidate = await proposalSurface(input.contentRef);
+        const bound = candidate && candidate.contentRef === input.contentRef
+          ? candidate : null;
+        const latest = contextPocWorkspaceProjectIdentity(catalog(), {
+          contentRef: input.contentRef
+        });
+        const result = contextPocWorkspaceProposalResult(
+          contextPocWorkspaceProposalProjection(
+            latest, bound
+          )
+        );
+        if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 5600) {
+          throw new Error('建议卡投影超过安全上限');
+        }
+        return result;
+      },
+      redact: contextPocWorkspaceProposalResult,
+      errorCode: contextPocWorkspaceOperationErrorCode
+    }),
+    'proposal.decide': Object.freeze({
+      validate: contextPocWorkspaceFileProposalDecisionInput,
+      async handle({ input, context }) {
+        contextPocAssertWorkspaceOperationCurrent(context);
+        const identity = contextPocWorkspaceProjectIdentity(catalog(), {
+          contentRef: input.contentRef
+        });
+        const candidate = await proposalSurface(input.contentRef);
+        const surface = candidate && candidate.contentRef === input.contentRef
+          ? candidate : null;
+        const visible = surface ? contextPocWorkspaceProposalResult(
+          contextPocWorkspaceProposalProjection(identity, surface)
+        ) : null;
+        if (!visible || visible.proposalToken !== input.proposalToken
+            || (input.decision === 'adopt'
+              && (visible.status !== 'ready' || visible.canAdopt !== true
+                || visible.proposalRevisionToken !== input.proposalRevisionToken))) {
+          throw contextPocWorkspaceOperationError(
+            'ERR_CONTEXT_PROJECT_STALE', '这张建议卡已变化，请重新查看'
+          );
+        }
+        const result = await proposalDecision({
+          proposalToken: input.proposalToken,
+          decision: input.decision,
+          ...(input.decision === 'adopt'
+            ? { proposalRevisionToken: input.proposalRevisionToken } : {})
+        });
+        if (!contextPocExact(result, ['kind', 'text'])
+            || result.kind !== 'ok' || typeof result.text !== 'string'
+            || !result.text) {
+          throw contextPocWorkspaceOperationError(
+            'ERR_OPERATION_OUTCOME_UNKNOWN',
+            '建议决策已执行，但结果无法确认'
+          );
+        }
+        let latest;
+        try {
+          latest = contextPocWorkspaceProjectIdentity(catalog(), {
+            contentRef: input.contentRef
+          });
+        } catch (_error) {
+          throw contextPocWorkspaceOperationError(
+            'ERR_OPERATION_OUTCOME_UNKNOWN',
+            '建议决策已执行，但当前内容身份无法确认'
+          );
+        }
+        let revisionToken = null;
+        if (input.decision === 'adopt') {
+          let adoptedSurface;
+          try {
+            const candidateAfter = await proposalSurface(input.contentRef);
+            adoptedSurface = candidateAfter
+              && candidateAfter.contentRef === input.contentRef ? candidateAfter : null;
+          }
+          catch (_error) { adoptedSurface = null; }
+          if (latest.projectToken === identity.projectToken
+              || !adoptedSurface || adoptedSurface.status !== 'adopted'
+              || typeof adoptedSurface.revisionToken !== 'string'
+              || !/^revision-[a-f0-9]{24}$/.test(adoptedSurface.revisionToken)) {
+            throw contextPocWorkspaceOperationError(
+              'ERR_OPERATION_OUTCOME_UNKNOWN',
+              '原稿采用已执行，但新版本与撤销快照无法确认'
+            );
+          }
+          revisionToken = adoptedSurface.revisionToken;
+        }
+        return {
+          kind: 'decision', ...latest,
+          decision: input.decision,
+          changed: input.decision === 'adopt',
+          revisionToken,
+          message: safeText(result && result.text,
+            input.decision === 'adopt' ? '已采用这一块。' : '已退回建议。', 160)
+        };
+      },
+      redact: contextPocWorkspaceProposalDecisionResult,
+      errorCode: contextPocWorkspaceOperationErrorCode
+    }),
+    'proposal.undo': Object.freeze({
+      validate: contextPocWorkspaceFileProposalUndoInput,
+      async handle({ input, context }) {
+        contextPocAssertWorkspaceOperationCurrent(context);
+        const identity = contextPocWorkspaceProjectIdentity(catalog(), {
+          contentRef: input.contentRef
+        });
+        const candidate = await proposalSurface(input.contentRef);
+        const surface = candidate && candidate.contentRef === input.contentRef
+          ? candidate : null;
+        if (!surface || surface.status !== 'adopted'
+            || surface.canUndo !== true
+            || surface.revisionToken !== input.revisionToken) {
+          throw contextPocWorkspaceOperationError(
+            'ERR_CONTEXT_PROJECT_STALE', '这份撤销快照已变化，请重新查看'
+          );
+        }
+        const result = await proposalUndo({ revisionToken: input.revisionToken });
+        if (!contextPocExact(result, ['kind', 'text'])
+            || result.kind !== 'ok' || typeof result.text !== 'string'
+            || !result.text) {
+          throw contextPocWorkspaceOperationError(
+            'ERR_OPERATION_OUTCOME_UNKNOWN',
+            '撤销已执行，但结果无法确认'
+          );
+        }
+        let latest;
+        try {
+          latest = contextPocWorkspaceProjectIdentity(catalog(), {
+            contentRef: input.contentRef
+          });
+        } catch (_error) {
+          throw contextPocWorkspaceOperationError(
+            'ERR_OPERATION_OUTCOME_UNKNOWN',
+            '撤销已执行，但当前内容身份无法确认'
+          );
+        }
+        if (latest.projectToken === identity.projectToken) {
+          throw contextPocWorkspaceOperationError(
+            'ERR_OPERATION_OUTCOME_UNKNOWN',
+            '撤销已执行，但最新文件版本无法确认'
+          );
+        }
+        return {
+          kind: 'undo', ...latest, changed: true,
+          message: safeText(result && result.text, '已撤销上一次块级采用。', 160)
+        };
+      },
+      redact: contextPocWorkspaceProposalUndoResult,
       errorCode: contextPocWorkspaceOperationErrorCode
     }),
     'project.action.prepare': Object.freeze({
@@ -11780,6 +12480,9 @@ if (MAIN_HELPER_TEST) {
     publishChecklistSurface,
     patchPublishLight,
     atomicReplaceVideoText,
+    bindEstablishedVideoProposal,
+    removeOwnedVideoProposal,
+    requireVideoProposalRemoval,
     recoverVideoCasJournal,
     recoverVideoCasWorkspace,
     assertVideoRuntimeIdentity,

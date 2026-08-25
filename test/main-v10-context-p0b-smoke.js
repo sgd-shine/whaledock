@@ -5,9 +5,11 @@ process.env.WHALEDOCK_CONTEXT_POC = '1';
 
 const assert = require('assert/strict');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const main = require('../main.js');
 const bridge = require('../lib/context-bridge');
+const cockpit = require('../lib/video-cockpit');
 
 const ROOT = path.join(__dirname, '..');
 const source = (name) => fs.readFileSync(path.join(ROOT, name), 'utf8').replace(/\r\n/g, '\n');
@@ -988,9 +990,10 @@ async function mainTest() {
       openReceipt: async (input) => { calls.push(['openReceipt', input]); return { kind: 'ok' }; }
     });
     assert.deepEqual(Object.keys(ops).sort(), [
-      'catalog.read', 'document.read', 'overview.read', 'project.action.prepare',
-      'project.action.submit', 'receipts.ack', 'receipts.open', 'receipts.read',
-      'topic.choose'
+      'block.action.prepare', 'block.action.submit', 'catalog.read', 'document.read',
+      'overview.read', 'project.action.prepare', 'project.action.submit',
+      'proposal.decide', 'proposal.read', 'proposal.undo', 'receipts.ack',
+      'receipts.open', 'receipts.read', 'topic.choose'
     ]);
     const mainSource = source('main.js');
     assert.equal((mainSource.match(
@@ -1439,6 +1442,507 @@ async function mainTest() {
     } catch (error) { uncertainError = error; }
     assert.equal(uncertainOps['topic.choose'].errorCode(uncertainError), 'outcome-unknown',
       '写回返回后无法取得 replacement token 时不得诱导自动重试');
+  });
+
+  await test('脚本块动作与建议卡按 contentRef 隔离，采用/退回/撤销保持 CAS 语义', async () => {
+    const contentRef = `content-${'a'.repeat(24)}`;
+    const otherContentRef = `content-${'b'.repeat(24)}`;
+    const projectVersions = [
+      `project-${'7'.repeat(24)}`,
+      `project-${'8'.repeat(24)}`,
+      `project-${'9'.repeat(24)}`
+    ];
+    const otherProjectToken = `project-${'c'.repeat(24)}`;
+    const blockToken = `block-${'d'.repeat(24)}`;
+    const preflightToken = 'preflight-batch6-01';
+    const receiptId = 'receipt-batch6-01';
+    const proposalToken = 'proposal-video-batch6_01';
+    const proposalRevisionToken = `proposal-revision-${'e'.repeat(24)}`;
+    const revisionToken = `revision-${'f'.repeat(24)}`;
+    let projectVersion = 0;
+    let mode = 'ready';
+    let originalWrites = 0;
+    let rejectWrites = 0;
+    let undoWrites = 0;
+    const blockCalls = [];
+    const decisionCalls = [];
+    const undoCalls = [];
+    const catalog = () => ({
+      generation: 40 + projectVersion,
+      projects: [{
+        projectToken: projectVersions[projectVersion], contentRef,
+        title: '脚本 A', stage: 'script', stageLabel: '写稿', actions: []
+      }, {
+        projectToken: otherProjectToken, contentRef: otherContentRef,
+        title: '脚本 B', stage: 'script', stageLabel: '写稿', actions: []
+      }]
+    });
+    const longBefore = `原稿：${'这是一段只读原稿。'.repeat(260)}`;
+    const longAfter = `建议：${'这是一段建议改写。'.repeat(260)}`;
+    let useLongComparison = true;
+    const surfaceFor = (requestedContentRef) => {
+      if (mode === null) return null;
+      const common = {
+        // 故意在 B 请求时仍返回 A 的绑定；主进程必须把它当作空卡，不能串卡。
+        contentRef,
+        title: '脚本 A',
+        before: useLongComparison ? longBefore : '原来的目标块。',
+        after: useLongComparison ? longAfter : '新的目标块。',
+        absolutePath: '/private/脚本A.md', hash: 'a'.repeat(64),
+        rawPrompt: 'SECRET BLOCK PROMPT'
+      };
+      if (mode === 'adopted') {
+        return {
+          ...common, status: 'adopted', reason: null,
+          proposalToken: null, proposalRevisionToken: null, revisionToken,
+          intentLabel: '已采用，可撤销一次', canAdopt: false,
+          canReject: false, canUndo: true, submitted: null, target: null
+        };
+      }
+      return {
+        ...common, status: 'ready', reason: null,
+        proposalToken, proposalRevisionToken, revisionToken: null,
+        intentLabel: '更口语', canAdopt: true, canReject: true, canUndo: false,
+        submitted: 'accepted', target: '目标会话'
+      };
+    };
+    const blockAction = async (input) => {
+      blockCalls.push(input);
+      if (!Object.prototype.hasOwnProperty.call(input, 'preflightToken')) {
+        return {
+          kind: 'preflight', preflightToken,
+          targetLabel: '目标会话', workspaceLabel: '脚本工作区',
+          workspaceMatch: 'match', targetRunning: true,
+          eventTracking: 'ready', expiresAt: '2026-08-25T12:20:00.000Z'
+        };
+      }
+      return { state: 'accepted', reason: 'queued', target: '目标会话', receiptId };
+    };
+    const proposalDecision = async (input) => {
+      decisionCalls.push(input);
+      if (input.decision === 'reject') {
+        rejectWrites += 1;
+        mode = null;
+        return { kind: 'ok', text: '已退回建议，原稿从未改动。' };
+      }
+      originalWrites += 1;
+      projectVersion = 1;
+      mode = 'adopted';
+      return { kind: 'ok', text: '已采用这一块；原稿其他部分不动。' };
+    };
+    const proposalUndo = async (input) => {
+      undoCalls.push(input);
+      undoWrites += 1;
+      projectVersion = 2;
+      mode = null;
+      return { kind: 'ok', text: '已撤销上一次块级采用。' };
+    };
+    const ops = main.contextPocWorkspaceFileOperations({
+      catalog, blockAction, proposalSurface: surfaceFor,
+      proposalDecision, proposalUndo
+    });
+    const current = { assertCurrent: () => true };
+
+    for (const action of ['revise', 'spoken', 'shorten', 'ask']) {
+      assert.deepEqual(ops['block.action.prepare'].validate({
+        projectToken: projectVersions[0], blockToken, action
+      }), { projectToken: projectVersions[0], blockToken, action });
+    }
+    for (const invalid of [
+      { projectToken: projectVersions[0], blockToken, action: 'delete' },
+      { projectToken: projectVersions[0], blockToken, action: 'revise', extra: true }
+    ]) assert.throws(() => ops['block.action.prepare'].validate(invalid));
+    const submitInput = {
+      projectToken: projectVersions[0], blockToken, action: 'spoken',
+      preflightToken, override: false
+    };
+    assert.deepEqual(ops['block.action.submit'].validate(submitInput), submitInput);
+    assert.throws(() => ops['block.action.submit'].validate({
+      projectToken: projectVersions[0], blockToken, action: 'spoken', override: false
+    }));
+    assert.throws(() => ops['block.action.submit'].validate({ ...submitInput, extra: true }));
+
+    const prepareRaw = await ops['block.action.prepare'].handle({
+      input: { projectToken: projectVersions[0], blockToken, action: 'spoken' },
+      context: current
+    });
+    const prepared = ops['block.action.prepare'].redact(prepareRaw);
+    assert.deepEqual(prepared, {
+      kind: 'preflight', contentRef, projectToken: projectVersions[0],
+      blockToken, action: 'spoken', state: 'ready', preflightToken,
+      targetLabel: '目标会话', workspaceLabel: '脚本工作区',
+      workspaceMatch: 'match', targetRunning: true, eventTracking: 'ready',
+      expiresAt: '2026-08-25T12:20:00.000Z', message: null
+    });
+    const submitRaw = await ops['block.action.submit'].handle({
+      input: submitInput, context: current
+    });
+    assert.deepEqual(ops['block.action.submit'].redact(submitRaw), {
+      kind: 'submission', contentRef, projectToken: projectVersions[0],
+      blockToken, action: 'spoken', state: 'accepted', reason: 'queued',
+      target: '目标会话', receiptId, message: null
+    });
+    assert.deepEqual(blockCalls, [
+      { projectToken: projectVersions[0], blockToken, action: 'spoken' }, submitInput
+    ]);
+
+    assert.deepEqual(ops['proposal.read'].validate({ contentRef }), { contentRef });
+    assert.throws(() => ops['proposal.read'].validate({ contentRef, path: '/private/a.md' }));
+    assert.deepEqual(ops['proposal.decide'].validate({
+      contentRef, proposalToken, decision: 'adopt', proposalRevisionToken
+    }), { contentRef, proposalToken, decision: 'adopt', proposalRevisionToken });
+    assert.deepEqual(ops['proposal.decide'].validate({
+      contentRef, proposalToken, decision: 'reject'
+    }), { contentRef, proposalToken, decision: 'reject' });
+    assert.throws(() => ops['proposal.decide'].validate({
+      contentRef, proposalToken, decision: 'reject', proposalRevisionToken
+    }), 'reject 不得携带 revision');
+    assert.throws(() => ops['proposal.decide'].validate({
+      contentRef, proposalToken, decision: 'adopt'
+    }));
+    assert.deepEqual(ops['proposal.undo'].validate({ contentRef, revisionToken }), {
+      contentRef, revisionToken
+    });
+    assert.throws(() => ops['proposal.undo'].validate({
+      contentRef, revisionToken, extra: true
+    }));
+
+    const readyRaw = await ops['proposal.read'].handle({
+      input: { contentRef }, context: current
+    });
+    const ready = ops['proposal.read'].redact(readyRaw);
+    assert.equal(ready.status, 'ready');
+    assert.equal(ready.projectToken, projectVersions[0]);
+    assert.equal(ready.proposalRevisionToken, null,
+      '对照文本被截断时不得向页面下发可采用 revision');
+    assert.equal(ready.canAdopt, false,
+      '对照文本被截断时主进程必须关闭采用，不依赖 UI 自律');
+    assert.equal(ready.canReject, true, '截断建议仍允许安全退回');
+    assert.equal(Buffer.byteLength(ready.before, 'utf8') <= 1600, true);
+    assert.equal(Buffer.byteLength(ready.after, 'utf8') <= 1600, true);
+    assert.equal(ready.beforeTruncated, true);
+    assert.equal(ready.afterTruncated, true);
+    assert.equal(Buffer.byteLength(JSON.stringify(ready), 'utf8') <= 5600, true);
+    assert.doesNotMatch(JSON.stringify(ready),
+      /(?:absolutePath|relativePath|hash|binding|rawPrompt|SECRET)/);
+    assert.throws(() => ops['proposal.read'].redact({
+      ...readyRaw, relativePath: '02_脚本/脚本A.md'
+    }));
+
+    const otherRaw = await ops['proposal.read'].handle({
+      input: { contentRef: otherContentRef }, context: current
+    });
+    const other = ops['proposal.read'].redact(otherRaw);
+    assert.deepEqual({
+      contentRef: other.contentRef, projectToken: other.projectToken,
+      status: other.status, proposalToken: other.proposalToken
+    }, {
+      contentRef: otherContentRef, projectToken: otherProjectToken,
+      status: null, proposalToken: null
+    }, '全局 A 建议卡不得串到 B 内容');
+
+    const baseProposal = {
+      contentRef, title: '脚本 A', intentLabel: '改这段', before: '原块', after: null,
+      proposalToken, proposalRevisionToken: null, revisionToken: null,
+      canAdopt: false, canReject: true, canUndo: false,
+      submitted: null, target: null
+    };
+    const variants = [
+      { status: 'queued', reason: null },
+      { status: 'unchanged', reason: 'target-unchanged' },
+      { status: 'stale', reason: 'original-changed' },
+      { status: 'invalid', reason: 'outside-target-changed' },
+      { status: 'invalid', reason: 'proposal-too-large' },
+      { status: 'invalid', reason: 'ERR_PATH_NOT_FOUND' },
+      {
+        status: 'ready', reason: null, proposalRevisionToken,
+        after: '新块', canAdopt: true
+      },
+      {
+        status: 'adopted', reason: null, proposalToken: null,
+        revisionToken, after: '新块', canReject: false, canUndo: true
+      },
+      {
+        status: 'conflict', reason: 'adopted-file-changed', proposalToken: null,
+        revisionToken, after: '新块', canReject: false, canUndo: false
+      }
+    ];
+    const observedStatuses = new Set();
+    const observedReasons = new Set();
+    for (const variant of variants) {
+      const statusOps = main.contextPocWorkspaceFileOperations({
+        catalog,
+        proposalSurface: () => ({ ...baseProposal, ...variant })
+      });
+      const raw = await statusOps['proposal.read'].handle({
+        input: { contentRef }, context: current
+      });
+      const projected = statusOps['proposal.read'].redact(raw);
+      observedStatuses.add(projected.status);
+      if (projected.reason) observedReasons.add(projected.reason);
+    }
+    assert.deepEqual([...observedStatuses].sort(), [
+      'adopted', 'conflict', 'invalid', 'queued', 'ready', 'stale', 'unchanged'
+    ]);
+    assert.deepEqual([...observedReasons].sort(), [
+      'adopted-file-changed', 'original-changed', 'outside-target-changed',
+      'proposal-too-large', 'read-failed', 'target-unchanged'
+    ]);
+
+    let clippedBypassError;
+    try {
+      await ops['proposal.decide'].handle({
+        input: { contentRef, proposalToken, decision: 'adopt', proposalRevisionToken },
+        context: current
+      });
+    } catch (error) { clippedBypassError = error; }
+    assert.equal(ops['proposal.decide'].errorCode(clippedBypassError), 'operation-stale');
+    assert.equal(decisionCalls.length, 0,
+      '直接调用 adopt 也必须复验当前完整投影，不能持旧 revision 绕过 UI');
+    useLongComparison = false;
+    const completeReadyRaw = await ops['proposal.read'].handle({
+      input: { contentRef }, context: current
+    });
+    const completeReady = ops['proposal.read'].redact(completeReadyRaw);
+    assert.equal(completeReady.canAdopt, true);
+    assert.equal(completeReady.proposalRevisionToken, proposalRevisionToken);
+
+    const rejectRaw = await ops['proposal.decide'].handle({
+      input: { contentRef, proposalToken, decision: 'reject' }, context: current
+    });
+    assert.deepEqual(ops['proposal.decide'].redact(rejectRaw), {
+      kind: 'decision', contentRef, projectToken: projectVersions[0],
+      decision: 'reject', changed: false, revisionToken: null,
+      message: '已退回建议，原稿从未改动。'
+    });
+    assert.equal(originalWrites, 0);
+    assert.equal(rejectWrites, 1, '退回只删除建议，不得写原稿');
+    assert.deepEqual(decisionCalls[0], { proposalToken, decision: 'reject' },
+      'contentRef 只用于主进程绑定，不下沉成路径或通用写接口');
+
+    mode = 'ready';
+    let staleRevisionError;
+    try {
+      await ops['proposal.decide'].handle({
+        input: {
+          contentRef, proposalToken, decision: 'adopt',
+          proposalRevisionToken: `proposal-revision-${'0'.repeat(24)}`
+        },
+        context: current
+      });
+    } catch (error) { staleRevisionError = error; }
+    assert.equal(ops['proposal.decide'].errorCode(staleRevisionError), 'operation-stale');
+    assert.equal(decisionCalls.length, 1, '旧 revision 不得进入采用写回');
+
+    const adoptRaw = await ops['proposal.decide'].handle({
+      input: { contentRef, proposalToken, decision: 'adopt', proposalRevisionToken },
+      context: current
+    });
+    assert.deepEqual(ops['proposal.decide'].redact(adoptRaw), {
+      kind: 'decision', contentRef, projectToken: projectVersions[1],
+      decision: 'adopt', changed: true, revisionToken,
+      message: '已采用这一块；原稿其他部分不动。'
+    });
+    assert.equal(originalWrites, 1, '采用只能发生一次原稿写回');
+    assert.deepEqual(decisionCalls[1], {
+      proposalToken, decision: 'adopt', proposalRevisionToken
+    });
+
+    const undoRaw = await ops['proposal.undo'].handle({
+      input: { contentRef, revisionToken }, context: current
+    });
+    assert.deepEqual(ops['proposal.undo'].redact(undoRaw), {
+      kind: 'undo', contentRef, projectToken: projectVersions[2], changed: true,
+      message: '已撤销上一次块级采用。'
+    });
+    assert.equal(undoWrites, 1);
+    assert.deepEqual(undoCalls, [{ revisionToken }]);
+    let secondUndoError;
+    try {
+      await ops['proposal.undo'].handle({
+        input: { contentRef, revisionToken }, context: current
+      });
+    } catch (error) { secondUndoError = error; }
+    assert.equal(ops['proposal.undo'].errorCode(secondUndoError), 'operation-stale');
+    assert.equal(undoWrites, 1, '一次性撤销 token 不得二次写回');
+
+    let oldTokenError;
+    try {
+      await ops['block.action.prepare'].handle({
+        input: { projectToken: projectVersions[0], blockToken, action: 'revise' },
+        context: current
+      });
+    } catch (error) { oldTokenError = error; }
+    assert.equal(ops['block.action.prepare'].errorCode(oldTokenError), 'operation-stale');
+    assert.equal(blockCalls.length, 2, '旧 projectToken 不得进入块动作');
+
+    let staleSideEffects = 0;
+    const staleOps = main.contextPocWorkspaceFileOperations({
+      catalog: () => { staleSideEffects += 1; return catalog(); },
+      blockAction: async () => { staleSideEffects += 1; return {}; },
+      proposalSurface: async () => { staleSideEffects += 1; return null; },
+      proposalDecision: async () => { staleSideEffects += 1; return {}; },
+      proposalUndo: async () => { staleSideEffects += 1; return {}; }
+    });
+    const staleContext = { assertCurrent: () => false };
+    await assert.rejects(staleOps['block.action.prepare'].handle({
+      input: { projectToken: projectVersions[2], blockToken, action: 'ask' },
+      context: staleContext
+    }));
+    await assert.rejects(staleOps['block.action.submit'].handle({
+      input: {
+        projectToken: projectVersions[2], blockToken, action: 'ask',
+        preflightToken, override: false
+      }, context: staleContext
+    }));
+    await assert.rejects(staleOps['proposal.read'].handle({
+      input: { contentRef }, context: staleContext
+    }));
+    await assert.rejects(staleOps['proposal.decide'].handle({
+      input: { contentRef, proposalToken, decision: 'reject' }, context: staleContext
+    }));
+    await assert.rejects(staleOps['proposal.undo'].handle({
+      input: { contentRef, revisionToken }, context: staleContext
+    }));
+    assert.equal(staleSideEffects, 0, '换绑后五个脚本 operation 都必须零副作用');
+
+    let uncertainMode = 'ready';
+    const unchangedToken = `project-${'1'.repeat(24)}`;
+    const uncertainOps = main.contextPocWorkspaceFileOperations({
+      catalog: () => ({ projects: [{ projectToken: unchangedToken, contentRef }] }),
+      proposalSurface: () => uncertainMode === 'ready'
+        ? {
+          contentRef, status: 'ready', reason: null, proposalToken,
+          proposalRevisionToken, revisionToken: null, title: '脚本', intentLabel: '改这段',
+          before: '原块', after: '新块', canAdopt: true, canReject: true,
+          canUndo: false, submitted: null, target: null
+        } : {
+          contentRef, status: 'adopted', reason: null, proposalToken: null,
+          proposalRevisionToken: null, revisionToken, title: '脚本',
+          intentLabel: '已采用', before: '原块', after: '新块',
+          canAdopt: false, canReject: false, canUndo: true,
+          submitted: null, target: null
+        },
+      proposalDecision: async () => {
+        uncertainMode = 'adopted';
+        return { kind: 'ok', text: '已写回' };
+      }
+    });
+    let uncertainError;
+    try {
+      await uncertainOps['proposal.decide'].handle({
+        input: { contentRef, proposalToken, decision: 'adopt', proposalRevisionToken },
+        context: current
+      });
+    } catch (error) { uncertainError = error; }
+    assert.equal(uncertainOps['proposal.decide'].errorCode(uncertainError), 'outcome-unknown',
+      '采用后 projectToken 未轮换时不得宣称成功或诱导重试');
+
+    const mainSource = source('main.js');
+    assert.match(mainSource,
+      /videoProposalMatchesContent\([\s\S]*runtime, videoProposal\.plan\.record\.sourceRelativePath/,
+      'proposal 必须用当前 runtime、源相对路径与 contentRef 共同绑定');
+    assert.match(mainSource, /expectedBinding: documents\.original\.binding/,
+      '采用必须保留原稿 inode binding');
+    assert.match(mainSource, /expectedBinding: videoUndo\.adoptedBinding/,
+      '撤销必须保留采用后 inode binding');
+    assert.match(mainSource, /videoUndo = null;\n    videoProposal = \{/,
+      '只有建议副本实际建立后才清旧 undo');
+    assert.equal(main.requireVideoProposalRemoval(true, false), true);
+    assert.throws(() => main.requireVideoProposalRemoval(false, false), (error) => (
+      error && error.code === 'ERR_PROPOSAL_REMOVE_FAILED'
+    ), 'reject 删除失败必须保留全局建议并如实报错');
+    assert.throws(() => main.requireVideoProposalRemoval(false, true), (error) => (
+      error && error.code === 'ERR_OPERATION_OUTCOME_UNKNOWN'
+    ), 'adopt 写后清理失败必须报告 outcome unknown');
+    const adoptionFlow = mainSource.slice(
+      mainSource.indexOf('const previous = videoProposal;',
+        mainSource.indexOf('function decideVideoProposal')),
+      mainSource.indexOf("return { kind: 'ok', text: '已采用这一块",
+        mainSource.indexOf('function decideVideoProposal'))
+    );
+    assert.ok(adoptionFlow.indexOf('videoUndo = {')
+      < adoptionFlow.indexOf('videoProposal = null;'));
+    assert.ok(adoptionFlow.indexOf('videoProposal = null;')
+      < adoptionFlow.indexOf('removeOwnedVideoProposal('));
+    assert.match(adoptionFlow,
+      /catch \(error\) \{\n    refreshVideoWorkspaceSnapshot\(\);/,
+      'adopt 清理失败也必须刷新出 adopted + canUndo，再返回结果未知');
+
+    const visibleProposal = {
+      proposalToken,
+      plan: { text: '# 建议副本\n' },
+      proposalHash: null,
+      proposalBinding: null,
+      submitState: 'sending'
+    };
+    let bindingReads = 0;
+    const bindingFailure = main.bindEstablishedVideoProposal(visibleProposal, () => {
+      bindingReads += 1;
+      const error = new Error('模拟 inode 回读失败');
+      error.code = 'ERR_PATH_CHANGED';
+      throw error;
+    });
+    assert.deepEqual(bindingFailure, { bound: false, code: 'ERR_PATH_CHANGED' });
+    assert.equal(bindingReads, 1);
+    assert.equal(visibleProposal.proposalToken, proposalToken,
+      '写成功后的建议状态必须保留，不能留下无状态 orphan');
+    assert.equal(visibleProposal.submitState, 'unknown');
+    assert.equal(visibleProposal.proposalBinding, null);
+    assert.equal(visibleProposal.proposalHash, cockpit.hashText(visibleProposal.plan.text));
+    const blockSubmitSource = mainSource.slice(
+      mainSource.indexOf('async function submitVideoBlockAction'),
+      mainSource.indexOf('function decideVideoProposal')
+    );
+    assert.ok(blockSubmitSource.indexOf('videoProposal = {')
+      < blockSubmitSource.indexOf('bindEstablishedVideoProposal('),
+    '建议文件成功后必须先建立可见状态，再尝试 binding 回读');
+    assert.match(blockSubmitSource,
+      /if \(!binding\.bound\) \{[\s\S]*pushVideoWorkspaceState\(\);[\s\S]*throw new Error/,
+      'binding 回读失败必须保持 unknown 卡并在模型提交前停止');
+
+    const cleanupTmp = fs.realpathSync(fs.mkdtempSync(
+      path.join(os.tmpdir(), 'whaledock-proposal-cleanup-')
+    ));
+    try {
+      fs.mkdirSync(path.join(cleanupTmp, '00_鲸坞建议'));
+      const cleanupRootStat = fs.lstatSync(cleanupTmp, { bigint: true });
+      const cleanupRootIdentity = {
+        dev: String(cleanupRootStat.dev), ino: String(cleanupRootStat.ino)
+      };
+      const cleanupRelative = '00_鲸坞建议/cleanup.md';
+      const cleanupPath = path.join(cleanupTmp, cleanupRelative);
+      const cleanupProposal = {
+        plan: { record: { proposalRelativePath: cleanupRelative } }
+      };
+      fs.writeFileSync(cleanupPath, '# 原建议\n', 'utf8');
+      const unchanged = cockpit.readDocument(cleanupTmp, cleanupRelative);
+      assert.equal(main.removeOwnedVideoProposal(
+        cleanupTmp, cleanupProposal, cleanupRootIdentity,
+        unchanged.hash, unchanged.binding
+      ), true, 'error/rejected 时未变化的受管建议必须能精确清理');
+      assert.equal(fs.existsSync(cleanupPath), false);
+
+      fs.writeFileSync(cleanupPath, '# 新建议\n', 'utf8');
+      const beforeChange = cockpit.readDocument(cleanupTmp, cleanupRelative);
+      fs.writeFileSync(cleanupPath, '# 已被外部改动\n', 'utf8');
+      assert.equal(main.removeOwnedVideoProposal(
+        cleanupTmp, cleanupProposal, cleanupRootIdentity,
+        beforeChange.hash, beforeChange.binding
+      ), false, '建议内容变化后必须保留并进入 unknown，不能误删');
+      assert.equal(fs.existsSync(cleanupPath), true);
+
+      fs.renameSync(cleanupPath, `${cleanupPath}.old`);
+      fs.writeFileSync(cleanupPath, '# 新建议\n', 'utf8');
+      const rebound = cockpit.readDocument(cleanupTmp, cleanupRelative);
+      assert.equal(rebound.hash, beforeChange.hash, '测试替换实体保持同 hash');
+      assert.equal(main.removeOwnedVideoProposal(
+        cleanupTmp, cleanupProposal, cleanupRootIdentity,
+        beforeChange.hash, beforeChange.binding
+      ), false, '同 hash 换 inode 也必须保留，不能按路径误删');
+    } finally {
+      fs.rmSync(cleanupTmp, { recursive: true, force: true });
+    }
   });
 
   await test('shell 公开面按当前 sessionRef 投影，不泄露 ref、路径或标题', async () => {

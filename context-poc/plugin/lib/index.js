@@ -44,6 +44,8 @@ const PREFERENCE_PENDING_MS = 3000;
 const WORKSPACE_FILE_OPERATIONS = new Set([
   'catalog.read', 'overview.read', 'document.read', 'topic.choose',
   'project.action.prepare', 'project.action.submit',
+  'block.action.prepare', 'block.action.submit',
+  'proposal.read', 'proposal.decide', 'proposal.undo',
   'receipts.read', 'receipts.ack', 'receipts.open'
 ]);
 const WORKSPACE_FILE_STATES = new Set([

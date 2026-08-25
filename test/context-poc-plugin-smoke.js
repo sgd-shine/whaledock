@@ -123,6 +123,8 @@ async function main() {
     for (const operation of [
       'catalog.read', 'overview.read', 'document.read', 'topic.choose',
       'project.action.prepare', 'project.action.submit',
+      'block.action.prepare', 'block.action.submit',
+      'proposal.read', 'proposal.decide', 'proposal.undo',
       'receipts.read', 'receipts.ack', 'receipts.open'
     ]) assert.match(pluginClient, new RegExp(`'${operation.replace('.', '\\.')}'`));
     assert.match(pluginClient, /contentRef/);

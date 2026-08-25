@@ -334,6 +334,17 @@ async function settle(harness, props) {
   return harness.renderer.render(harness.AppFrame, props);
 }
 
+async function fireTimers(harness, delay, props) {
+  const pending = [...harness.timers.entries()]
+    .filter(([, timer]) => timer.delay === delay);
+  assert(pending.length > 0, `expected at least one ${delay}ms timer`);
+  for (const [id, timer] of pending) {
+    harness.timers.delete(id);
+    await timer.fn();
+  }
+  return settle(harness, props);
+}
+
 function catalog(projects, nextCursor = null, projectCount = projects.length) {
   return fulfilled({ kind: 'catalog', projects, nextCursor, projectCount });
 }
@@ -354,6 +365,34 @@ function overview(project, candidates = [], extra = {}) {
     angle: null, hook: null, candidateCount: candidates.length,
     cursor: 0, nextCursor: null, candidates, ...extra
   });
+}
+
+function documentPage(project, blocks = [], extra = {}) {
+  return fulfilled({
+    kind: 'document', projectToken: project.projectToken, title: project.title,
+    stage: 'script', stageLabel: '写稿', blockCount: blocks.length,
+    cursor: 0, nextCursor: null, truncated: blocks.some((block) => block.textTruncated),
+    blocks, ...extra
+  });
+}
+
+function proposal(project, status = null, extra = {}) {
+  return fulfilled({
+    kind: 'proposal', contentRef: project.contentRef, projectToken: project.projectToken,
+    status, reason: null, proposalToken: null, proposalRevisionToken: null,
+    revisionToken: null, title: null, intentLabel: null, before: null,
+    beforeTruncated: false, after: null, afterTruncated: false,
+    canAdopt: false, canReject: false, canUndo: false, submitted: null,
+    target: null, ...extra
+  });
+}
+
+function scriptBlock(hex, text, extra = {}) {
+  return {
+    blockToken: `block-${hex.repeat(24).slice(0, 24)}`,
+    kind: 'paragraph', text, textTruncated: false, startLine: 5, endLine: 5,
+    ...extra
+  };
 }
 
 async function main() {
@@ -823,7 +862,7 @@ async function main() {
     assert(calls.some((call) => call.operation === 'catalog.read' && call.input.cursor === 4));
   });
 
-  await test('概览接通真实选题且其余四阶段诚实标未完成，TaskReceiptStrip 切 tab 不卸载', async () => {
+  await test('概览和脚本接通真实文件且其余三阶段诚实标未完成，TaskReceiptStrip 不卸载', async () => {
     const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
     const project = contentProject('8', '回执项目', '拍摄中');
     project.contentRef = `content-${'8'.repeat(24)}`;
@@ -832,6 +871,10 @@ async function main() {
       if (operation === 'overview.read') return overview(project, [{
         field: 'angle', value: '先看完成结果', selected: false
       }]);
+      if (operation === 'document.read') return documentPage(project, [
+        scriptBlock('1', '真实脚本文本')
+      ]);
+      if (operation === 'proposal.read') return proposal(project);
       if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
         projectToken: input.projectToken, receipts: [{
           receiptId: 'receipt-opaque-01', targetLabel: '右栏会话', tracking: 'ready',
@@ -857,7 +900,13 @@ async function main() {
     assert.match(textOf(tree), /选题拍板/u);
     assert.match(textOf(tree), /先看完成结果/u);
     assert.doesNotMatch(textOf(tree), /这一格还没做/u);
-    for (const label of ['脚本', '拍摄', '发布', '复盘']) {
+    button(tree, '脚本').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /真实脚本文本/u);
+    assert.doesNotMatch(textOf(tree), /这一格还没做/u);
+    assert.equal(harness.renderer.fiberIds('TaskReceiptStrip')[0], receiptFiber);
+    for (const label of ['拍摄', '发布', '复盘']) {
       button(tree, label).props.onClick();
       tree = harness.renderer.render(harness.AppFrame, props);
       assert.match(textOf(tree), /这一格还没做/u);
@@ -1064,6 +1113,590 @@ async function main() {
       `project-${'b'.repeat(24)}`, tokenB
     ]);
     assert.match(textOf(tree), /当前钩子别再空想/u);
+  });
+
+  await test('脚本自动分页、后页失败保留已读块，截断块禁用四动作', async () => {
+    const project = contentProject('4', '分页脚本', '写稿');
+    const first = [
+      scriptBlock('1', '第一块完整文本'),
+      scriptBlock('2', '第二块截断文本', { textTruncated: true, startLine: 6, endLine: 8 })
+    ];
+    const tail = [scriptBlock('3', '第三块完整文本', { startLine: 9, endLine: 10 })];
+    const makeHarness = (failTail) => {
+      const calls = [];
+      const workspaceFiles = { async execute(operation, input) {
+        calls.push({ operation, input: { ...input } });
+        if (operation === 'catalog.read') return catalog([project]);
+        if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+          projectToken: input.projectToken, receipts: [] });
+        if (operation === 'proposal.read') return proposal(project);
+        if (operation === 'document.read' && input.cursor === 0) return documentPage(project, first, {
+          blockCount: 3, nextCursor: 2, truncated: true
+        });
+        if (operation === 'document.read' && input.cursor === 2) {
+          if (failTail) throw new Error('tail unavailable');
+          return documentPage(project, tail, { blockCount: 3, cursor: 2, truncated: false });
+        }
+        throw new Error(operation);
+      } };
+      const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+      return { calls, harness: loadBundle({ whaledockShellPreferences: pref,
+        whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+        creatorTab: 'script'
+      }) };
+    };
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const full = makeHarness(false);
+    const props = uiProps(state, full.harness.integration, []);
+    let tree = full.harness.renderer.render(full.harness.AppFrame, props);
+    tree = await settle(full.harness, props);
+    tree = await settle(full.harness, props);
+    assert.match(textOf(tree), /第一块完整文本/u);
+    assert.match(textOf(tree), /第三块完整文本/u);
+    assert.match(textOf(tree), /文档投影含截断内容/u);
+    assert(full.calls.some((call) => call.operation === 'document.read' && call.input.cursor === 2));
+    const articles = findAll(tree, (node) => node.type === 'article' && node.props?.className === 'wd10-block');
+    assert.equal(articles.length, 3);
+    for (const label of ['改这段', '更口语', '压时长', '问一句']) {
+      assert.equal(findAll(articles[0], (node) => node.type === 'button' && textOf(node) === label)[0]
+        .props.disabled, false);
+      assert.equal(findAll(articles[1], (node) => node.type === 'button' && textOf(node) === label)[0]
+        .props.disabled, true);
+    }
+
+    const partial = makeHarness(true);
+    const partialProps = uiProps(state, partial.harness.integration, []);
+    tree = partial.harness.renderer.render(partial.harness.AppFrame, partialProps);
+    tree = await settle(partial.harness, partialProps);
+    tree = await settle(partial.harness, partialProps);
+    assert.match(textOf(tree), /第一块完整文本/u);
+    assert.doesNotMatch(textOf(tree), /第三块完整文本/u);
+    assert.match(textOf(tree), /脚本读取不完整；只显示已成功读取的 2\/3 块/u);
+  });
+
+  await test('脚本 A→B→A 后清空旧块并丢弃迟到的旧 A 响应', async () => {
+    let projectA = contentProject('5', '脚本 A', '写稿');
+    const projectB = contentProject('6', '脚本 B', '写稿');
+    const delayedA = deferred();
+    let refreshedAReads = 0;
+    const workspaceFiles = { async execute(operation, input) {
+      if (operation === 'catalog.read') return catalog([projectA, projectB]);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'proposal.read') {
+        return proposal(input.contentRef === projectB.contentRef ? projectB : projectA);
+      }
+      if (operation !== 'document.read') throw new Error(operation);
+      if (input.projectToken === `project-${'5'.repeat(24)}`) {
+        return documentPage(projectA, [scriptBlock('5', 'A 初始脚本')]);
+      }
+      if (input.projectToken === projectB.projectToken) {
+        return documentPage(projectB, [scriptBlock('6', 'B 当前脚本')]);
+      }
+      refreshedAReads += 1;
+      return refreshedAReads === 1 ? delayedA.promise
+        : documentPage(projectA, [scriptBlock('7', 'A 最新脚本')]);
+    } };
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+      creatorTab: 'script'
+    });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /A 初始脚本/u);
+    projectA = { ...projectA, projectToken: `project-${'7'.repeat(24)}` };
+    button(tree, '刷新内容').props.onClick();
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /正在读取脚本块/u);
+    assert.doesNotMatch(textOf(tree), /A 初始脚本/u);
+    const card = (title) => findAll(tree, (node) => node.props?.className === 'wd10-project'
+      && textOf(node).includes(title))[0];
+    card('脚本 B').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /B 当前脚本/u);
+    card('脚本 A').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /A 最新脚本/u);
+    delayedA.resolve(documentPage(projectA, [scriptBlock('8', 'A 迟到脚本')]));
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /A 最新脚本/u);
+    assert.doesNotMatch(textOf(tree), /A 迟到脚本/u);
+  });
+
+  await test('四个块动作共用预检取消链，最终确认双击只提交一次', async () => {
+    const project = contentProject('8', '动作脚本', '写稿');
+    const block = scriptBlock('8', '需要加工的完整块');
+    const prepares = [];
+    const submits = [];
+    const workspaceFiles = { async execute(operation, input) {
+      if (operation === 'catalog.read') return catalog([project]);
+      if (operation === 'document.read') return documentPage(project, [block]);
+      if (operation === 'proposal.read') return proposal(project);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'block.action.prepare') {
+        prepares.push({ ...input });
+        return fulfilled({
+          kind: 'preflight', contentRef: project.contentRef,
+          projectToken: project.projectToken, blockToken: block.blockToken,
+          action: input.action, state: 'ready', preflightToken: `preflight-${input.action}-01`,
+          targetLabel: '脚本会话', workspaceLabel: 'alpha', workspaceMatch: 'match',
+          targetRunning: true, eventTracking: 'ready',
+          expiresAt: new Date(Date.now() + 60_000).toISOString(), message: null
+        });
+      }
+      if (operation === 'block.action.submit') {
+        submits.push({ ...input });
+        return fulfilled({
+          kind: 'submission', contentRef: project.contentRef,
+          projectToken: project.projectToken, blockToken: block.blockToken,
+          action: input.action, state: 'accepted', reason: 'accepted', target: '脚本会话',
+          receiptId: 'receipt-block-action-01', message: null
+        });
+      }
+      throw new Error(operation);
+    } };
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+      creatorTab: 'script'
+    });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    for (const label of ['改这段', '更口语', '压时长']) {
+      button(tree, label).props.onClick();
+      tree = await settle(harness, props);
+      assert.match(textOf(tree), /将发往 脚本会话/u);
+      button(tree, '取消').props.onClick();
+      tree = harness.renderer.render(harness.AppFrame, props);
+      assert.match(textOf(tree), /已取消，没有发送/u);
+    }
+    button(tree, '问一句').props.onClick();
+    tree = await settle(harness, props);
+    button(tree, '确认发送').props.onClick();
+    button(tree, '确认发送').props.onClick();
+    tree = await settle(harness, props);
+    assert.deepEqual(prepares.map((item) => item.action), ['revise', 'spoken', 'shorten', 'ask']);
+    assert.equal(submits.length, 1);
+    assert.deepEqual(Object.keys(submits[0]).sort(), [
+      'action', 'blockToken', 'override', 'preflightToken', 'projectToken'
+    ]);
+    assert.equal(submits[0].action, 'ask');
+    assert.equal(submits[0].override, false);
+    assert.match(textOf(tree), /已提交到 脚本会话/u);
+  });
+
+  await test('黄牌建议逐一诚实呈现 queued/unchanged/ready/stale/invalid/adopted/conflict', async () => {
+    const project = contentProject('a', '建议状态脚本', '写稿');
+    const block = scriptBlock('a', '建议状态原稿');
+    const active = {
+      proposalToken: 'proposal-video_fixture_01', title: '建议状态卡',
+      intentLabel: '改这段', before: '原来的表达', submitted: 'accepted',
+      target: '脚本会话', canReject: true
+    };
+    const cases = [
+      ['queued', { ...active, submitted: 'sending' }, /建议副本已排队/u, false, true, false],
+      ['unchanged', { ...active, reason: 'target-unchanged' }, /目标块还没有变化/u, false, true, false],
+      ['ready', { ...active, after: '新的表达', proposalRevisionToken:
+        `proposal-revision-${'a'.repeat(24)}`, canAdopt: true }, /建议已就绪/u, true, true, false],
+      ['stale', { ...active, reason: 'original-changed' }, /原稿已变化/u, false, true, false],
+      ['invalid', { ...active, reason: 'read-failed' }, /建议文件无效/u, false, true, false],
+      ['adopted', { title: '建议状态卡', intentLabel: '已采用，可撤销一次',
+        before: '原来的表达', after: '新的表达', revisionToken: `revision-${'b'.repeat(24)}`,
+        canUndo: true }, /可撤销一次/u, false, false, true],
+      ['conflict', { title: '建议状态卡', intentLabel: '已采用，可撤销一次',
+        before: '原来的表达', after: '新的表达', revisionToken: `revision-${'c'.repeat(24)}`,
+        reason: 'adopted-file-changed' }, /撤销不可用/u, false, false, false]
+    ];
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    for (const [status, fields, copy, adoptVisible, rejectVisible, undoVisible] of cases) {
+      const workspaceFiles = { async execute(operation, input) {
+        if (operation === 'catalog.read') return catalog([project]);
+        if (operation === 'document.read') return documentPage(project, [block]);
+        if (operation === 'proposal.read') return proposal(project, status, fields);
+        if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+          projectToken: input.projectToken, receipts: [] });
+        throw new Error(operation);
+      } };
+      const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+      const harness = loadBundle({ whaledockShellPreferences: pref,
+        whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+        creatorTab: 'script'
+      });
+      const props = uiProps(state, harness.integration, []);
+      let tree = harness.renderer.render(harness.AppFrame, props);
+      tree = await settle(harness, props);
+      tree = await settle(harness, props);
+      assert.match(textOf(tree), /鲸坞建议 · 黄牌，不会自动生效/u);
+      assert.match(textOf(tree), copy);
+      assert.equal(findAll(tree, (node) => node.type === 'button'
+        && textOf(node) === '采用这一块').length > 0, adoptVisible, status);
+      const rejectButtons = findAll(tree, (node) => node.type === 'button'
+        && textOf(node) === '退回建议');
+      assert.equal(rejectButtons.length > 0, rejectVisible, status);
+      if (rejectVisible) assert.equal(rejectButtons[0].props.disabled, false, `${status} 应允许退回`);
+      assert.equal(findAll(tree, (node) => node.type === 'button'
+        && textOf(node) === '撤销这一次采用').length > 0, undoVisible, status);
+    }
+  });
+
+  await test('建议原文或新稿截断时不可采用，但仍可真实退回', async () => {
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    for (const [hex, truncatedField] of [['d', 'beforeTruncated'], ['e', 'afterTruncated']]) {
+      const project = contentProject(hex, `${truncatedField} 建议`, '写稿');
+      const block = scriptBlock(hex, '截断门禁原稿');
+      let decisions = 0;
+      const workspaceFiles = { async execute(operation, input) {
+        if (operation === 'catalog.read') return catalog([project]);
+        if (operation === 'document.read') return documentPage(project, [block]);
+        if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+          projectToken: input.projectToken, receipts: [] });
+        if (operation === 'proposal.read') return proposal(project, 'ready', {
+          proposalToken: `proposal-video_truncated_${hex}`, title: '截断建议',
+          intentLabel: '改这段', before: '原来文本', after: '建议文本',
+          proposalRevisionToken: null,
+          canAdopt: false, canReject: true, submitted: 'accepted', target: '脚本会话',
+          [truncatedField]: true
+        });
+        if (operation === 'proposal.decide') {
+          decisions += 1;
+          assert.equal(input.decision, 'reject');
+          return fulfilled({ kind: 'decision', contentRef: project.contentRef,
+            projectToken: project.projectToken, decision: 'reject', changed: false,
+            revisionToken: null, message: '已退回截断建议。' });
+        }
+        throw new Error(operation);
+      } };
+      const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+      const harness = loadBundle({ whaledockShellPreferences: pref,
+        whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+        creatorTab: 'script'
+      });
+      const props = uiProps(state, harness.integration, []);
+      let tree = harness.renderer.render(harness.AppFrame, props);
+      tree = await settle(harness, props);
+      tree = await settle(harness, props);
+      const adoptButtons = findAll(tree, (node) => node.type === 'button'
+        && textOf(node) === '采用这一块');
+      assert.equal(adoptButtons.length, 0, `${truncatedField} 不得渲染采用入口`);
+      const reject = button(tree, '退回建议');
+      assert.equal(reject.props.disabled, false);
+      reject.props.onClick();
+      tree = await settle(harness, props);
+      assert.equal(decisions, 1);
+      assert.match(textOf(tree), /已退回截断建议/u);
+    }
+  });
+
+  await test('块提交 error/unknown 后建议轮询仍继续并保留诚实反馈', async () => {
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    for (const [hex, submitState, feedback] of [
+      ['d', 'error', /目标会话暂不可用/u],
+      ['e', 'unknown', /提交结果未知/u]
+    ]) {
+      const project = contentProject(hex, `${submitState} 提交脚本`, '写稿');
+      const block = scriptBlock(hex, '块动作后仍需轮询');
+      let proposalReads = 0;
+      const workspaceFiles = { async execute(operation, input) {
+        if (operation === 'catalog.read') return catalog([project]);
+        if (operation === 'document.read') return documentPage(project, [block]);
+        if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+          projectToken: input.projectToken, receipts: [] });
+        if (operation === 'proposal.read') {
+          proposalReads += 1;
+          const fields = {
+            proposalToken: `proposal-video_submit_${hex}`, title: '提交后建议',
+            intentLabel: '问一句', before: '原稿未改', canReject: true,
+            submitted: submitState, target: '脚本会话'
+          };
+          return proposal(project, proposalReads === 1 ? 'queued' : 'unchanged', {
+            ...fields, ...(proposalReads === 1 ? {} : { reason: 'target-unchanged' })
+          });
+        }
+        if (operation === 'block.action.prepare') return fulfilled({
+          kind: 'preflight', contentRef: project.contentRef, projectToken: project.projectToken,
+          blockToken: block.blockToken, action: input.action, state: 'ready',
+          preflightToken: `preflight-${submitState}-01`, targetLabel: '脚本会话',
+          workspaceLabel: 'alpha', workspaceMatch: 'match', targetRunning: true,
+          eventTracking: 'ready', expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          message: null
+        });
+        if (operation === 'block.action.submit') return fulfilled(submitState === 'error' ? {
+          kind: 'submission', contentRef: project.contentRef, projectToken: project.projectToken,
+          blockToken: block.blockToken, action: input.action, state: 'error',
+          reason: null, target: null, receiptId: null, message: '目标会话暂不可用。'
+        } : {
+          kind: 'submission', contentRef: project.contentRef, projectToken: project.projectToken,
+          blockToken: block.blockToken, action: input.action, state: 'unknown',
+          reason: 'outcome-unknown', target: '脚本会话', receiptId: null, message: null
+        });
+        throw new Error(operation);
+      } };
+      const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+      const harness = loadBundle({ whaledockShellPreferences: pref,
+        whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+        creatorTab: 'script'
+      });
+      const props = uiProps(state, harness.integration, []);
+      let tree = harness.renderer.render(harness.AppFrame, props);
+      tree = await settle(harness, props);
+      tree = await settle(harness, props);
+      button(tree, '问一句').props.onClick();
+      tree = await settle(harness, props);
+      button(tree, '确认发送').props.onClick();
+      tree = await settle(harness, props);
+      assert.match(textOf(tree), feedback);
+      const beforePoll = proposalReads;
+      tree = await fireTimers(harness, 1000, props);
+      assert.equal(proposalReads, beforePoll + 1, `${submitState} 后必须继续 proposal.read`);
+      assert.match(textOf(tree), /目标块还没有变化/u);
+      assert.match(textOf(tree), feedback);
+    }
+  });
+
+  await test('adopt outcome-unknown 后仍轮询到 adopted 并显示一次撤销', async () => {
+    const project = contentProject('f', '采用结果未知脚本', '写稿');
+    const adoptedIdentity = { ...project, projectToken: `project-${'1'.repeat(24)}` };
+    const block = scriptBlock('f', '采用结果未知原稿');
+    const proposalToken = 'proposal-video_outcome_unknown';
+    const proposalRevisionToken = `proposal-revision-${'2'.repeat(24)}`;
+    const revisionToken = `revision-${'3'.repeat(24)}`;
+    let status = 'ready';
+    let proposalReads = 0;
+    const workspaceFiles = { async execute(operation, input) {
+      if (operation === 'catalog.read') return catalog([project]);
+      if (operation === 'document.read') return documentPage(project, [block]);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'proposal.read') {
+        proposalReads += 1;
+        return status === 'ready' ? proposal(project, 'ready', {
+          proposalToken, proposalRevisionToken, title: '结果未知建议',
+          intentLabel: '改这段', before: '原来文本', after: '建议文本',
+          canAdopt: true, canReject: true, submitted: 'accepted', target: '脚本会话'
+        }) : proposal(adoptedIdentity, 'adopted', {
+          revisionToken, title: '结果未知建议', intentLabel: '已采用，可撤销一次',
+          before: '原来文本', after: '建议文本', canUndo: true
+        });
+      }
+      if (operation === 'proposal.decide') {
+        status = 'adopted';
+        return { requestToken: 'request-outcome-unknown', state: 'rejected',
+          code: 'outcome-unknown', result: null };
+      }
+      throw new Error(operation);
+    } };
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+      creatorTab: 'script'
+    });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    button(tree, '采用这一块').props.onClick();
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /操作结果未知/u);
+    const beforePoll = proposalReads;
+    tree = await fireTimers(harness, 4000, props);
+    assert(proposalReads > beforePoll, 'outcome-unknown 后必须继续 proposal.read');
+    assert.match(textOf(tree), /这一块已采用/u);
+    assert.equal(button(tree, '撤销这一次采用').props.disabled, false);
+  });
+
+  await test('queued 黄牌可退回且 reject 精确省略 proposalRevisionToken', async () => {
+    const project = contentProject('b', '退回脚本', '写稿');
+    const block = scriptBlock('b', '等待中的建议原稿');
+    let status = 'queued';
+    const decisions = [];
+    const workspaceFiles = { async execute(operation, input) {
+      if (operation === 'catalog.read') return catalog([project]);
+      if (operation === 'document.read') return documentPage(project, [block]);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'proposal.read') return status === null ? proposal(project) : proposal(project,
+        status, { proposalToken: 'proposal-video_reject_01', title: '待退回建议',
+          intentLabel: '压时长', before: '原稿未改', canReject: true,
+          submitted: 'sending', target: '脚本会话' });
+      if (operation === 'proposal.decide') {
+        decisions.push({ ...input });
+        status = null;
+        return fulfilled({ kind: 'decision', contentRef: project.contentRef,
+          projectToken: project.projectToken, decision: 'reject', changed: false,
+          revisionToken: null, message: '已退回建议，原稿从未改动。' });
+      }
+      throw new Error(operation);
+    } };
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+      creatorTab: 'script'
+    });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    button(tree, '退回建议').props.onClick();
+    button(tree, '退回建议').props.onClick();
+    tree = await settle(harness, props);
+    assert.equal(decisions.length, 1);
+    assert.deepEqual(Object.keys(decisions[0]).sort(), [
+      'contentRef', 'decision', 'proposalToken'
+    ]);
+    assert.equal(Object.prototype.hasOwnProperty.call(decisions[0], 'proposalRevisionToken'), false);
+    assert.match(textOf(tree), /原稿从未改动/u);
+  });
+
+  await test('ready 采用携带精确 revision、更新 projectToken，且 adopted 只撤销一次', async () => {
+    let project = contentProject('c', '采用脚本', '写稿');
+    const block = scriptBlock('c', '采用前原稿');
+    const proposalToken = 'proposal-video_adopt_01';
+    const proposalRevisionToken = `proposal-revision-${'d'.repeat(24)}`;
+    const undoToken = `revision-${'e'.repeat(24)}`;
+    const adoptedProjectToken = `project-${'d'.repeat(24)}`;
+    const undoneProjectToken = `project-${'e'.repeat(24)}`;
+    let proposalStatus = 'ready';
+    let decideCalls = 0;
+    let undoCalls = 0;
+    let prepareCalls = 0;
+    const decideInputs = [];
+    const undoInputs = [];
+    const workspaceFiles = { async execute(operation, input) {
+      if (operation === 'catalog.read') return catalog([project]);
+      if (operation === 'document.read') return documentPage(project, [block]);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'proposal.read') {
+        if (proposalStatus === null) return proposal(project);
+        if (proposalStatus === 'ready') return proposal(project, 'ready', {
+          proposalToken, proposalRevisionToken, title: '采用建议', intentLabel: '更口语',
+          before: '采用前原稿', after: '采用后建议', canAdopt: true, canReject: true,
+          submitted: 'accepted', target: '脚本会话'
+        });
+        return proposal(project, 'adopted', {
+          revisionToken: undoToken, title: '采用建议', intentLabel: '已采用，可撤销一次',
+          before: '采用前原稿', after: '采用后建议', canUndo: true
+        });
+      }
+      if (operation === 'proposal.decide') {
+        decideCalls += 1;
+        decideInputs.push({ ...input });
+        proposalStatus = 'adopted';
+        project = { ...project, projectToken: adoptedProjectToken };
+        return fulfilled({ kind: 'decision', contentRef: project.contentRef,
+          projectToken: adoptedProjectToken, decision: 'adopt', changed: true,
+          revisionToken: undoToken, message: '已采用这一块；仍可撤销一次。' });
+      }
+      if (operation === 'block.action.prepare') {
+        prepareCalls += 1;
+        return fulfilled({ kind: 'preflight', contentRef: project.contentRef,
+          projectToken: project.projectToken, blockToken: block.blockToken, action: input.action,
+          state: 'ready', preflightToken: 'preflight-adopted-check-01',
+          targetLabel: '脚本会话', workspaceLabel: 'alpha', workspaceMatch: 'match',
+          targetRunning: false, eventTracking: 'ready',
+          expiresAt: new Date(Date.now() + 60_000).toISOString(), message: null });
+      }
+      if (operation === 'proposal.undo') {
+        undoCalls += 1;
+        undoInputs.push({ ...input });
+        proposalStatus = null;
+        project = { ...project, projectToken: undoneProjectToken };
+        return fulfilled({ kind: 'undo', contentRef: project.contentRef,
+          projectToken: undoneProjectToken, changed: true,
+          message: '已撤销上一次块级采用。' });
+      }
+      throw new Error(operation);
+    } };
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+      creatorTab: 'script'
+    });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /原来采用前原稿/u);
+    assert.match(textOf(tree), /鲸坞建议采用后建议/u);
+    button(tree, '采用这一块').props.onClick();
+    button(tree, '采用这一块').props.onClick();
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.equal(decideCalls, 1);
+    assert.deepEqual(decideInputs, [{ contentRef: project.contentRef, proposalToken,
+      decision: 'adopt', proposalRevisionToken }]);
+    assert.match(textOf(tree), /撤销这一次采用/u);
+    assert.equal(findAll(tree, (node) => node.props?.className === 'wd10-project'
+      && node.props['aria-current'] === true).length, 1,
+    '采用后必须按稳定 contentRef 保持选中');
+
+    button(tree, '问一句').props.onClick();
+    tree = await settle(harness, props);
+    assert.equal(prepareCalls, 1);
+    button(tree, '取消').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.match(textOf(tree), /撤销这一次采用/u,
+      '只有真实新 proposal 才能清掉旧 undo，预检取消不能清');
+
+    button(tree, '撤销这一次采用').props.onClick();
+    button(tree, '撤销这一次采用').props.onClick();
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.equal(undoCalls, 1);
+    assert.deepEqual(undoInputs, [{ contentRef: project.contentRef, revisionToken: undoToken }]);
+    assert.doesNotMatch(textOf(tree), /撤销这一次采用/u);
   });
 
   await test('动作先预检再明确确认，双击只提交一次并刷新 catalog', async () => {

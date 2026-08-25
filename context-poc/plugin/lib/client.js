@@ -20,6 +20,8 @@ window.__ModuleLoader__.load({
     const WORKSPACE_FILE_OPERATIONS = new Set([
       'catalog.read', 'overview.read', 'document.read', 'topic.choose',
       'project.action.prepare', 'project.action.submit',
+      'block.action.prepare', 'block.action.submit',
+      'proposal.read', 'proposal.decide', 'proposal.undo',
       'receipts.read', 'receipts.ack', 'receipts.open'
     ]);
     const WORKSPACE_FILE_STATES = new Set([
@@ -42,6 +44,14 @@ window.__ModuleLoader__.load({
     const MAX_WORKSPACE_FILE_RESULT_BYTES = 6 * 1024;
     const PROJECT_TOKEN_RE = /^project-[a-f0-9]{24}$/;
     const CONTENT_REF_RE = /^content-[a-f0-9]{24}$/;
+    const BLOCK_TOKEN_RE = /^block-[a-f0-9]{24}$/;
+    const PROPOSAL_TOKEN_RE = /^proposal-[A-Za-z0-9_-]{1,80}$/;
+    const PROPOSAL_REVISION_TOKEN_RE = /^proposal-revision-[a-f0-9]{24}$/;
+    const REVISION_TOKEN_RE = /^revision-[a-f0-9]{24}$/;
+    const BLOCK_ACTIONS = Object.freeze([
+      ['revise', '改这段'], ['spoken', '更口语'],
+      ['shorten', '压时长'], ['ask', '问一句']
+    ]);
     const OVERVIEW_STAGES = new Set([
       'inspiration', 'topic', 'script', 'shoot', 'edit',
       'publish', 'data', 'review', 'asset'
@@ -52,6 +62,7 @@ window.__ModuleLoader__.load({
     const inject = ['connection', 'sessions'];
 
     const SHELL_CSS = `.wd10-left{background:var(--dsw-specific-sidebar-fill);border-right:1px solid var(--dsw-alias-border-l1);min-width:0;height:100%;display:flex;flex-direction:column;overflow:hidden}.wd10-switch{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:12px;padding:4px;border-radius:10px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1)}.wd10-switch button{border:0;border-radius:7px;padding:7px 10px;color:var(--dsw-alias-fg-secondary);background:transparent;font:inherit;font-size:13px;cursor:pointer}.wd10-switch button[aria-selected=true]{background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);box-shadow:0 1px 3px rgba(0,0,0,.08)}.wd10-library{min-height:0;overflow:auto;padding:0 10px 18px}.wd10-libraryHead{padding:8px 6px 10px}.wd10-eyebrow{font-size:11px;letter-spacing:.08em;color:var(--dsw-alias-fg-tertiary);text-transform:uppercase}.wd10-libraryHead h2{font-size:17px;line-height:1.35;margin:4px 0;color:var(--dsw-alias-fg-primary)}.wd10-libraryHead p{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-refresh,.wd10-loadMore{margin-top:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;padding:5px 8px;background:transparent;color:var(--dsw-alias-fg-secondary);font:inherit;font-size:11px;cursor:pointer}.wd10-refresh:disabled,.wd10-loadMore:disabled{opacity:.55;cursor:default}.wd10-loadMore{width:100%;padding:8px}.wd10-workspaceList{margin:0 0 10px;padding:8px 6px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}.wd10-workspaceChoice{width:100%;text-align:left;border:1px solid transparent;border-radius:8px;padding:7px 8px;margin-top:4px;background:transparent;color:inherit;cursor:pointer}.wd10-workspaceChoice:hover,.wd10-workspaceChoice[aria-current=true]{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l1)}.wd10-projectPath{display:block;margin-top:3px;font-size:10px;color:var(--dsw-alias-fg-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wd10-project{width:100%;text-align:left;border:1px solid transparent;border-radius:10px;padding:10px;margin:2px 0 6px;background:transparent;color:inherit;cursor:pointer}.wd10-project:hover{background:var(--dsw-alias-bg-layer-1)}.wd10-project[aria-current=true]{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l2)}.wd10-projectTitle{display:block;font-size:13px;font-weight:600;color:var(--dsw-alias-fg-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wd10-projectMeta{display:flex;align-items:center;gap:7px;margin-top:5px;font-size:11px;color:var(--dsw-alias-fg-tertiary)}.wd10-stageBadge{border-radius:999px;padding:1px 7px;background:var(--dsw-alias-state-business-tertiary);color:var(--dsw-alias-state-business-primary)}.wd10-detail{min-width:0;height:100%;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base);border-right:1px solid var(--dsw-alias-border-l2);overflow:hidden}.wd10-detailHead{padding:22px 24px 12px}.wd10-detailHead h1{font-size:22px;line-height:1.25;margin:5px 0 7px;color:var(--dsw-alias-fg-primary)}.wd10-detailHead p{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-projectActions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.wd10-projectActions button,.wd10-receipt button,.wd10-choice,.wd10-nextAction{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 9px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:11px;cursor:pointer}.wd10-projectActions button:disabled,.wd10-receipt button:disabled,.wd10-choice:disabled,.wd10-nextAction:disabled{opacity:.55;cursor:default}.wd10-tabs{display:flex;gap:3px;padding:0 20px;border-bottom:1px solid var(--dsw-alias-border-l1);overflow:auto}.wd10-tabs button{border:0;border-bottom:2px solid transparent;padding:10px 8px 9px;background:transparent;color:var(--dsw-alias-fg-secondary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}.wd10-tabs button[aria-selected=true]{border-bottom-color:var(--dsw-alias-fg-primary);color:var(--dsw-alias-fg-primary)}.wd10-receipts{flex:none;max-height:188px;overflow:auto;padding:10px 18px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}.wd10-receiptTitle{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-receipt{margin-top:7px;padding:8px 10px;border-radius:9px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-receiptHead,.wd10-receiptFoot{display:flex;align-items:center;justify-content:space-between;gap:8px}.wd10-receipt strong{color:var(--dsw-alias-fg-primary)}.wd10-receipt p{margin:5px 0 0;line-height:1.45}.wd10-preflight{border-color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-state-warn-tertiary)}.wd10-pulse{color:var(--dsw-alias-state-business-primary);font-weight:600}.wd10-panel{min-height:0;overflow:auto;padding:20px 24px 28px}.wd10-card{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:16px;background:var(--dsw-alias-bg-layer-1);margin-bottom:12px}.wd10-card h3{font-size:14px;margin:0 0 7px;color:var(--dsw-alias-fg-primary)}.wd10-card p{font-size:12px;line-height:1.65;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-overviewMeta{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}.wd10-overviewMeta div{border:1px solid var(--dsw-alias-border-l1);border-radius:9px;padding:9px;background:var(--dsw-alias-bg-base)}.wd10-overviewMeta span,.wd10-currentChoice span{display:block;font-size:10px;color:var(--dsw-alias-fg-tertiary);margin-bottom:3px}.wd10-overviewMeta strong,.wd10-currentChoice strong{font-size:12px;color:var(--dsw-alias-fg-primary)}.wd10-currentChoices{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}.wd10-currentChoice{border-left:3px solid var(--dsw-alias-state-business-primary);padding:7px 9px;background:var(--dsw-alias-bg-base);border-radius:0 8px 8px 0}.wd10-choiceGroup{margin-top:14px}.wd10-choiceGroup h4{font-size:11px;margin:0 0 7px;color:var(--dsw-alias-fg-secondary)}.wd10-choiceList{display:flex;flex-wrap:wrap;gap:6px}.wd10-choice[aria-pressed=true]{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-tertiary);font-weight:600}.wd10-incomplete{color:var(--dsw-alias-state-warn-primary)!important;margin-top:10px!important}.wd10-next{margin-top:16px;padding-top:14px;border-top:1px solid var(--dsw-alias-border-l1)}.wd10-nextAction{margin-top:8px;border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-bg-base);font-weight:600}.wd10-unfinished strong{display:block;margin:8px 0;color:var(--dsw-alias-fg-primary)}.wd10-feedback{font-size:12px;line-height:1.5;margin:8px 0 0;color:var(--dsw-alias-fg-secondary)}.wd10-chat{min-width:0;height:100%;display:flex;overflow:hidden}.wd10-chatMain{min-width:0;flex:1;display:flex;flex-direction:column;overflow:hidden}.wd10-empty{padding:24px;color:var(--dsw-alias-fg-secondary);font-size:13px;line-height:1.6}@media(max-width:1120px){.wd10-detailHead{padding:18px 18px 10px}.wd10-panel{padding:16px 18px}.wd10-detailHead h1{font-size:19px}.wd10-tabs{padding:0 14px}.wd10-receipts{padding:9px 14px}.wd10-overviewMeta,.wd10-currentChoices{grid-template-columns:1fr}}.wd10-leftViews,.wd10-leftView,.wd10-nativeSidebar{min-height:0;flex:1;overflow:hidden}.wd10-leftView[hidden],.wd10-nativeSidebar[hidden]{display:none}.wd10-subSwitch{margin-top:0}.wd10-banner,.wd10-hint{display:flex;align-items:center;gap:8px;margin:10px 18px 0;padding:9px 10px;border:1px solid var(--dsw-alias-state-warn-primary);border-radius:9px;color:var(--dsw-alias-fg-primary);background:var(--dsw-alias-state-warn-tertiary);font-size:12px;line-height:1.45}.wd10-banner span,.wd10-hint span{min-width:0;flex:1}.wd10-banner button,.wd10-hint button{flex:none;border:1px solid currentColor;border-radius:7px;padding:4px 8px;background:transparent;color:inherit;cursor:pointer}.wd10-banner button:disabled{opacity:.55;cursor:default}.wd10-prefStatus{margin:0 14px 8px;color:var(--dsw-alias-state-warn-primary);font-size:11px}.wd10-contentDetails{transition:width var(--ds-transition-duration-slow) var(--ds-ease-in-out);flex-shrink:0}`;
+    const SCRIPT_CSS = `.wd10-script{display:flex;flex-direction:column;gap:10px}.wd10-scriptHead,.wd10-blockMeta{display:flex;align-items:center;justify-content:space-between;gap:8px}.wd10-scriptHead h3{margin:0;color:var(--dsw-alias-fg-primary);font-size:14px}.wd10-scriptHead span,.wd10-blockMeta span{font-size:10px;color:var(--dsw-alias-fg-tertiary)}.wd10-block{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:13px;background:var(--dsw-alias-bg-layer-1)}.wd10-blockMeta strong{font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-block pre,.wd10-compare pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:9px 0 0;font:inherit;font-size:12px;line-height:1.6;color:var(--dsw-alias-fg-primary)}.wd10-blockActions,.wd10-proposalActions{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}.wd10-blockActions button,.wd10-proposalActions button,.wd10-undo{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 9px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:11px;cursor:pointer}.wd10-blockActions button:disabled,.wd10-proposalActions button:disabled,.wd10-undo:disabled{opacity:.5;cursor:default}.wd10-proposal{border-color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-state-warn-tertiary)}.wd10-compare{margin-top:10px;border-radius:9px;padding:10px;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1)}.wd10-compare h4{margin:0;font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-proposalActions button:first-child,.wd10-undo{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);font-weight:600}.wd10-undo{margin-top:11px}`;
     const CREATOR_TABS = Object.freeze([
       ['overview', '概览'], ['script', '脚本'], ['shoot', '拍摄'],
       ['publish', '发布'], ['review', '复盘']
@@ -66,7 +77,7 @@ window.__ModuleLoader__.load({
       const tag = document.createElement('style');
       tag.dataset.plugin = '@whaledock/context-bridge-poc';
       tag.dataset.pluginCss = tagId;
-      tag.textContent = SHELL_CSS;
+      tag.textContent = `${SHELL_CSS}${SCRIPT_CSS}`;
       document.head.appendChild(tag);
       return () => { tag.remove(); };
     }
@@ -287,6 +298,221 @@ window.__ModuleLoader__.load({
         projectToken: value.projectToken, field: value.field, value: value.value,
         updated, message
       });
+    }
+
+    function documentPageResult(snapshot, expectedProjectToken, expectedCursor) {
+      const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+      if (!exact(value, [
+        'kind', 'projectToken', 'title', 'stage', 'stageLabel', 'blockCount',
+        'cursor', 'nextCursor', 'truncated', 'blocks'
+      ]) || value.kind !== 'document' || value.projectToken !== expectedProjectToken
+          || !PROJECT_TOKEN_RE.test(String(value.projectToken || ''))
+          || !(value.stage === null || OVERVIEW_STAGES.has(value.stage))
+          || !Number.isSafeInteger(value.blockCount) || value.blockCount < 0
+          || value.blockCount > 4096
+          || !Number.isSafeInteger(value.cursor) || value.cursor !== expectedCursor
+          || !(value.nextCursor === null || (Number.isSafeInteger(value.nextCursor)
+            && value.nextCursor > value.cursor && value.nextCursor <= value.blockCount))
+          || typeof value.truncated !== 'boolean'
+          || !Array.isArray(value.blocks) || value.blocks.length > 2
+          || value.cursor + value.blocks.length > value.blockCount) return null;
+      const title = strictOverviewText(value.title, 120, false);
+      const stageLabel = strictOverviewText(value.stageLabel, 24, false);
+      if (title === undefined || stageLabel === undefined) return null;
+      const blocks = value.blocks.map((block) => {
+        if (!exact(block, [
+          'blockToken', 'kind', 'text', 'textTruncated', 'startLine', 'endLine'
+        ]) || !BLOCK_TOKEN_RE.test(String(block.blockToken || ''))
+            || typeof block.kind !== 'string' || !/^[a-z][a-z-]{0,31}$/.test(block.kind)
+            || typeof block.text !== 'string' || utf8Bytes(block.text) > 2048
+            || WORKSPACE_TEXT_CONTROL_RE.test(block.text)
+            || typeof block.textTruncated !== 'boolean'
+            || !Number.isSafeInteger(block.startLine) || block.startLine < 1
+            || !Number.isSafeInteger(block.endLine) || block.endLine < block.startLine) return null;
+        return Object.freeze({ ...block });
+      });
+      if (blocks.some((block) => block === null)
+          || new Set(blocks.map((block) => block.blockToken)).size !== blocks.length
+          || (value.nextCursor === null
+            ? value.cursor + blocks.length !== value.blockCount
+            : value.nextCursor !== value.cursor + blocks.length)) return null;
+      return Object.freeze({
+        kind: 'document', projectToken: value.projectToken, title,
+        stage: value.stage, stageLabel, blockCount: value.blockCount,
+        cursor: value.cursor, nextCursor: value.nextCursor,
+        truncated: value.truncated, blocks: Object.freeze(blocks)
+      });
+    }
+
+    function sameDocumentHeader(left, right) {
+      return left && right && [
+        'projectToken', 'title', 'stage', 'stageLabel', 'blockCount'
+      ].every((key) => Object.is(left[key], right[key]));
+    }
+
+    function strictProposalBlock(value, nullable = true) {
+      if (value === null && nullable) return null;
+      if (typeof value !== 'string' || utf8Bytes(value) > 1600
+          || WORKSPACE_TEXT_CONTROL_RE.test(value)) return undefined;
+      return value;
+    }
+
+    function proposalResult(snapshot, expectedContentRef) {
+      const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+      const keys = [
+        'kind', 'contentRef', 'projectToken', 'status', 'reason', 'proposalToken',
+        'proposalRevisionToken', 'revisionToken', 'title', 'intentLabel',
+        'before', 'beforeTruncated', 'after', 'afterTruncated', 'canAdopt',
+        'canReject', 'canUndo', 'submitted', 'target'
+      ];
+      if (!exact(value, keys)
+          || value.kind !== 'proposal' || value.contentRef !== expectedContentRef
+          || !CONTENT_REF_RE.test(String(value.contentRef || ''))
+          || !PROJECT_TOKEN_RE.test(String(value.projectToken || ''))
+          || !(value.status === null || [
+            'queued', 'unchanged', 'ready', 'stale', 'invalid', 'adopted', 'conflict'
+          ].includes(value.status))
+          || !(value.reason === null || [
+            'target-unchanged', 'original-changed', 'outside-target-changed',
+            'proposal-too-large', 'read-failed', 'adopted-file-changed'
+          ].includes(value.reason))
+          || typeof value.beforeTruncated !== 'boolean'
+          || typeof value.afterTruncated !== 'boolean'
+          || typeof value.canAdopt !== 'boolean' || typeof value.canReject !== 'boolean'
+          || typeof value.canUndo !== 'boolean'
+          || !(value.submitted === null || [
+            'sending', 'accepted', 'rejected', 'unknown', 'error'
+          ].includes(value.submitted))) return null;
+      const title = strictOverviewText(value.title, 120);
+      const intentLabel = strictOverviewText(value.intentLabel, 64);
+      const before = strictProposalBlock(value.before);
+      const after = strictProposalBlock(value.after);
+      const target = strictOverviewText(value.target, 120);
+      const proposalToken = value.proposalToken;
+      const proposalRevisionToken = value.proposalRevisionToken;
+      const revisionToken = value.revisionToken;
+      if ([title, intentLabel, before, after, target].includes(undefined)
+          || !(proposalToken === null || PROPOSAL_TOKEN_RE.test(String(proposalToken)))
+          || !(proposalRevisionToken === null
+            || PROPOSAL_REVISION_TOKEN_RE.test(String(proposalRevisionToken)))
+          || !(revisionToken === null || REVISION_TOKEN_RE.test(String(revisionToken)))) return null;
+      if (value.status === null && [proposalToken, proposalRevisionToken, revisionToken,
+        title, intentLabel, before, after, value.reason, value.submitted, target]
+        .some((item) => item !== null)) return null;
+      if (value.status === null && (value.beforeTruncated || value.afterTruncated
+          || value.canAdopt || value.canReject || value.canUndo)) return null;
+      if (['adopted', 'conflict'].includes(value.status)) {
+        if (proposalToken !== null || proposalRevisionToken !== null || !revisionToken
+            || value.canAdopt || value.canReject
+            || value.canUndo !== (value.status === 'adopted')) return null;
+      } else if (value.status !== null) {
+        if (!proposalToken || revisionToken !== null || value.canUndo
+            || value.canReject !== true) return null;
+        if (value.status === 'ready') {
+          const comparisonTruncated = value.beforeTruncated || value.afterTruncated;
+          if (comparisonTruncated
+            ? (value.canAdopt || proposalRevisionToken !== null)
+            : (!value.canAdopt || !proposalRevisionToken)) return null;
+        } else if (value.canAdopt || proposalRevisionToken !== null) return null;
+      }
+      if ((before === null && value.beforeTruncated)
+          || (after === null && value.afterTruncated)) return null;
+      return Object.freeze({
+        kind: 'proposal', contentRef: value.contentRef, projectToken: value.projectToken,
+        status: value.status, reason: value.reason, proposalToken,
+        proposalRevisionToken, revisionToken, title, intentLabel, before,
+        beforeTruncated: value.beforeTruncated, after,
+        afterTruncated: value.afterTruncated, canAdopt: value.canAdopt,
+        canReject: value.canReject, canUndo: value.canUndo,
+        submitted: value.submitted, target
+      });
+    }
+
+    function proposalDecisionResult(snapshot, expected) {
+      const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+      if (!exact(value, [
+        'kind', 'contentRef', 'projectToken', 'decision', 'changed',
+        'revisionToken', 'message'
+      ]) || value.kind !== 'decision' || value.decision !== expected.decision
+          || value.contentRef !== expected.contentRef
+          || !CONTENT_REF_RE.test(String(value.contentRef || ''))
+          || !PROJECT_TOKEN_RE.test(String(value.projectToken || ''))
+          || typeof value.changed !== 'boolean'
+          || !(value.revisionToken === null
+            || REVISION_TOKEN_RE.test(String(value.revisionToken)))) return null;
+      const message = strictOverviewText(value.message, 160, false);
+      if (message === undefined) return null;
+      if (expected.decision === 'adopt' && (value.changed !== true
+          || !value.revisionToken || value.projectToken === expected.projectToken)) return null;
+      if (expected.decision === 'reject' && (value.changed !== false
+          || value.revisionToken !== null)) return null;
+      return Object.freeze({ ...value, message });
+    }
+
+    function proposalUndoResult(snapshot, expected) {
+      const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+      if (!exact(value, [
+        'kind', 'contentRef', 'projectToken', 'changed', 'message'
+      ]) || value.kind !== 'undo' || value.changed !== true
+          || value.contentRef !== expected.contentRef
+          || !CONTENT_REF_RE.test(String(value.contentRef || ''))
+          || !PROJECT_TOKEN_RE.test(String(value.projectToken || ''))
+          || value.projectToken === expected.projectToken) return null;
+      const message = strictOverviewText(value.message, 160, false);
+      return message === undefined ? null : Object.freeze({ ...value, message });
+    }
+
+    function blockPreflightResult(snapshot, expected) {
+      const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+      if (!exact(value, [
+        'kind', 'contentRef', 'projectToken', 'blockToken', 'action', 'state',
+        'preflightToken', 'targetLabel', 'workspaceLabel', 'workspaceMatch',
+        'targetRunning', 'eventTracking', 'expiresAt', 'message'
+      ]) || value.kind !== 'preflight' || value.contentRef !== expected.contentRef
+          || value.projectToken !== expected.projectToken
+          || value.blockToken !== expected.blockToken || value.action !== expected.action
+          || !['ready', 'error'].includes(value.state)
+          || !(value.preflightToken === null
+            || OPAQUE_VALUE_RE.test(String(value.preflightToken)))
+          || !(value.workspaceMatch === null
+            || ['match', 'mismatch', 'unknown'].includes(value.workspaceMatch))
+          || !(value.targetRunning === null || typeof value.targetRunning === 'boolean')
+          || !(value.eventTracking === null
+            || ['ready', 'unavailable'].includes(value.eventTracking))) return null;
+      const targetLabel = strictOverviewText(value.targetLabel, 120);
+      const workspaceLabel = strictOverviewText(value.workspaceLabel, 120);
+      const expiresAt = strictOverviewText(value.expiresAt, 64);
+      const message = strictOverviewText(value.message, 160);
+      if ([targetLabel, workspaceLabel, expiresAt, message].includes(undefined)) return null;
+      if (value.state === 'ready') {
+        const expiresMs = Date.parse(expiresAt);
+        if (!value.preflightToken || !targetLabel || !workspaceLabel || !value.workspaceMatch
+            || value.targetRunning === null || !value.eventTracking
+            || !Number.isFinite(expiresMs) || message !== null) return null;
+      } else if (message === null) return null;
+      return Object.freeze({ ...value, targetLabel, workspaceLabel, expiresAt, message });
+    }
+
+    function blockSubmissionResult(snapshot, expected) {
+      const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+      if (!exact(value, [
+        'kind', 'contentRef', 'projectToken', 'blockToken', 'action', 'state',
+        'reason', 'target', 'receiptId', 'message'
+      ]) || value.kind !== 'submission' || value.contentRef !== expected.contentRef
+          || value.projectToken !== expected.projectToken
+          || value.blockToken !== expected.blockToken || value.action !== expected.action
+          || !['accepted', 'rejected', 'unknown', 'error'].includes(value.state)
+          || !(value.receiptId === null || OPAQUE_VALUE_RE.test(String(value.receiptId)))) return null;
+      const reason = strictOverviewText(value.reason, 80);
+      const target = strictOverviewText(value.target, 120);
+      const message = strictOverviewText(value.message, 160);
+      if ([reason, target, message].includes(undefined)) return null;
+      if (value.state === 'error') {
+        if (reason !== null || target !== null || value.receiptId !== null
+            || message === null) return null;
+      } else if (!reason || !/^[a-z][a-z0-9-]{0,63}$/.test(reason)
+          || !target || message !== null) return null;
+      return Object.freeze({ ...value, reason, target, message });
     }
 
     function receiptView(value) {
@@ -750,12 +976,349 @@ window.__ModuleLoader__.load({
       });
     }
 
+    function proposalStatusCopy(proposal) {
+      if (!proposal || proposal.status === null) return '';
+      if (proposal.status === 'queued') return '建议副本已排队，正在等待任务写入真实文件。';
+      if (proposal.status === 'unchanged') return '建议文件已回读，但目标块还没有变化。';
+      if (proposal.status === 'ready') return '建议已就绪；采用只会替换这一块。';
+      if (proposal.status === 'stale') return '原稿已变化，这张建议不能采用。';
+      if (proposal.status === 'invalid') return '建议文件无效，原稿没有变化。';
+      if (proposal.status === 'adopted') return '这一块已采用；在原稿再次变化前可撤销一次。';
+      return '采用后的原稿已变化，这次撤销不可用。';
+    }
+
+    function ScriptPanel({ project, workspaceFiles, actionPending, onBlockAction,
+      proposalRefreshKey, onProjectMutation }) {
+      const [documentState, setDocumentState] = react.useState({ status: 'idle', document: null });
+      const [proposalState, setProposalState] = react.useState({ status: 'idle', proposal: null });
+      const [proposalFeedback, setProposalFeedback] = react.useState('');
+      const [proposalPending, setProposalPending] = react.useState(false);
+      const documentAttempt = react.useRef(0);
+      const proposalAttempt = react.useRef(0);
+      const proposalActionAttempt = react.useRef(0);
+      const proposalActionAbort = react.useRef(null);
+      const proposalPendingRef = react.useRef(false);
+
+      react.useEffect(() => {
+        const attempt = ++documentAttempt.current;
+        const controller = new AbortController();
+        setDocumentState({ status: project ? 'loading' : 'idle', document: null });
+        if (!project || !workspaceFiles || typeof workspaceFiles.execute !== 'function') {
+          if (project) setDocumentState({ status: 'error', document: null });
+          return () => controller.abort();
+        }
+        const read = async () => {
+          let cursor = 0;
+          let first = null;
+          let last = null;
+          let complete = false;
+          let failed = false;
+          const blocks = [];
+          const seen = new Set();
+          for (let pageIndex = 0; pageIndex < 2048; pageIndex += 1) {
+            let page = null;
+            try {
+              page = documentPageResult(await workspaceFiles.execute('document.read', {
+                projectToken: project.projectToken, cursor, limit: 2
+              }, controller.signal), project.projectToken, cursor);
+            } catch (_error) { page = null; }
+            if (controller.signal.aborted || documentAttempt.current !== attempt) return;
+            if (!page || (first && !sameDocumentHeader(first, page))) {
+              failed = true;
+              break;
+            }
+            first ||= page;
+            last = page;
+            let duplicate = false;
+            for (const block of page.blocks) {
+              if (seen.has(block.blockToken)) { duplicate = true; break; }
+              seen.add(block.blockToken);
+              blocks.push(block);
+            }
+            if (duplicate) { failed = true; break; }
+            if (page.nextCursor === null) { complete = true; break; }
+            cursor = page.nextCursor;
+          }
+          if (controller.signal.aborted || documentAttempt.current !== attempt) return;
+          if (!first) {
+            setDocumentState({ status: 'error', document: null });
+            return;
+          }
+          const document = Object.freeze({
+            ...first,
+            blocks: Object.freeze(blocks),
+            truncated: last?.truncated === true || blocks.some((block) => block.textTruncated)
+          });
+          setDocumentState({ status: complete && !failed ? 'ready' : 'partial', document });
+        };
+        void read();
+        return () => controller.abort();
+      }, [project?.contentRef, project?.projectToken, workspaceFiles]);
+
+      react.useEffect(() => {
+        const attempt = ++proposalAttempt.current;
+        const controller = new AbortController();
+        let timer = null;
+        proposalActionAttempt.current += 1;
+        proposalActionAbort.current?.abort();
+        proposalActionAbort.current = null;
+        proposalPendingRef.current = false;
+        setProposalPending(false);
+        setProposalFeedback('');
+        setProposalState({ status: project ? 'loading' : 'idle', proposal: null });
+        if (!project || !workspaceFiles || typeof workspaceFiles.execute !== 'function') {
+          if (project) setProposalState({ status: 'error', proposal: null });
+          return () => controller.abort();
+        }
+        const poll = async () => {
+          let proposal = null;
+          try {
+            proposal = proposalResult(await workspaceFiles.execute('proposal.read', {
+              contentRef: project.contentRef
+            }, controller.signal), project.contentRef);
+          } catch (_error) { proposal = null; }
+          if (controller.signal.aborted || proposalAttempt.current !== attempt) return;
+          if (!proposal) {
+            setProposalState((current) => current.proposal
+              ? { status: 'stale-read', proposal: current.proposal }
+              : { status: 'error', proposal: null });
+          } else setProposalState({ status: 'ready', proposal });
+          const active = proposal && ['queued', 'unchanged'].includes(proposal.status);
+          timer = globalThis.setTimeout(poll, active ? 1000 : 4000);
+        };
+        void poll();
+        return () => {
+          controller.abort();
+          if (timer !== null) globalThis.clearTimeout(timer);
+        };
+      }, [project?.contentRef, project?.projectToken, workspaceFiles, proposalRefreshKey]);
+
+      react.useEffect(() => () => {
+        proposalActionAttempt.current += 1;
+        proposalActionAbort.current?.abort();
+        proposalActionAbort.current = null;
+        proposalPendingRef.current = false;
+      }, []);
+
+      const decide = async (decision) => {
+        const proposal = proposalState.proposal;
+        const allowed = decision === 'adopt'
+          ? proposal?.status === 'ready' && proposal.canAdopt === true
+            && !proposal.beforeTruncated && !proposal.afterTruncated
+          : proposal?.status !== null && proposal?.canReject === true;
+        if (!proposal || !allowed || proposalPendingRef.current || !proposal.proposalToken) return;
+        proposalPendingRef.current = true;
+        setProposalPending(true);
+        setProposalFeedback(decision === 'adopt' ? '正在采用这一块…' : '正在退回建议…');
+        const controller = new AbortController();
+        proposalActionAbort.current = controller;
+        const attempt = ++proposalActionAttempt.current;
+        const input = decision === 'adopt' ? {
+          contentRef: proposal.contentRef,
+          proposalToken: proposal.proposalToken,
+          decision,
+          proposalRevisionToken: proposal.proposalRevisionToken
+        } : {
+          contentRef: proposal.contentRef,
+          proposalToken: proposal.proposalToken,
+          decision
+        };
+        try {
+          const snapshot = await workspaceFiles.execute('proposal.decide', input, controller.signal);
+          if (controller.signal.aborted || proposalActionAttempt.current !== attempt) return;
+          const result = proposalDecisionResult(snapshot, {
+            contentRef: proposal.contentRef,
+            projectToken: proposal.projectToken,
+            decision
+          });
+          if (!result) {
+            setProposalFeedback(operationError(snapshot, '建议决策结果无效；请刷新后核对原稿。'));
+            return;
+          }
+          setProposalFeedback(result.message);
+          if (decision === 'adopt') onProjectMutation?.(result);
+          else setProposalState({ status: 'ready', proposal: Object.freeze({
+            ...proposal, status: null, reason: null, proposalToken: null,
+            proposalRevisionToken: null, revisionToken: null, title: null,
+            intentLabel: null, before: null, beforeTruncated: false,
+            after: null, afterTruncated: false, canAdopt: false,
+            canReject: false, canUndo: false, submitted: null, target: null,
+            projectToken: result.projectToken
+          }) });
+        } catch (_error) {
+          if (!controller.signal.aborted && proposalActionAttempt.current === attempt) {
+            setProposalFeedback('建议决策结果未知；请刷新后核对原稿，不要重复点击。');
+          }
+        } finally {
+          if (proposalActionAbort.current === controller) proposalActionAbort.current = null;
+          if (proposalActionAttempt.current === attempt) {
+            proposalPendingRef.current = false;
+            setProposalPending(false);
+          }
+        }
+      };
+
+      const undo = async () => {
+        const proposal = proposalState.proposal;
+        if (!proposal || proposal.status !== 'adopted' || !proposal.revisionToken
+            || !proposal.canUndo || proposalPendingRef.current) return;
+        proposalPendingRef.current = true;
+        setProposalPending(true);
+        setProposalFeedback('正在撤销这一次采用…');
+        const controller = new AbortController();
+        proposalActionAbort.current = controller;
+        const attempt = ++proposalActionAttempt.current;
+        try {
+          const snapshot = await workspaceFiles.execute('proposal.undo', {
+            contentRef: proposal.contentRef,
+            revisionToken: proposal.revisionToken
+          }, controller.signal);
+          if (controller.signal.aborted || proposalActionAttempt.current !== attempt) return;
+          const result = proposalUndoResult(snapshot, {
+            contentRef: proposal.contentRef,
+            projectToken: proposal.projectToken
+          });
+          if (!result) {
+            setProposalFeedback(operationError(snapshot, '撤销结果无效；请刷新后核对原稿。'));
+            return;
+          }
+          setProposalFeedback(result.message);
+          onProjectMutation?.(result);
+        } catch (_error) {
+          if (!controller.signal.aborted && proposalActionAttempt.current === attempt) {
+            setProposalFeedback('撤销结果未知；请刷新后核对原稿，不要重复点击。');
+          }
+        } finally {
+          if (proposalActionAbort.current === controller) proposalActionAbort.current = null;
+          if (proposalActionAttempt.current === attempt) {
+            proposalPendingRef.current = false;
+            setProposalPending(false);
+          }
+        }
+      };
+
+      const proposal = proposalState.proposal;
+      const proposalCard = proposal && proposal.status !== null
+        ? react_jsx_runtime.jsxs('section', {
+          className: 'wd10-card wd10-proposal', 'data-proposal-status': proposal.status, children: [
+            react_jsx_runtime.jsx('h3', { children: '鲸坞建议 · 黄牌，不会自动生效' }),
+            react_jsx_runtime.jsx('p', { children:
+              `${proposal.intentLabel || '块级建议'} · ${proposalStatusCopy(proposal)}` }),
+            proposal.before !== null && react_jsx_runtime.jsxs('div', {
+              className: 'wd10-compare', children: [
+                react_jsx_runtime.jsx('h4', { children: '原来' }),
+                react_jsx_runtime.jsx('pre', { children: proposal.before }),
+                proposal.beforeTruncated && react_jsx_runtime.jsx('p', {
+                  className: 'wd10-incomplete', children: '原文对照已截断。'
+                })
+              ]
+            }),
+            proposal.after !== null && react_jsx_runtime.jsxs('div', {
+              className: 'wd10-compare', children: [
+                react_jsx_runtime.jsx('h4', { children: '鲸坞建议' }),
+                react_jsx_runtime.jsx('pre', { children: proposal.after }),
+                proposal.afterTruncated && react_jsx_runtime.jsx('p', {
+                  className: 'wd10-incomplete', children: '建议对照已截断，不能采用。'
+                })
+              ]
+            }),
+            (proposal.status === 'ready' && proposal.canAdopt || proposal.canReject)
+              && react_jsx_runtime.jsxs('div', {
+              className: 'wd10-proposalActions', children: [
+                proposal.status === 'ready' && proposal.canAdopt
+                  && react_jsx_runtime.jsx('button', { type: 'button',
+                  disabled: proposalPending || proposal.beforeTruncated || proposal.afterTruncated,
+                  onClick: () => { void decide('adopt'); }, children: '采用这一块' }),
+                proposal.canReject && react_jsx_runtime.jsx('button', {
+                  type: 'button', disabled: proposalPending,
+                  onClick: () => { void decide('reject'); }, children: '退回建议' })
+              ]
+            }),
+            proposal.status === 'adopted' && proposal.canUndo
+              && react_jsx_runtime.jsx('button', { type: 'button', className: 'wd10-undo',
+                disabled: proposalPending, onClick: () => { void undo(); },
+                children: '撤销这一次采用' }),
+            proposalFeedback && react_jsx_runtime.jsx('p', {
+              className: 'wd10-feedback', role: 'status', children: proposalFeedback
+            })
+          ]
+        }) : null;
+
+      if (documentState.status === 'idle') return react_jsx_runtime.jsx('section', {
+        className: 'wd10-card', children: react_jsx_runtime.jsx('p', {
+          children: '请从左侧选择一张真实内容卡。'
+        })
+      });
+      if (documentState.status === 'loading') return react_jsx_runtime.jsxs(react_jsx_runtime.Fragment, {
+        children: [react_jsx_runtime.jsx('section', { className: 'wd10-card', children:
+          react_jsx_runtime.jsx('p', { children: '正在读取脚本块…' }) }), proposalCard]
+      });
+      if (documentState.status === 'error' || !documentState.document) {
+        return react_jsx_runtime.jsxs(react_jsx_runtime.Fragment, { children: [
+          react_jsx_runtime.jsx('section', { className: 'wd10-card', children:
+            react_jsx_runtime.jsx('p', { role: 'status', children:
+              '脚本暂时读不到；没有使用内容卡摘要冒充正文。' }) }), proposalCard
+        ] });
+      }
+      const document = documentState.document;
+      return react_jsx_runtime.jsxs(react_jsx_runtime.Fragment, { children: [
+        proposalState.status === 'error' && react_jsx_runtime.jsx('p', {
+          className: 'wd10-feedback', role: 'status', children: '建议卡暂时读不到；没有推断建议状态。'
+        }),
+        proposalState.status === 'stale-read' && react_jsx_runtime.jsx('p', {
+          className: 'wd10-feedback', role: 'status', children:
+            '建议卡刷新失败；以下保留上次成功结果，不代表当前状态。'
+        }),
+        proposalCard,
+        !proposalCard && proposalFeedback && react_jsx_runtime.jsx('p', {
+          className: 'wd10-feedback', role: 'status', children: proposalFeedback
+        }),
+        react_jsx_runtime.jsxs('section', { className: 'wd10-script', children: [
+          react_jsx_runtime.jsxs('div', { className: 'wd10-scriptHead', children: [
+            react_jsx_runtime.jsx('h3', { children: '真实脚本块' }),
+            react_jsx_runtime.jsx('span', { children:
+              `${document.blocks.length}/${document.blockCount} 块` })
+          ] }),
+          documentState.status === 'partial' && react_jsx_runtime.jsx('p', {
+            className: 'wd10-incomplete', role: 'status', children:
+              `脚本读取不完整；只显示已成功读取的 ${document.blocks.length}/${document.blockCount} 块。`
+          }),
+          document.truncated && documentState.status === 'ready' && react_jsx_runtime.jsx('p', {
+            className: 'wd10-incomplete', role: 'status', children:
+              '文档投影含截断内容；只能处理下方显示完整的块。'
+          }),
+          document.blocks.length === 0 && react_jsx_runtime.jsx('p', {
+            className: 'wd10-feedback', children: '这份文件没有可显示的正文块。'
+          }),
+          ...document.blocks.map((block) => react_jsx_runtime.jsxs('article', {
+            className: 'wd10-block', 'data-block-kind': block.kind, children: [
+              react_jsx_runtime.jsxs('div', { className: 'wd10-blockMeta', children: [
+                react_jsx_runtime.jsx('strong', { children: block.kind }),
+                react_jsx_runtime.jsx('span', { children:
+                  `第 ${block.startLine}-${block.endLine} 行` })
+              ] }),
+              react_jsx_runtime.jsx('pre', { children: block.text }),
+              block.textTruncated && react_jsx_runtime.jsx('p', {
+                className: 'wd10-incomplete', children: '这一块文本已截断，不能发起块级动作。'
+              }),
+              react_jsx_runtime.jsx('div', { className: 'wd10-blockActions', children:
+                BLOCK_ACTIONS.map(([action, label]) => react_jsx_runtime.jsx('button', {
+                  type: 'button', disabled: actionPending || block.textTruncated,
+                  onClick: () => onBlockAction(block, action), children: label
+                }, action)) })
+            ]
+          }, block.blockToken))
+        ] })
+      ] });
+    }
+
     function CreatorDetail({ routingProject, project, tab, onTab, workspaceFiles,
       alignment, onAlign, onCatalogRefresh, onProjectMutation }) {
       const [preflight, setPreflight] = react.useState(null);
       const [feedback, setFeedback] = react.useState('');
       const [pending, setPending] = react.useState(false);
       const [receiptRefresh, setReceiptRefresh] = react.useState(0);
+      const [proposalRefresh, setProposalRefresh] = react.useState(0);
       const [preflightRemaining, setPreflightRemaining] = react.useState(null);
       const pendingRef = react.useRef(false);
       const actionAttempt = react.useRef(0);
@@ -775,7 +1338,7 @@ window.__ModuleLoader__.load({
           actionAbort.current = null;
           pendingRef.current = false;
         };
-      }, [project?.projectToken, workspaceFiles]);
+      }, [project?.contentRef, project?.projectToken, workspaceFiles]);
       react.useEffect(() => {
         if (!preflight) {
           setPreflightRemaining(null);
@@ -796,7 +1359,7 @@ window.__ModuleLoader__.load({
         tick();
         return () => { if (timer !== null) globalThis.clearTimeout(timer); };
       }, [preflight]);
-      const runPrepare = async (action) => {
+      const runPreparedAction = async (spec) => {
         if (!project || pendingRef.current) return;
         pendingRef.current = true;
         setPending(true);
@@ -806,11 +1369,18 @@ window.__ModuleLoader__.load({
         actionAbort.current = controller;
         const attempt = ++actionAttempt.current;
         try {
-          const snapshot = await workspaceFiles.execute('project.action.prepare', {
-            projectToken: project.projectToken, actionId: action.id
-          }, controller.signal);
+          const snapshot = await workspaceFiles.execute(
+            spec.prepareOperation, spec.prepareInput, controller.signal
+          );
           if (actionAttempt.current !== attempt) return;
-          const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+          let value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+          if (spec.scope === 'block') {
+            value = blockPreflightResult(snapshot, spec.expected);
+            if (value?.state === 'error') {
+              setFeedback(value.message);
+              return;
+            }
+          }
           const expiresMs = Date.parse(value?.expiresAt);
           if (!plain(value) || value.kind !== 'preflight'
               || !OPAQUE_VALUE_RE.test(String(value.preflightToken || ''))
@@ -823,9 +1393,11 @@ window.__ModuleLoader__.load({
             return;
           }
           setPreflight(Object.freeze({
+            scope: spec.scope,
+            submitOperation: spec.submitOperation,
+            submitInput: Object.freeze({ ...spec.submitInput }),
             preflightToken: value.preflightToken,
             projectToken: project.projectToken,
-            actionId: action.id,
             targetLabel: boundedUiText(value.targetLabel, '目标会话', 120),
             workspaceLabel: boundedUiText(value.workspaceLabel, '当前工作区', 120),
             workspaceMatch: ['match', 'mismatch', 'unknown'].includes(value.workspaceMatch)
@@ -841,6 +1413,22 @@ window.__ModuleLoader__.load({
           if (actionAttempt.current === attempt) { pendingRef.current = false; setPending(false); }
         }
       };
+      const runPrepare = (action) => runPreparedAction({
+        scope: 'project', prepareOperation: 'project.action.prepare',
+        prepareInput: { projectToken: project.projectToken, actionId: action.id },
+        submitOperation: 'project.action.submit',
+        submitInput: { projectToken: project.projectToken, actionId: action.id }
+      });
+      const runBlockPrepare = (block, action) => runPreparedAction({
+        scope: 'block', prepareOperation: 'block.action.prepare',
+        prepareInput: { projectToken: project.projectToken, blockToken: block.blockToken, action },
+        submitOperation: 'block.action.submit',
+        submitInput: { projectToken: project.projectToken, blockToken: block.blockToken, action },
+        expected: {
+          contentRef: project.contentRef, projectToken: project.projectToken,
+          blockToken: block.blockToken, action
+        }
+      });
       const cancelPreflight = () => {
         if (pendingRef.current) return;
         setPreflight(null);
@@ -862,26 +1450,35 @@ window.__ModuleLoader__.load({
         actionAbort.current = controller;
         const attempt = ++actionAttempt.current;
         try {
-          const snapshot = await workspaceFiles.execute('project.action.submit', {
-            projectToken: frozen.projectToken,
-            actionId: frozen.actionId,
+          const snapshot = await workspaceFiles.execute(frozen.submitOperation, {
+            ...frozen.submitInput,
             preflightToken: frozen.preflightToken,
             override: frozen.workspaceMatch !== 'match'
           }, controller.signal);
           if (actionAttempt.current !== attempt) return;
-          const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+          const value = frozen.scope === 'block'
+            ? blockSubmissionResult(snapshot, {
+              contentRef: project.contentRef,
+              projectToken: frozen.submitInput.projectToken,
+              blockToken: frozen.submitInput.blockToken,
+              action: frozen.submitInput.action
+            })
+            : (snapshot?.state === 'fulfilled' ? snapshot.result : null);
           setPreflight(null);
-          if (!plain(value) || !['accepted', 'rejected', 'unknown'].includes(value.state)) {
+          if (!plain(value) || !['accepted', 'rejected', 'unknown', 'error'].includes(value.state)) {
             setFeedback(operationError(snapshot));
             return;
           }
-          setFeedback(value.state === 'accepted'
+          setFeedback(value.message || (value.state === 'accepted'
             ? `已提交到 ${boundedUiText(value.target, '目标会话', 96)}；任务回执会继续更新。`
             : value.state === 'rejected'
               ? `目标拒绝投递（${boundedUiText(value.reason, '原因未说明', 64)}）；没有重复发送。`
-              : '提交结果未知；请核对任务回执，不要重复点击。');
+              : value.state === 'error' ? '提交失败；没有重复发送。'
+                : '提交结果未知；请核对任务回执，不要重复点击。'));
           setReceiptRefresh((current) => current + 1);
-          onCatalogRefresh?.();
+          if (frozen.scope === 'block' && value.state === 'accepted') {
+            setProposalRefresh((current) => current + 1);
+          } else if (frozen.scope === 'project') onCatalogRefresh?.();
         } catch (_error) {
           if (actionAttempt.current === attempt) {
             setPreflight(null);
@@ -924,6 +1521,12 @@ window.__ModuleLoader__.load({
             project, workspaceFiles, actions: project?.actions || [], actionPending: pending,
             onAction: (action) => { void runPrepare(action); },
             onMutation: onProjectMutation
+          })
+          : tab === 'script' ? react_jsx_runtime.jsx(ScriptPanel, {
+            project, workspaceFiles, actionPending: pending,
+            onBlockAction: (block, action) => { void runBlockPrepare(block, action); },
+            proposalRefreshKey: proposalRefresh,
+            onProjectMutation
           })
           : react_jsx_runtime.jsxs('section', {
             className: 'wd10-card wd10-unfinished', 'data-whaledock-unfinished': true, children: [
@@ -1245,7 +1848,7 @@ window.__ModuleLoader__.load({
           ...current,
           projects: current.projects.map((project) => project.contentRef === mutation.contentRef
             ? Object.freeze({ ...project, projectToken: mutation.projectToken,
-              updated: mutation.updated }) : project)
+              ...(typeof mutation.updated === 'string' ? { updated: mutation.updated } : {}) }) : project)
         }));
         refreshCatalog();
       }, [refreshCatalog]);
