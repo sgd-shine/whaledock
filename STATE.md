@@ -1,10 +1,23 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-24（v0.10 批次 0 已修复；批次 1 精确蓝图判红，停在 HUMAN GATE；v0.9.0 仍是公开稳定版）
+更新：2026-08-25（公开稳定版 v0.9.1；v0.10 Batch 1 已完成本地 alpha 收口，下一步为 Batch 2）
 
 ## 阶段结论
 
-**v0.10 源码主线已完成切换无响应修复与 dsh 插件侦察：批次 0 自动/受控 GUI 全绿；批次 1 对“三栏同屏”精确验收判红，按提示词停在 SGD/Cowork 人工路线门。v0.9.0 仍是当前公开稳定版。**
+**公开稳定/恢复入口已经升到 v0.9.1；所有新功能工作都在 `codex/v010-forward` 的 `0.10.0-alpha.1` 上继续。v0.10 Batch 1 已完成本地信任根、持久数据根、上下文协议与布局守门收口；Batch 2 是下一步，v0.10 尚未公开发布。**
+
+- v0.9.1 PR [#18](https://github.com/sgd-shine/whaledock/pull/18) 合入 `main@670e32c1abd45f5cb355dfd6e6eeaa9ee18ff27c`；[main CI 32869008546](https://github.com/sgd-shine/whaledock/actions/runs/32869008546) 三平台全绿，[Release run 32869263514](https://github.com/sgd-shine/whaledock/actions/runs/32869263514) attempt 2 成功，[公开 v0.9.1 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.1) 为非 draft、非 prerelease且含 8 项资产。
+- 官方 macOS arm64 v0.9.1 已安装并完成版本、架构、签名、公证、Gatekeeper、两条成品合规链与 Spotlight 唯一安装回读；v0.9.1 ZIP/DMG 已另存为可恢复基线。本地 alpha 替换正式 App 前必须继续保留这份恢复路径。
+- v0.10 工作树为 `harness-desktop-v010-forward`，分支 `codex/v010-forward`，基线是上述 `main@670e32c`。当前版本 `0.10.0-alpha.1` 使用专属 `electron-builder.v0.10-preview.cjs` 和 `release-preview/`，不会沿用正式版本的发布输出。
+- Batch 1 已完成官方会话侧栏与内容视图共存、三栏项目/会话对齐、零会话显式连接、官方 `connect → input/migrate → sessions.open` 草稿链、偏好同步与 core journal 隔离、受管/非受管发送分流、桥不可用可见降级、认证重放/限流/尺寸门、受管页面重载重签，以及对齐/填草稿的迟到操作失效边界。
+- 受管内容模式的数据根固定为 WhaleDock-owned `userData/context-poc/v1/dsh-home`；可信前端资产另存为摘要绑定、只读、可复用的 asset root。正常退出、后端重启、App 重启或工作区切换不得删除数据根。用户 `~/.dsh` 始终不读、不写、不迁移、不清理，也不会自动导入；首次使用可能要重新配置模型。
+- 最终固定资产基线为 **14 个文件 / 564,862 B**，digest `c5df6830be8d4240c08bf8e1783c1619203fc540308c6cf326fa6bde8bd7b79e`；全量 `npm run smoke` 为 **735 PASS / 42 个 ALL PASS**，`git diff --check`、context baseline verifier 与 app-runtime verifier 均通过。app-runtime 仍是 52 包 / 830 文件，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`。
+- 真实内置 rc.2 在同一鲸坞持久 home 上完成两次冷启动：Host 握手与 HTTP 均两次成功，会话/cwd 恢复，home 和固定 asset root 复用，settings/credentials 哈希不变，退出后回环端口已关闭；结论为 `RC2_PERSISTENCE_PASS`。
+- 本地 arm64 预览已构建、安装并回读 Developer ID Application / Hardened Runtime；Gatekeeper 明确标记为未公证 Developer ID，App 与 DMG 都没有 stapled ticket。这是本地 alpha，不是正式成品或公开发布。安装 App 磁盘占用 `600,872 KiB`，其中 dsh runtime `286,532 KiB`；按普通文件逻辑字节计为 `530,077,104 B` / `209,844,893 B`，`app.asar` 为 `19,632,101 B`；arm64 ZIP / DMG 为 `193,679,417 B` / `175,633,885 B`。
+- 安装态首次沿用 macOS 受保护文稿目录 cwd 时，自动验收不代用户授予 TCC 权限；本轮改用专用、非受保护的测试工作区后完成运行验证。这只是验收环境调整，不是产品绕过 TCC，也不证明原受保护目录已获授权。
+- v0.10 尚未打 tag、没有公开 Release。下一步是 Batch 2 可复现 refork / 双闭包合规，之后才是创作页签回迁；本地 alpha、三平台 CI、Windows/Intel 真机、Apple 公证、公开发布和 SGD 人工验收继续分开报告。
+
+### v0.9.0 与早期侦察历史（以下为当时证据）
 
 - v0.9.0 PR [#14](https://github.com/sgd-shine/whaledock/pull/14) 合入 `main@80009fed511a9345b0762fc564603b24d3361ff6`；[最终 PR CI 32634898329](https://github.com/sgd-shine/whaledock/actions/runs/32634898329) 与 [main CI 32634983004](https://github.com/sgd-shine/whaledock/actions/runs/32634983004) 均三平台全绿，本地最终 smoke 为 **606 PASS / 31 个 ALL PASS**。
 - [Release run 32635087823](https://github.com/sgd-shine/whaledock/actions/runs/32635087823) attempt 2 成功，[公开 v0.9.0 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.0) 为非 draft、非 prerelease且含 8 项资产，`releases/latest` 已命中；精确审批变量只存在于 publish 重跑窗口，发布回读后已删除。
@@ -13,7 +26,7 @@
 - **批次 3｜工作区去糊**：驾驶舱头部和普通工作台左栏补充安全工作区标签与打开入口；首次引导及 README 解释“工作台 / 工作区 / 会话”三层概念，并明示全新用户的 `文稿（Documents）/鲸坞工作台/默认工作区` 与重工作台同父目录落点。默认台、电商客服行为不变；主 dsh `WebContentsView` 仍无 preload / `executeJavaScript`，未新增运行时依赖；lockfile 只随应用版本更新和合规身份重生成。
 - 受控 loopback 源码 App 已完成“灵感 → 选题 → 脚本 → 看到产出”14 帧程序化真实 DOM 操作审计，内部 MP4/GIF、事件时间线和落地脚本回读齐全；这不是上游模型或平台证据。SGD 亲手可见性、交互手感与真实会话体验继续标记 **NEEDS-HUMAN**。
 
-## v0.10 主线｜批次 0 修复与批次 1 侦察（等待 HUMAN GATE）
+## v0.10 历史侦察记录｜批次 0 修复与批次 1 路线门（已由方案 B 后续实现取代）
 
 - 分支为 `codex/v010-native-ui-recon`。正式安装 `/Applications/WhaleDock.app` 回读 v0.9.0/arm64，五个关键 ASAR 文件与 `v0.9.0@80009fed` 字节一致；现场根因是已离线 external attach 未退休，加上错误 toast 落在 dsh `WebContentsView` 下方。钥匙串另有真实启动门，但不是当次点击的直接原因。
 - 批次 0 仅在“端口明确关闭 + 端口配置未变 + await 后运行身份仍一致”时退休鲸坞自己的 stale attach；复核已进入 workspace coordinator 串行边界，并位于 target canonicalize、noop、预算门之后。只关闭只读事件层，不停止未知进程。主窗/设置页在 IPC 前立即显示进度，成功/取消/失败分立；toast 完整移入 132px 自有左栏。
@@ -22,7 +35,7 @@
 - hotfix 判定：v0.8 已有同一 stale-attach/toast 缺陷，没有证据支持 v0.9 新发布回归，因此不单独发 v0.9.1，修复留在 v0.10。
 - dsh `0.1.1-rc.2` 可读写 workspace、监听/发起会话，也支持 `conversation.view` 和 CLI plugin 安装；但没有 additive sidebar-tab/column-order slot，AppFrame 固定 `sidebar | conversation | details`。替换 `root` 技术上可绕，但上游明确 `DO NOT register here`，跟版成本接近局部 fork。因此精确蓝图判红。
 - Oil Creator 固定快照为 MIT 的 dsh Cordis 插件，身份路线为绿；但它整体替换官方 sidebar，并通过宿主 DOM `padding-left` compatibility seam 保住右侧对话，且只声明兼容 Harness `0.1.0-rc.6/rc.7`。只学习 IA/状态表达；不复制其宿主 DOM 绕法、品牌图标或未登记第三方素材。
-- 待 SGD/Cowork 选择：A）公开增量 slot，稳定但内容/聊天需切 tab，违反零切换验收；B）root-shell 插件 proof-of-contract，可能达到三栏，但高风险且接近局部 fork。选择前不实现插件、不改 dsh 锁、不写 `~/.dsh`。
+- 当时待 SGD/Cowork 选择：A）公开增量 slot，稳定但内容/聊天需切 tab，违反零切换验收；B）root-shell 插件 proof-of-contract，可能达到三栏，但高风险且接近局部 fork。后续已明确选择并实现方案 B；本段仅保留侦察历史。
 - 内部完整证据：`docs/验收记录-v0.10-批次0修复与批次1侦察-2026-08-24.md`（已 exclude）。本批未生成包、未跑 CI/Release，包/runtime 体积为 `N/A`。
 
 ## v0.9.0 体验流畅度批次 2/3（已公开发布）

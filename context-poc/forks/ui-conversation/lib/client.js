@@ -1574,15 +1574,22 @@ window.__ModuleLoader__.load({
 			* exactly one path; a failed first prompt is an ordinary prompt failure
 			* (banner via promptError, draft restored only while untouched).
 			*/
-			async sink(session, text, imageIds, mode, signal) {
-				if (text === "" && imageIds.length === 0) return Promise.resolve({ kind: "success" });
-				const gate = this.rootCtx.get("whaledockContextGate");
+				async sink(session, text, imageIds, mode, signal) {
+					if (text === "" && imageIds.length === 0) return Promise.resolve({ kind: "success" });
+					const gate = this.rootCtx.get("whaledockContextGate");
+					if (gate === void 0) {
+						const raw = globalThis.location?.hash || "", parameters = new URLSearchParams(raw.startsWith("#") ? raw.slice(1) : raw);
+						const fragmentManaged = this.rootCtx.get("connection")?.isLoopback === true && /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/.test(parameters.get("whaledockController") || "") && /^[a-f0-9]{64}$/.test(parameters.get("whaledockSelectionToken") || "");
+						if (globalThis.__WHALEDOCK_CONTEXT_MANAGED__ !== true && !fragmentManaged) return this.conversation().sendSession(session, text, imageIds, mode, signal);
+						this.shell(session.sessionId).notify("error", "这是鲸坞受管页面：上下文闸门没有加载，本次未发送。请刷新页面；仍未恢复时请重启后端");
+						return { kind: "error" };
+					}
 				let ready = false;
 				try {
-					ready = gate !== void 0 && await gate.beforeSend(session.sessionId, mode, signal);
+					ready = await gate.beforeSend(session.sessionId, mode, signal);
 				} catch (_error) { /* 固定失败面，不把内部身份或路径显示给用户 */ }
 				if (!ready) {
-					this.shell(session.sessionId).notify("error", "工作台上下文尚未准备好，请稍后再发送");
+					this.shell(session.sessionId).notify("error", "这是鲸坞受管会话：工作台上下文未就绪，本次未发送。请等待连接，或刷新页面 / 重启后端");
 					return { kind: "error" };
 				}
 				return this.conversation().sendSession(session, text, imageIds, mode, signal);

@@ -13,6 +13,7 @@ const config = require('../lib/config');
 const log = require('../lib/log');
 const update = require('../lib/update');
 const hotfixBuild = require('../scripts/hotfix-build-config');
+const previewBuild = require('../electron-builder.v0.10-preview.cjs');
 const macosBuildVisibility = require('../scripts/macos-build-visibility');
 const macosCodesign = require('../scripts/macos-codesign');
 
@@ -279,28 +280,39 @@ async function main() {
       && macosBuildVisibility.archiveMacAppBundles(macRelease, { unregister: false }).length === 0);
 
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
-  const hotfixConfig = hotfixBuild.createHotfixBuildConfig(pkg);
   const sourceContextResources = pkg.build.extraResources.filter(hotfixBuild.isContextPocResource);
-  const packagedContextResources = hotfixConfig.extraResources.filter(hotfixBuild.isContextPocResource);
-  check('packaging: v0.9.1 独立配置精确排除 context-poc 且源码资产保留',
-    pkg.version === hotfixBuild.HOTFIX_VERSION
+  const previewContextResources = previewBuild.extraResources.filter(hotfixBuild.isContextPocResource);
+  const previewScripts = [
+    pkg.scripts['dist:mac:arm64'],
+    pkg.scripts['dist:mac:x64'],
+    pkg.scripts['dist:win']
+  ];
+  check('packaging: v0.10 alpha 预览身份、独立输出与 context-poc 携带合同',
+    pkg.version === '0.10.0-alpha.1'
+      && previewBuild.directories.output === 'release-preview'
       && sourceContextResources.length === 1
-      && packagedContextResources.length === 0
-      && pkg.scripts['dist:mac:arm64'].includes('--config electron-builder.v0.9.1.cjs')
-      && pkg.scripts['dist:mac:x64'].includes('--config electron-builder.v0.9.1.cjs')
-      && pkg.scripts['dist:win'].includes('--config electron-builder.v0.9.1.cjs'));
+      && previewContextResources.length === 1
+      && previewScripts.every((script) =>
+        script.includes('--config electron-builder.v0.10-preview.cjs')
+          && script.includes('--publish never')));
+
+  const hotfixPackage = { ...pkg, version: hotfixBuild.HOTFIX_VERSION };
+  const hotfixConfig = hotfixBuild.createHotfixBuildConfig(hotfixPackage);
+  const packagedContextResources = hotfixConfig.extraResources.filter(hotfixBuild.isContextPocResource);
+  check('packaging: v0.9.1 历史独立配置仍精确排除 context-poc',
+    sourceContextResources.length === 1 && packagedContextResources.length === 0);
 
   let wrongVersionRejected = false;
   let missingResourceRejected = false;
   let duplicateResourceRejected = false;
-  try { hotfixBuild.createHotfixBuildConfig({ ...pkg, version: '0.9.2' }); }
+  try { hotfixBuild.createHotfixBuildConfig({ ...hotfixPackage, version: '0.9.2' }); }
   catch (_error) { wrongVersionRejected = true; }
   try {
     hotfixBuild.createHotfixBuildConfig({
-      ...pkg,
+      ...hotfixPackage,
       build: {
-        ...pkg.build,
-        extraResources: pkg.build.extraResources.filter(
+        ...hotfixPackage.build,
+        extraResources: hotfixPackage.build.extraResources.filter(
           (entry) => !hotfixBuild.isContextPocResource(entry)
         )
       }
@@ -308,10 +320,10 @@ async function main() {
   } catch (_error) { missingResourceRejected = true; }
   try {
     hotfixBuild.createHotfixBuildConfig({
-      ...pkg,
+      ...hotfixPackage,
       build: {
-        ...pkg.build,
-        extraResources: [...pkg.build.extraResources, sourceContextResources[0]]
+        ...hotfixPackage.build,
+        extraResources: [...hotfixPackage.build.extraResources, sourceContextResources[0]]
       }
     });
   } catch (_error) { duplicateResourceRejected = true; }
@@ -1077,14 +1089,18 @@ async function main() {
       result.status === 0 ? file : `${file} exit=${result.status}`);
   }
 
-  // v0.10：批次 0 切换反馈，以及默认关闭的上下文契约 P0A。
+  // v0.10：批次 0 切换反馈，以及默认随 v0.10 产品身份开启的受管上下文链。
   for (const [file, label] of [
     ['main-v10-switch-feedback-smoke.js', '切换反馈、陈旧 attach 与启动降级'],
     ['context-bridge-smoke.js', '上下文 revision、turn freeze 与 delivery 证据合同'],
     ['backend-context-bridge-smoke.js', 'managed dsh 资格门与假 transport 收口'],
+    ['context-poc-manifest-smoke.js', '固定资产 manifest 生成器与 tamper fail-closed'],
     ['backend-context-poc-assets-smoke.js', '隔离资产、命令装饰与真实 transport'],
     ['context-poc-plugin-smoke.js', 'rc.2 Host/Client 静态插件与 delivery 合同'],
-    ['main-v10-context-smoke.js', '默认关闭的主进程脱敏状态薄层'],
+    ['context-poc-layout-smoke.js', 'rc.2 布局项目对齐、原生挂载与草稿单飞'],
+    ['context-poc-conversation-runtime-smoke.js', '浏览器原生发送与受管 preflight 分流'],
+    ['context-poc-shell-smoke.js', '上下文降级双表面可见提示'],
+    ['main-v10-context-smoke.js', 'v0.10 默认开启、脱敏状态与可用性日志'],
     ['main-v10-context-p0b-smoke.js', '主进程 opaque selection、事件游标与工作区 stage']
   ]) {
     const result = spawnSync(process.execPath, [path.join(__dirname, file)], {

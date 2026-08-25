@@ -1,0 +1,78 @@
+{
+  "schema": 1,
+  "package": "@whaledock/context-bridge-poc",
+  "files": [
+    {
+      "path": "context-bridge.patch.yml",
+      "size": 93,
+      "sha256": "32e892d2cbf1bce5a5262f1a1af80cb9f1a03794707a0c34425dd2d0810e5e68"
+    },
+    {
+      "path": "plugin/package.json",
+      "size": 681,
+      "sha256": "9d93b452d89af349c86bbb7cfa7a7fa2c78fad89f3021414a83a5691d38b82a4"
+    },
+    {
+      "path": "plugin/lib/index.js",
+      "size": 37228,
+      "sha256": "28809c6fe452307545cfd407aea10d413b576f0b1614815675a13271132fd533"
+    },
+    {
+      "path": "plugin/lib/client.js",
+      "size": 16883,
+      "sha256": "84628a46cfd8c5d885cc835dbdf5b8137a516f10f074b37df2aabf12e11c6352"
+    },
+    {
+      "path": "forks/ui-layout/package.json",
+      "size": 2056,
+      "sha256": "1bd253f6e9eb0591a7b919d2e4957812ea4e42dcf21099f3c6773e803f9e67ce"
+    },
+    {
+      "path": "forks/ui-layout/LICENSE",
+      "size": 1065,
+      "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"
+    },
+    {
+      "path": "forks/ui-layout/lib/index.js",
+      "size": 180,
+      "sha256": "c62669c2bcf72075724aa3d4c90bb6064f8b5952322c7950640cc8ca95389859"
+    },
+    {
+      "path": "forks/ui-layout/lib/invariant.js",
+      "size": 975,
+      "sha256": "bcb99fc9bc5099c92ca2aeb97fd2da3cddbc3854d6864c954a32ed9cca8f9e4c"
+    },
+    {
+      "path": "forks/ui-layout/lib/client.js",
+      "size": 48436,
+      "sha256": "f5a749fbad51c036cf541f5e087e72f97d9ab6cbf8082efe3816f49fdcf9cf4f"
+    },
+    {
+      "path": "forks/ui-conversation/package.json",
+      "size": 4396,
+      "sha256": "3419e5ccb98c61702c4b3afbb1e1ce12efd3e6e3f00cea4710e759d5c05e14ae"
+    },
+    {
+      "path": "forks/ui-conversation/LICENSE",
+      "size": 1065,
+      "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"
+    },
+    {
+      "path": "forks/ui-conversation/lib/index.js",
+      "size": 1514,
+      "sha256": "eef46c73e65c2fa3c28808b6cf1337aaad60806605b92e7d3d24ab3b5cd02c2a"
+    },
+    {
+      "path": "forks/ui-conversation/lib/invariant.js",
+      "size": 1079,
+      "sha256": "29569c60ec03133e7c1cdf9ffc18b0939def737f1809e8a97805e95beeb2ebd3"
+    },
+    {
+      "path": "forks/ui-conversation/lib/client.js",
+      "size": 449211,
+      "sha256": "0190da000df07a64e55566e84dd8f57c8135f2eacd7f7a461bda33cc6c7150c2"
+    }
+  ],
+  "totalBytes": 564862,
+  "digest": "c5df6830be8d4240c08bf8e1783c1619203fc540308c6cf326fa6bde8bd7b79e"
+}

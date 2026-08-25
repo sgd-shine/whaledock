@@ -1,8 +1,29 @@
-# HANDOFF.md — WhaleDock v0.10 批次 0–2 交接
+# HANDOFF.md — WhaleDock v0.10+ 当前交接
 
-更新：2026-08-25 · SGD 已选择方案 B，P1 同屏多项目工作台与发送前闸门已在本地实验分支实现，并通过本地 macOS arm64 人工界面验收；v0.9.0 仍是公开稳定版
+更新：2026-08-25 · 公开稳定版为 v0.9.1；v0.10 Batch 1 已完成本地 alpha 收口，下一步是 Batch 2
 
-## v0.10 当前交接
+## v0.10+ 当前执行线
+
+- 工作树：`harness-desktop-v010-forward`；分支：`codex/v010-forward`；基线：`main@670e32c1abd45f5cb355dfd6e6eeaa9ee18ff27c`；应用身份：`0.10.0-alpha.1`。
+- 新功能不再落到 v0.9.x。v0.9.1 只作为公开稳定/恢复入口；本地 alpha 使用独立 preview builder 与 `release-preview/`，没有 tag、没有 Release、没有发布授权。
+- Batch 1 已完成固定资产清单、受管页面认证/重载重签、官方 SidebarRoot/三栏对齐、Host↔main 偏好协议与 core journal 隔离、官方草稿填充链、迟到 align/fillDraft 失效和可见降级。最终统一 smoke 为 **735 PASS / 42 个 ALL PASS**，未留下 Batch 1 P0/P1 代码审查项。
+- 可信静态资产与可变 dsh 数据已经拆根：摘要绑定、只读的 asset root 可跨启动复用；稳定数据根为 `userData/context-poc/v1/dsh-home`，必须跨后端/App 重启和工作区切换保留 sessions、settings、credentials、attachments、storages 与 presets。退出和启动 sweep 都不得触达数据根。
+- 受管 v0.10 不读取、不写入、不迁移、不清理 `~/.dsh`，也不自动导入旧数据；设置页明确提示首次使用可能需要重新配置模型。该隔离边界是产品合同，不得写成历史数据丢失或已迁移。
+- 固定基线为 **14 文件 / 564,862 B**，digest `c5df6830be8d4240c08bf8e1783c1619203fc540308c6cf326fa6bde8bd7b79e`；context baseline 和 app-runtime verifier 均通过，后者为 52 包 / 830 文件，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`。
+- 真实 rc.2 双冷启动为 `RC2_PERSISTENCE_PASS`：Host 握手×2、HTTP×2、会话/cwd 恢复、home/asset root 复用、settings/credentials 哈希不变，收尾后回环端口关闭。
+- 本地 arm64 预览已以 Developer ID Application + Hardened Runtime 构建并安装，但 Gatekeeper 回读为未公证 Developer ID，App/DMG 均无 stapled ticket，不得写成正式成品。安装 App / 其内置 dsh runtime 磁盘占用为 `600,872 / 286,532 KiB`，普通文件逻辑字节为 `530,077,104 / 209,844,893 B`，`app.asar` 为 `19,632,101 B`，ZIP / DMG 为 `193,679,417 / 175,633,885 B`。
+- TCC 边界：安装态沿用 macOS 受保护文稿目录 cwd 时，自动验收不代用户授权；本轮只改用专用非受保护测试工作区完成运行验证。这不是产品绕过权限，也不是原目录 TCC 已通过。
+- 下一步直接进入 Batch 2 可复现 refork / 双闭包合规，再按内容卡片与回执条 → 概览 → 脚本 → 发布 → 复盘 → 拍摄的顺序回迁创作能力。v0.10 仍未打 tag、未公开发布；每个后续批次仍须把本地自动化、真实 GUI、三平台 CI、Windows/Intel 真机、Apple 公证与 SGD 人工验收分开报告。
+
+## v0.9.1 已公开发布与恢复入口
+
+- PR [#18](https://github.com/sgd-shine/whaledock/pull/18) 已合入 `main@670e32c1abd45f5cb355dfd6e6eeaa9ee18ff27c`；[main CI 32869008546](https://github.com/sgd-shine/whaledock/actions/runs/32869008546) 三平台全绿。
+- [Release run 32869263514](https://github.com/sgd-shine/whaledock/actions/runs/32869263514) attempt 2 成功；[v0.9.1 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.1) 为非 draft、非 prerelease，共 8 项资产。macOS arm64 DMG/ZIP 为 176,646,943 / 194,888,771 B，x64 为 181,493,987 / 199,804,430 B，Windows Setup/portable 为 152,772,664 / 152,584,811 B。
+- 官方 v0.9.1 arm64 此前已完成安装回读，并保留本地 ZIP/DMG 与 no-index App 恢复副本；当前 `/Applications/WhaleDock.app` 是本地 v0.10 alpha。系统仍只能发现这一个 WhaleDock App，旧正式版不得以并列裸 `.app` 留在索引范围内。
+
+## v0.10 前置 P1 已合入历史
+
+> 以下为前置 P1 当时的历史快照，其 688 PASS、旧资产字节数与 ad-hoc 包边界不是当前 Batch 1 最终值；当前值以本文顶部为准。
 
 - 工作分支：`codex/v010-native-ui-recon`。开发前的最近可运行 P0B 为 `5e8cfa318c0d7d8fd0a58ea3b2a9254f14fcfe51`；备份分支 `codex/backup-v010-p0b-runnable-20260824`、tag `backup/v010-p0b-runnable-20260824` 与仓库外 bundle 均已验证回读到该 commit。
 - 批次 0 的 stale external attach、可见 toast 与安全 remote 启动修复保持不变；旧批证据见 `docs/验收记录-v0.10-批次0修复与批次1侦察-2026-08-24.md`。
@@ -55,7 +76,7 @@
 
 ## dsh 跟版升级｜批次 0–4 历史候选证据（已进入批次 5）
 
-- 路径/分支：`/Users/shine/AI工作台/02_AI项目/02_产品实验室/30_桌面App/harness-desktop-v08-dsh-upgrade`，`codex/v08-dsh-upgrade`，基线 `main@29070d5`。
+- 工作树/分支：`harness-desktop-v08-dsh-upgrade`，`codex/v08-dsh-upgrade`，基线 `main@29070d5`。
 - 批次 0 把升级对象刷新为 npm `latest=0.1.1-rc.2`；tarball 33,675 B，registry SHA-1 为 `1a5112369f1c46b13a6e6f21de8af5e6afd45074`，SHA-1/SHA-512 与临时下载一致。内部六门与实施卡在 `docs/验收记录-dsh跟版升级-批次0-2026-08-22.md`（已 exclude）。
 - 批次 1 只改 `lib/backend.js` 与纯 Node 测试：能力阈值固定在 rc.8；npx 由精确版本或显式 `latest` 判断，bundled 由已校验 manifest 判断，system 只有界读官方 npm shim/symlink 布局与 `package.json`，不起版本子进程；未知时沿用旧参数。该版本只控制 `--no-open`，不会进入 `packageVersionProof`。
 - rc.6 的 system/npx/bundled 完整命令 fixture 未变化。`0.1.1-rc.2` 的 system/npx 可生成只在 web argv 末尾多 `--no-open` 的计划；bundled 在批次 5 切生产锁前仍明确拒绝 rc.2，本批只验证同样的纯 argv planner。Windows `.cmd/.bat` 启动仍经引号、`shell:true`、`windowsHide:true`；版本识别不运行 shim；custom 分支在 PATH/版本探针之前返回。
@@ -94,7 +115,7 @@ v0.6.0 工作台包、内置短视频创作台、托盘五态与叫醒阶梯已�
 
 ### 分支与改动
 
-- 独立 worktree `/Users/shine/AI工作台/02_AI项目/02_产品实验室/30_桌面App/harness-desktop-v07-remote` 的 `codex/v07-remote` 已经 PR [#6](https://github.com/sgd-shine/whaledock/pull/6) 合入 `main`，merge 为 `73bb4ce`。本线从含驾驶舱 PR #3–#5 的 `main@145ac1c` 起步，没有操作 PR #2。
+- 独立 worktree `harness-desktop-v07-remote` 的 `codex/v07-remote` 已经 PR [#6](https://github.com/sgd-shine/whaledock/pull/6) 合入 `main`，merge 为 `73bb4ce`。本线从含驾驶舱 PR #3–#5 的 `main@145ac1c` 起步，没有操作 PR #2。
 - 代码面：`lib/remote.js`、`lib/config.js`、`main.js`、`preload-settings.js`、`settings.html`；回归面：`test/remote-smoke.js`、`test/main-remote-smoke.js`、`test/smoke.js`。工作台包 manifest 未加远程字段，远程仍是鲸坞本体底座。
 - 核心是纯 Node/零新运行时依赖，只暴露受控收/推/批与生命周期，无通用命令入口。三通道默认全关；本批不注册真实 adapter，因此零平台网络、零凭据读写。
 - 设置「远程」页已有三通道开关/状态/绑定、三类 IM 内容开关和全部断开；已放入面向所有用户的图文三步自助向导框架。随身网页以同一 Wi-Fi 为默认，Tailscale 仅作可选向导，账号注册/登录/授权留给用户本人。
@@ -192,7 +213,7 @@ v0.6.0 工作台包、内置短视频创作台、托盘五态与叫醒阶梯已�
 - 当前源码版本 `0.3.0`；`npm run smoke` 已实际回读 **119 PASS / ALL PASS**：基础 34、config 13、events 24、backend adapter 20、main 24，加 4 项 wrapper 纳入检查。这是本地纯 Node 证据，与远程 CI、打包与 Release 证据分开记录。
 - macOS arm64 源码态已真实 attach 当前 dsh，看到 13 个会话并进入 live。因为是外部服务，只能证明 rc.6 host/list/history/WS 形状符合，**不能证明对方 npm 根包就是 `0.1.0-rc.6`**。
 - rc.6 历史兼容与单会话 50,000 条尾部基线仍会标记 `history-gap`；当前看板对此如实显示，不用局部数据伪造完整账单。
-- 匿名看板已真实显示。深色战报 `/Users/shine/Downloads/WhaleDock-v03-dark-test.png`：357,713 B，SHA-256 `163732dc25f4f5eea8b4acc650a3281e643b95c6d9ba9abb9af01e2fb6055600`；浅色战报 `/Users/shine/Downloads/WhaleDock-v03-light-test.png`：336,785 B，SHA-256 `dac1ebce2fef2572a5bb23211109c99c3287ec81615ee6e1785472986e9f9f40`。两张都由 GUI 保存并回读为 1080×1440。
+- 匿名看板已真实显示。内部深色样张 `WhaleDock-v03-dark-test.png`：357,713 B，SHA-256 `163732dc25f4f5eea8b4acc650a3281e643b95c6d9ba9abb9af01e2fb6055600`；浅色样张 `WhaleDock-v03-light-test.png`：336,785 B，SHA-256 `dac1ebce2fef2572a5bb23211109c99c3287ec81615ee6e1785472986e9f9f40`。两张都由 GUI 保存并回读为 1080×1440。
 - 上述战报是**对比度修复前样张**；它们只证明 GUI 保存流程、PNG 字节与像素尺寸，不代表修复后最终色彩/对比度验收。
 
 ### 必须保留的 v0.3 边界

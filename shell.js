@@ -24,6 +24,10 @@ const confirmOk = el('confirm-ok');
 const confirmCancel = el('confirm-cancel');
 const dropBox = el('drop');
 const toast = el('toast');
+const contextBridgeBanners = [
+  el('context-bridge-banner'),
+  el('cockpit-context-bridge-banner')
+];
 const cockpitName = el('cockpit-name');
 const routeStages = el('route-stages');
 const taskState = el('task-state');
@@ -44,7 +48,8 @@ const sceneStage = el('scene-stage');
 
 let state = {
   current: null, packages: [], skipped: [], defaultLabel: '默认工作台', busy: false,
-  cockpit: null, workspace: { label: '当前工作区', available: false }, deliveries: []
+  cockpit: null, workspace: { label: '当前工作区', available: false }, deliveries: [],
+  contextPoc: null
 };
 let confirmHandler = null;
 let toastTimer = null;
@@ -111,6 +116,44 @@ function showToast(message, ms = 6000) {
   toast.classList.add('open');
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toast.classList.remove('open'), ms);
+}
+
+function contextBridgeNotice(contextPoc) {
+  if (!contextPoc || typeof contextPoc !== 'object'
+      || contextPoc.state === 'disabled') return null;
+  const reason = typeof contextPoc.reason === 'string' ? contextPoc.reason : '';
+  if (reason === 'external-unproven') {
+    return {
+      title: '外部 dsh 未受管',
+      text: '对话仍可用，但鲸坞无法验证并注入工作台信息。请切回鲸坞托管后端。'
+    };
+  }
+  if (reason === 'unsupported-version') {
+    return {
+      title: '当前 dsh 暂不支持内容联动',
+      text: '对话仍可用，工作台信息不会注入。请切换到鲸坞内置后端。'
+    };
+  }
+  // 公开 surface 未来可能增加新的 fail-closed reason；只要整体状态已经
+  // degraded/unavailable，就必须有固定可见面，不能靠枚举遗漏后静默。
+  if (!['degraded', 'unavailable'].includes(contextPoc.state)) return null;
+  return {
+    title: '工作台信息暂未接通',
+    text: '受管页面会阻止本次发送，工作台信息不会注入。请等待连接恢复；仍未恢复时请重启后端，并到设置中查看日志。'
+  };
+}
+
+function renderContextBridgeNotice() {
+  const notice = contextBridgeNotice(state.contextPoc);
+  for (const banner of contextBridgeBanners) {
+    banner.replaceChildren();
+    banner.hidden = !notice;
+    if (!notice) continue;
+    const title = document.createElement('strong');
+    title.textContent = notice.title;
+    banner.append(title, document.createTextNode(notice.text));
+    banner.title = `${notice.title}：${notice.text}`;
+  }
 }
 
 // ---------- 左栏 ----------
@@ -1307,9 +1350,11 @@ function applyState(next) {
     cockpit: next.cockpit && typeof next.cockpit === 'object' ? next.cockpit : null,
     workspace: next.workspace && typeof next.workspace === 'object'
       ? next.workspace : { label: '当前工作区', available: false },
-    deliveries: Array.isArray(next.deliveries) ? next.deliveries : []
+    deliveries: Array.isArray(next.deliveries) ? next.deliveries : [],
+    contextPoc: next.contextPoc && typeof next.contextPoc === 'object' ? next.contextPoc : null
   };
   syncDeliveryBaselines(state.deliveries);
+  renderContextBridgeNotice();
   renderRail();
   renderCockpit();
   if (switcherLayer.classList.contains('open')) renderSwitcher();

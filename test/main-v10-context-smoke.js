@@ -110,6 +110,48 @@ async function run() {
     assert.equal(fixture.calls.surfaces, 0, '关闭时不得制造可见状态');
   });
 
+  await check('v0.10+ 产品身份默认开启，但显式 0 仍是紧急关闭门', async () => {
+    assert.equal(main.contextPocDefaultEnabled('0.9.1'), false);
+    assert.equal(main.contextPocDefaultEnabled('0.10.0-alpha.1'), true);
+    assert.equal(main.contextPocDefaultEnabled('0.10.0'), true);
+    assert.equal(main.contextPocDefaultEnabled('1.0.0'), true);
+    assert.equal(main.contextPocDefaultEnabled('0.10'), false);
+    assert.equal(main.contextPocDefaultEnabled('0.10.0 alpha'), false);
+
+    const fixture = bridgeFixture();
+    assert.equal(main.createContextPocController({
+      env: {}, bridgeModel: fixture.model, defaultEnabled: true
+    }).enabled, true);
+    assert.equal(main.createContextPocController({
+      env: { WHALEDOCK_CONTEXT_POC: '0' }, bridgeModel: fixture.model, defaultEnabled: true
+    }).enabled, false);
+    assert.equal(main.createContextPocController({
+      env: { WHALEDOCK_CONTEXT_POC: '1' }, bridgeModel: fixture.model, defaultEnabled: false
+    }).enabled, true);
+    assert.match(source('main.js'),
+      /defaultEnabled:\s*contextPocDefaultEnabled\(require\('\.\/package\.json'\)\.version\)/);
+  });
+
+  await check('bridge availability 日志按 backend state 去重且只暴露 stage/reason', async () => {
+    const lines = [];
+    const report = main.createContextPocAvailabilityReporter((line) => lines.push(line));
+    const first = {};
+    assert.equal(report(first, 'asset-mount', 'bridge-unavailable'), true);
+    assert.equal(report(first, 'asset-mount', 'bridge-unavailable'), false);
+    assert.equal(report(first, 'rpc-handshake', 'bridge-unavailable'), true);
+    assert.equal(report(first, 'ready'), true);
+    assert.equal(report(first, 'unknown', 'bridge-unavailable'), false);
+    assert.equal(report(first, 'ready', 'secret-path'), false);
+    assert.equal(report({}, 'asset-mount'), true, '新 backend identity 必须独立记录');
+    assert.deepEqual(lines, [
+      'context-poc availability stage=asset-mount reason=bridge-unavailable',
+      'context-poc availability stage=rpc-handshake reason=bridge-unavailable',
+      'context-poc availability stage=ready',
+      'context-poc availability stage=asset-mount'
+    ]);
+    assert.doesNotMatch(lines.join('\n'), /token|session|digest|path|secret/i);
+  });
+
   await check('flag 仅精确 1 开启，P0A 无桥时如实降级', async () => {
     const fixture = bridgeFixture();
     const controller = main.createContextPocController({
@@ -262,6 +304,25 @@ async function run() {
         '任何 package proof 调用都不得回退读取展示用 version'
       );
     }
+  });
+
+  await check('主进程启动时清理 context-poc 残留且日志只含计数', async () => {
+    const value = source('main.js');
+    const startup = block(
+      value, 'async function onReady()', '  initializeWorkspaceCoordinator();'
+    );
+    const cleanupBlock = block(
+      startup,
+      '  try {\n    const cleanup = backend.cleanupContextPocRuns',
+      '  initEventService();'
+    );
+    assert.match(startup,
+      /const cleanup = backend\.cleanupContextPocRuns\(app\.getPath\('userData'\)\)/);
+    assert.match(cleanupBlock,
+      /context-poc startup cleanup removed=\$\{cleanup\.removed\} skipped=\$\{cleanup\.skipped\}/);
+    assert.match(cleanupBlock, /context-poc startup cleanup removed=0 skipped=1/);
+    assert.doesNotMatch(cleanupBlock,
+      /assetDigest|mountRoot|ownerToken|userDataPath|_error\.(?:message|code|stack)/);
   });
 
   console.log(failed === 0

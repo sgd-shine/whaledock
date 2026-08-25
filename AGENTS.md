@@ -33,6 +33,7 @@ npm run dist:win          # Windows x64 NSIS Setup + portable
 7. 界面与用户文档用中文，代码注释中文为主；提交信息用英文。
 8. 每次代码改动后运行 `npm run smoke`，必须 `ALL PASS`。本地 smoke、打包成功、真机安装、人工 UI、Windows/Intel、签名与发布合规是不同证据，不得互相替代。
 9. 每次版本更新后，系统应用界面只允许出现一个正式安装的鲸坞：macOS 为 `/Applications/WhaleDock.app`。历史版本保留为 dmg/zip/校验和或 no-index 归档，不得把 `release/**/WhaleDock.app` 裸包留给 Spotlight/LaunchServices 索引；Windows 升级也要确认“已安装的应用”、开始菜单和桌面没有新增并列旧版本。
+10. 新增内部验收记录、开发方案或接力提示词前，先对照 `.git/info/exclude` 清单自查；内部文档和操作录屏不得进入公开仓库。
 
 ## 已知的坑（修问题前先看这里）
 

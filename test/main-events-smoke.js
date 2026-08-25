@@ -430,8 +430,14 @@ async function run() {
     const viewOptions = viewBlock.slice(0, viewBlock.indexOf('});') + 3);
     assert.match(viewOptions, /webPreferences:\s*\{\s*contextIsolation:\s*true,\s*nodeIntegration:\s*false\s*\}/);
     assert(!/preload\s*:/.test(viewOptions), 'dsh 视图不得有 preload');
-    // 加载 dsh 的只能是这个视图，不能是主窗自己的 webContents。
-    assert.match(openMain, /view\.webContents\.loadURL\(harnessViewUrl\(\)\)/);
+    // 加载 dsh 的只能是这个视图，不能是主窗自己的 webContents。v0.10 统一经
+    // reloadHarnessView 重签受管 URL，真正的 loadURL 仍只落在传入视图上。
+    assert.match(openMain, /reloadHarnessView\(view, \{[\s\S]*transition: 'initial'/);
+    const reloadView = source.slice(
+      source.indexOf('async function reloadHarnessView('),
+      source.indexOf('function sendSplash(')
+    );
+    assert.match(reloadView, /await view\.webContents\.loadURL\(decision\.url\)/);
     assert.match(source, /function harnessViewUrl\(origin = baseUrl\(\)\)/);
     assert(!/win\.loadURL\(baseUrl\(\)\)/.test(source), '主窗自己的 webContents 不得再加载 dsh');
     // 外壳页的 preload 只挂在本地 file:// 页上。

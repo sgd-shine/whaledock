@@ -6,12 +6,15 @@
 
 > ⚠️ 本项目是社区作品，与 DeepSeek 官方无关（Unofficial）。DeepSeek Harness 本体以 MIT 协议开源。本项目原名 Harness Desktop，自 v0.1.1 起更名为鲸坞 WhaleDock。
 
-## 当前状态（2026-08-23）
+## 当前状态（2026-08-25）
 
-- **v0.9.0 已公开发布**：注解 tag 精确指向 `main@80009fed`；[main CI 32634983004](https://github.com/sgd-shine/whaledock/actions/runs/32634983004) 三平台全绿，[Release run 32635087823](https://github.com/sgd-shine/whaledock/actions/runs/32635087823) attempt 2 完成发布，[正式 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.0) 为非 draft、非 prerelease，共 8 项资产。
-- 官方 macOS arm64 成品已下载安装并回读 0.9.0/arm64、Developer ID、Hardened Runtime、DMG stapling、Gatekeeper、两条成品合规链和 Spotlight 唯一安装；首次启动后系统新出现钥匙串 `SecurityAgent` 且尚无 0.9 初始化日志，按人工确认门处理而未代输或绕过，因此成品 GUI/真实会话仍为 **NEEDS-HUMAN**。v0.9 x64 成品在 Apple Silicon 上完成临时安装、签名/Gatekeeper 回读并由 Rosetta 拉起进程，但同样停在钥匙串门、没有 `SMOKE_OK`，所以功能启动仍未通过，也不是 Intel 真机证据。Windows 仍只有 CI/自动化证据、没有 Windows 真机验收。
-- v0.9 批次 2 已在源码与自动化层补上投递前去向预检、灵感区/项目卡/脚本块三类锚点上的回执、运行用时、诚实的 unavailable/unknown 降级、watcher 自动刷新、「刚更新」和结果打开；批次 3 补上驾驶舱与普通工作台的工作区标签/打开入口，以及“工作台 / 工作区 / 会话”三层引导和默认落点说明。默认台、电商客服、主 dsh 视图隔离与运行时依赖闭包边界保持不变。
-- v0.9 的受控 loopback 源码 App 已完成“灵感 → 选题 → 脚本 → 看到产出”14 帧程序化真实 DOM 操作审计，内部 MP4/GIF 与文件回读齐全；它不是真实上游模型，也不替代 SGD 亲手视觉/手感验收，后者仍为 **NEEDS-HUMAN**。
+- **公开稳定版是 v0.9.1**：tag 精确指向 `main@670e32c`；[main CI 32869008546](https://github.com/sgd-shine/whaledock/actions/runs/32869008546) 三平台全绿，[Release run 32869263514](https://github.com/sgd-shine/whaledock/actions/runs/32869263514) attempt 2 成功，[正式 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.1) 为非 draft、非 prerelease，共 8 项资产。v0.9.1 是稳定与恢复入口，不再是新功能开发线。
+- **新功能开发已经切到 v0.10+**：当前独立分支 `codex/v010-forward` 从上述稳定基线起步，应用身份为 `0.10.0-alpha.1`。本地预览包使用独立构建配置与 `release-preview/`，不会冒充正式 v0.10 Release。
+- v0.10 的原生页面保留官方会话侧栏，同时加入内容视图、多项目对齐、受控草稿填充、发送前上下文闸门、偏好持久化和桥不可用时的可见降级。受管页面只在鲸坞自行拉起、精确内置 dsh `0.1.1-rc.2` 且固定资产清单逐文件通过时启用；外部或无法证明的 dsh 继续使用原生会话，不接管发送。
+- v0.10 受管模式使用鲸坞自己的持久 dsh 数据目录，跨后端重启、App 重启与工作区切换保留会话、设置、凭据、附件、存储和预设。它不会读取、迁移、覆盖或清理 `~/.dsh`；旧环境数据不会自动导入，首次使用可能需要重新配置模型。
+- **v0.10 Batch 1 已完成本地 alpha 收口**：统一 `npm run smoke` 实跑 **735 PASS / 42 个 ALL PASS**；受管基线固定为 14 个文件、`564,862 B`、SHA-256 `c5df6830…b79e`。真实 rc.2 双冷启动回读了 Host/HTTP、会话与 cwd 恢复、同一持久 home/asset root 复用，设置与凭据文件保持不变，退出后端口已关闭。
+- **arm64 预览是本地安装证据，不是发布**：本次 App 已用 Developer ID Application 签名并开启 Hardened Runtime，也已在本机安装；但未经 Apple 公证、没有 stapled ticket，因而不是公开或正式安装包。当前 ZIP / DMG 为 `193,679,417 B` / `175,633,885 B`；本地安装 App 约 `600,872 KiB`，其中内置 dsh runtime 约 `286,532 KiB`。
+- 安装态首次沿用 macOS 受保护文稿目录作为 cwd 时，自动验收不代用户授予 TCC 文件访问权限；本轮只是改用专用、非受保护的测试工作区完成 Batch 1 验证。这不代表文稿目录权限已通过，仍需用户本人在正式验收时确认。下一步是 Batch 2 可复现 refork / 双闭包合规；v0.10 仍未发布，三平台 CI、Windows/Intel 真机与后续人工验收也仍是独立证据门。
 
 ## v0.2 带来了什么
 

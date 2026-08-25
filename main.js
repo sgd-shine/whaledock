@@ -65,9 +65,16 @@ const VIDEO_DELIVERY_FILE_STAGES = Object.freeze({
 const deliveryReceiptService = deliveryReceipts.createFlowReceiptService();
 const deliveryBindings = new Map();
 let videoDeliverySubmissions = 0;
-const contextPocController = createContextPocController({ env: process.env });
+const contextPocController = createContextPocController({
+  env: process.env,
+  defaultEnabled: contextPocDefaultEnabled(require('./package.json').version)
+});
 let contextPocBridgeRuntime = null;
 let contextPocBridgeGeneration = 0;
+let contextPocPreferences = null;
+const reportContextPocAvailability = createContextPocAvailabilityReporter((message) => {
+  log.line('context', message);
+});
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -221,10 +228,44 @@ async function confirmExternalAttachRetirement(runtime, port, adapters) {
 
 // P0A 只接 feature flag 和脱敏状态：不做真实 bridge RPC，
 // 也不从“最近活动会话”猜测当前会话。flag 关闭时连状态机都不创建。
+function contextPocDefaultEnabled(version) {
+  if (typeof version !== 'string') return false;
+  const matched = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.exec(version);
+  if (!matched) return false;
+  const major = Number(matched[1]);
+  const minor = Number(matched[2]);
+  return major > 0 || (major === 0 && minor >= 10);
+}
+
+function createContextPocAvailabilityReporter(write) {
+  if (typeof write !== 'function') throw new TypeError('context POC availability writer invalid');
+  const seen = new WeakMap();
+  const stages = new Set(['asset-mount', 'rpc-handshake', 'ready']);
+  return (state, stage, reason = null) => {
+    if (!state || typeof state !== 'object' || !stages.has(stage)
+        || (reason !== null && reason !== 'bridge-unavailable')) return false;
+    let keys = seen.get(state);
+    if (!keys) { keys = new Set(); seen.set(state, keys); }
+    const key = `${stage}:${reason || 'ok'}`;
+    if (keys.has(key)) return false;
+    try {
+      write(`context-poc availability stage=${stage}${
+        reason === 'bridge-unavailable' ? ' reason=bridge-unavailable' : ''
+      }`);
+      keys.add(key);
+      return true;
+    } catch (_error) { return false; }
+  };
+}
+
 function createContextPocController(options = {}) {
   const bridgeModel = options.bridgeModel || contextBridgeModel;
   const env = options.env === undefined ? process.env : options.env;
-  const enabled = bridgeModel.isContextPocEnabled(env);
+  const explicit = env && typeof env === 'object' && !Array.isArray(env)
+    ? env.WHALEDOCK_CONTEXT_POC : undefined;
+  const enabled = explicit === '0' ? false
+    : (explicit === '1' || options.defaultEnabled === true
+      || bridgeModel.isContextPocEnabled(env));
   if (!enabled) {
     return Object.freeze({ enabled: false, bridgeModel, state: null });
   }
@@ -823,6 +864,9 @@ let mainWindow = null;
 // v0.6：主窗自己的 webContents 换成本地外壳页（有 preload、URL 可精确校验、能接拖放），
 // dsh 的 Web UI 搬进这个**没有 preload** 的子视图——远程页面拿不到任何 IPC。
 let dshView = null;
+// 受管身份不能只记一个 boolean：main 同时保留显式模式与最后一次
+// 签发的 backend identity/generation。能力短暂不可用时不会静默降成 unmanaged。
+const contextPocManagedViews = new WeakMap();
 const SHELL_RAIL_WIDTH = 132;
 // 驾驶舱对话不再塞进右侧窄栏。它是航道下方的全宽现场；顶部只保留
 // 第一方航道与匿名任务摘要，完整 dsh Web UI 不注入、不裁切、不重载。
@@ -1360,6 +1404,124 @@ function harnessViewUrl(origin = baseUrl()) {
   }, origin);
 }
 
+function contextPocNavigationFragmentValid(value, controller, runtime = {}) {
+  try {
+    const target = new URL(value);
+    const params = new URLSearchParams(target.hash.slice(1));
+    const pairs = [...params.entries()];
+    const expectedToken = runtime.state && runtime.state.contextBridgeSelectionToken;
+    if (pairs.length !== 2
+        || params.getAll('whaledockController').length !== 1
+        || params.getAll('whaledockSelectionToken').length !== 1
+        || !controller || params.get('whaledockController') !== controller.controllerId
+        || typeof expectedToken !== 'string' || !CONTEXT_POC_TOKEN_RE.test(expectedToken)) {
+      return false;
+    }
+    const actualToken = params.get('whaledockSelectionToken');
+    return typeof actualToken === 'string' && CONTEXT_POC_TOKEN_RE.test(actualToken)
+      && crypto.timingSafeEqual(Buffer.from(actualToken, 'hex'), Buffer.from(expectedToken, 'hex'));
+  } catch (_error) {
+    return false;
+  }
+}
+
+function contextPocManagedNavigationDecision(options = {}) {
+  if (!isPlainObject(options) || options.owned !== true || options.managed !== true
+      || options.isMainFrame === false || options.isSameDocument === true) {
+    return Object.freeze({ action: 'ignore', url: null });
+  }
+  const runtime = options.runtime || {};
+  let target;
+  try {
+    const base = new URL(options.baseOrigin);
+    const current = new URL(options.currentUrl);
+    target = new URL(options.targetUrl);
+    if (current.origin !== base.origin || target.origin !== base.origin) {
+      return Object.freeze({ action: 'ignore', url: null });
+    }
+  } catch (_error) {
+    return Object.freeze({ action: 'ignore', url: null });
+  }
+  if (contextPocNavigationFragmentValid(target.href, options.controller, runtime)) {
+    return Object.freeze({ action: 'allow', url: null });
+  }
+  const state = runtime.state;
+  if (!options.controller || options.controller.enabled !== true
+      || !contextPocValidId(options.controller.controllerId)
+      || runtime.backendReady !== true || runtime.spawnedByUs !== true
+      || !state || state.exited === true || state.contextBridgeMounted !== true
+      || typeof state.contextBridgeSelectionToken !== 'string'
+      || !CONTEXT_POC_TOKEN_RE.test(state.contextBridgeSelectionToken)) {
+    return Object.freeze({ action: 'block', url: null });
+  }
+  const signed = contextPocHarnessUrl(options.controller, runtime, target.href);
+  if (!contextPocNavigationFragmentValid(signed, options.controller, runtime)) {
+    return Object.freeze({ action: 'block', url: null });
+  }
+  return Object.freeze({ action: 'resign', url: signed });
+}
+
+function contextPocViewModeState(mode, runtime = {}) {
+  if (!['managed', 'native', 'external'].includes(mode)) return null;
+  return Object.freeze({
+    mode,
+    backendState: runtime.state || null,
+    generation: Number.isSafeInteger(runtime.generation) && runtime.generation >= 0
+      ? runtime.generation : 0
+  });
+}
+
+function contextPocDesiredViewMode(controller, runtime = {}) {
+  if (!controller || controller.enabled !== true) return 'native';
+  if (runtime.backendReady !== true) return null;
+  return runtime.spawnedByUs === true ? 'managed' : 'external';
+}
+
+function contextPocManagedLoadDecision(options = {}) {
+  if (!isPlainObject(options) || options.owned !== true) {
+    return Object.freeze({ action: 'ignore', url: null, state: null });
+  }
+  let target;
+  try {
+    const base = new URL(options.baseOrigin);
+    target = new URL(options.targetUrl);
+    if (target.origin !== base.origin) {
+      return Object.freeze({ action: 'block', url: null, state: null });
+    }
+    target.hash = '';
+  } catch (_error) {
+    return Object.freeze({ action: 'block', url: null, state: null });
+  }
+  const runtime = options.runtime || {};
+  const current = options.viewState && ['managed', 'native', 'external']
+    .includes(options.viewState.mode) ? options.viewState : null;
+  const desired = contextPocDesiredViewMode(options.controller, runtime);
+  let mode = current && current.mode;
+  // initial 只能为新 view 选一次模式；加载重试不得覆盖已受管状态。
+  if (!mode && options.transition === 'initial') mode = desired;
+  // 后台恢复是 main 唯一明确允许重新判定 native/external 的路径。
+  if (options.transition === 'runtime' && desired) mode = desired;
+  if (!mode) return Object.freeze({ action: 'block', url: null, state: current });
+
+  if (mode === 'managed') {
+    const managedState = contextPocViewModeState('managed', runtime);
+    const signed = contextPocHarnessUrl(options.controller, runtime, target.href);
+    if (!contextPocNavigationFragmentValid(signed, options.controller, runtime)) {
+      return Object.freeze({ action: 'block', url: null, state: managedState });
+    }
+    return Object.freeze({
+      action: 'load',
+      url: signed,
+      state: managedState
+    });
+  }
+  return Object.freeze({
+    action: 'load',
+    url: target.href,
+    state: contextPocViewModeState(mode, runtime)
+  });
+}
+
 function contextPocReloadOrigin(currentUrl, fallbackOrigin = baseUrl()) {
   try {
     const fallback = new URL(fallbackOrigin);
@@ -1372,16 +1534,50 @@ function contextPocReloadOrigin(currentUrl, fallbackOrigin = baseUrl()) {
   }
 }
 
-async function reloadHarnessView(view = dshView, urlFactory = harnessViewUrl,
-  fallbackOrigin = baseUrl()) {
+function warnContextPocManagedNavigationBlocked() {
+  log.line('context', 'context-poc navigation stage=resign reason=capability-unavailable action=blocked');
+  pushShellNotice(
+    'error',
+    '受管对话页面未能刷新安全凭据，本次重新加载已阻止。请重启后端后再试。'
+  );
+}
+
+async function reloadHarnessView(view = dshView, options = {}) {
   if (!view || !view.webContents || view.webContents.isDestroyed()) return false;
+  const settings = options && typeof options === 'object' ? options : {};
+  const fallbackOrigin = settings.fallbackOrigin || baseUrl();
   const currentUrl = typeof view.webContents.getURL === 'function'
     ? view.webContents.getURL() : '';
   const origin = contextPocReloadOrigin(currentUrl, fallbackOrigin);
+  const runtime = settings.runtime || {
+    backendReady, spawnedByUs, state: backendState, generation: contextPocBridgeGeneration
+  };
+  const controller = settings.controller || contextPocController;
+  const stateStore = settings.stateStore || contextPocManagedViews;
+  const owned = settings.owned === true || (settings.owned !== false && view === dshView);
+  const decision = contextPocManagedLoadDecision({
+    owned,
+    viewState: stateStore.get(view) || null,
+    transition: settings.transition || null,
+    targetUrl: origin,
+    baseOrigin: fallbackOrigin,
+    controller,
+    runtime
+  });
+  if (decision.action !== 'load') {
+    if (decision.action === 'block') {
+      if (decision.state) stateStore.set(view, decision.state);
+      const onBlocked = typeof settings.onBlocked === 'function'
+        ? settings.onBlocked : warnContextPocManagedNavigationBlocked;
+      try { onBlocked(); } catch (_error) { /* 警告失败不能反向放行导航 */ }
+    }
+    return false;
+  }
+  stateStore.set(view, decision.state);
   try {
     // 每次刷新都重新签发 fragment；直接 reload 已被 Client 清理的 URL
     // 会让 selection reporter 在一次 lease 后静默失效。
-    await view.webContents.loadURL(urlFactory(origin));
+    await view.webContents.loadURL(decision.url);
     return true;
   } catch (_error) {
     return false;
@@ -5418,6 +5614,11 @@ function registerShootingIpc() {
 const CONTEXT_POC_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 const CONTEXT_POC_TOKEN_RE = /^[a-f0-9]{64}$/;
 const CONTEXT_POC_SESSION_REF_RE = /^session-[a-f0-9]{64}$/;
+const CONTEXT_POC_PREFERENCES_CAPABILITY = 'ui-preferences-v1';
+const CONTEXT_POC_MAX_PREFERENCE_REVISION = 1_000_000_000;
+const CONTEXT_POC_PREFERENCE_PENDING_MS = 3000;
+const CONTEXT_POC_PREFERENCE_WRITE_MARGIN_MS = 500;
+const CONTEXT_POC_MAX_PREFERENCE_READ_BATCH = 16;
 const CONTEXT_POC_EVENT_TYPES = new Set([
   'ack', 'turn-start', 'turn-miss', 'delivery', 'turn-end'
 ]);
@@ -5432,6 +5633,226 @@ function contextPocExact(value, required, optional = []) {
 function contextPocValidId(value) {
   return typeof value === 'string' && CONTEXT_POC_ID_RE.test(value);
 }
+
+function contextPocPreferencePatchValue(value) {
+  if (!isPlainObject(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.length < 1 || keys.length > 2
+      || keys.some((key) => key !== 'contentViewMode' && key !== 'contentViewHintSeen')
+      || (Object.prototype.hasOwnProperty.call(value, 'contentViewMode')
+        && value.contentViewMode !== 'content' && value.contentViewMode !== 'sessions')
+      || (Object.prototype.hasOwnProperty.call(value, 'contentViewHintSeen')
+        && typeof value.contentViewHintSeen !== 'boolean')) return null;
+  return Object.freeze({ ...value });
+}
+
+function contextPocPreferenceSnapshotValue(value, allowZero = false) {
+  if (!contextPocExact(value, [
+    'revision', 'contentViewMode', 'contentViewHintSeen'
+  ]) || !Number.isSafeInteger(value.revision)
+      || value.revision < (allowZero ? 0 : 1)
+      || value.revision > CONTEXT_POC_MAX_PREFERENCE_REVISION
+      || (value.contentViewMode !== 'content' && value.contentViewMode !== 'sessions')
+      || typeof value.contentViewHintSeen !== 'boolean') return null;
+  return Object.freeze({
+    revision: value.revision,
+    contentViewMode: value.contentViewMode,
+    contentViewHintSeen: value.contentViewHintSeen
+  });
+}
+
+function contextPocSamePreferenceSnapshot(left, right) {
+  return Boolean(left && right && left.revision === right.revision
+    && left.contentViewMode === right.contentViewMode
+    && left.contentViewHintSeen === right.contentViewHintSeen);
+}
+
+function contextPocPreferenceSyncResponseValue(value) {
+  if (!contextPocExact(value, ['accepted', 'code', 'snapshot'])
+      || typeof value.accepted !== 'boolean'
+      || (value.accepted ? value.code !== null
+        : !['preferences-stale', 'preferences-conflict'].includes(value.code))) return null;
+  const snapshot = contextPocPreferenceSnapshotValue(value.snapshot);
+  return snapshot ? { accepted: value.accepted, code: value.code, snapshot } : null;
+}
+
+function contextPocPreferenceRequestValue(value) {
+  if (!contextPocExact(value, [
+    'controllerId', 'pageInstanceId', 'selectionRevision',
+    'requestToken', 'baseRevision', 'issuedAtMs', 'deadlineMs', 'patch'
+  ]) || !contextPocValidId(value.controllerId) || !contextPocValidId(value.pageInstanceId)
+      || !Number.isSafeInteger(value.selectionRevision) || value.selectionRevision < 1
+      || value.selectionRevision > CONTEXT_POC_MAX_PREFERENCE_REVISION
+      || !CONTEXT_POC_TOKEN_RE.test(value.requestToken)
+      || !Number.isSafeInteger(value.baseRevision) || value.baseRevision < 1
+      || value.baseRevision > CONTEXT_POC_MAX_PREFERENCE_REVISION
+      || !Number.isSafeInteger(value.issuedAtMs) || value.issuedAtMs < 0
+      || !Number.isSafeInteger(value.deadlineMs)
+      || value.deadlineMs !== value.issuedAtMs + CONTEXT_POC_PREFERENCE_PENDING_MS) return null;
+  const patch = contextPocPreferencePatchValue(value.patch);
+  return patch ? Object.freeze({ ...value, patch }) : null;
+}
+
+function contextPocPreferenceReadResponseValue(value, runtime) {
+  if (!contextPocExact(value, ['contract', 'hostInstanceId', 'requests'])
+      || value.contract !== contextBridgeModel.CONTRACT_VERSION
+      || !runtime || !runtime.handshake
+      || value.hostInstanceId !== runtime.handshake.hostInstanceId
+      || !Array.isArray(value.requests)
+      || value.requests.length > CONTEXT_POC_MAX_PREFERENCE_READ_BATCH) return null;
+  const requests = value.requests.map(contextPocPreferenceRequestValue);
+  if (requests.some((request) => request === null)
+      || new Set(requests.map((request) => request.requestToken)).size !== requests.length) {
+    return null;
+  }
+  return Object.freeze({
+    contract: value.contract,
+    hostInstanceId: value.hostInstanceId,
+    requests: Object.freeze(requests)
+  });
+}
+
+function createContextPocPreferenceCoordinator(options = {}) {
+  if (typeof options.read !== 'function' || typeof options.write !== 'function') {
+    throw new TypeError('context POC preferences adapter invalid');
+  }
+  let revision = Number.isSafeInteger(options.initialRevision)
+    ? options.initialRevision : 1;
+  if (revision < 1 || revision > CONTEXT_POC_MAX_PREFERENCE_REVISION) {
+    throw new TypeError('context POC preferences revision invalid');
+  }
+  const snapshot = () => {
+    const current = options.read();
+    return contextPocPreferenceSnapshotValue({
+      revision,
+      contentViewMode: current && current.contentViewMode,
+      contentViewHintSeen: current && current.contentViewHintSeen
+    });
+  };
+  const configChanged = () => {
+    if (revision >= CONTEXT_POC_MAX_PREFERENCE_REVISION) return null;
+    revision += 1;
+    return snapshot();
+  };
+  const sync = async (runtime, hooks = {}) => {
+    const isCurrent = hooks.isCurrent || contextPocRuntimeCurrent;
+    try {
+      if (!runtime || !runtime.handshake
+          || !runtime.handshake.capabilities.includes(CONTEXT_POC_PREFERENCES_CAPABILITY)
+          || !isCurrent(runtime)) return false;
+      const sent = snapshot();
+      if (!sent) return false;
+      const raw = await runtime.transport.call('ui/preferences/sync', {
+        contract: contextBridgeModel.CONTRACT_VERSION,
+        snapshot: sent
+      });
+      if (!isCurrent(runtime)) return false;
+      const response = contextPocPreferenceSyncResponseValue(raw);
+      const accepted = Boolean(response && response.accepted === true
+        && contextPocSamePreferenceSnapshot(response.snapshot, sent));
+      if (accepted) runtime.preferencesSyncedRevision = sent.revision;
+      return accepted;
+    } catch (_error) {
+      return false;
+    }
+  };
+  const applyWrite = async (runtime, event, hooks = {}) => {
+    const isCurrent = hooks.isCurrent || contextPocRuntimeCurrent;
+    const now = typeof hooks.now === 'function' ? hooks.now : Date.now;
+    let status = 'rejected';
+    let code = 'preferences-invalid';
+    const request = contextPocPreferenceRequestValue(event);
+    const patch = request && request.patch;
+    try {
+      const capable = Boolean(runtime && runtime.handshake
+        && runtime.handshake.capabilities.includes(CONTEXT_POC_PREFERENCES_CAPABILITY));
+      const binding = runtime && runtime.binding;
+      if (!capable || !isCurrent(runtime) || !binding) code = 'preferences-unavailable';
+      else if (!request || request.controllerId !== binding.controllerId
+          || request.pageInstanceId !== binding.pageInstanceId
+          || request.selectionRevision !== binding.selectionRevision) code = 'preferences-invalid';
+      else {
+        const writeAtMs = now();
+        if (!Number.isSafeInteger(writeAtMs) || writeAtMs < request.issuedAtMs) {
+          code = 'preferences-invalid';
+        } else if (request.deadlineMs - writeAtMs < CONTEXT_POC_PREFERENCE_WRITE_MARGIN_MS) {
+          code = 'preferences-timeout';
+        } else if (request.baseRevision !== revision
+            || revision >= CONTEXT_POC_MAX_PREFERENCE_REVISION) {
+          code = 'preferences-stale';
+        } else {
+          try {
+            options.write(patch);
+            revision += 1;
+            status = 'applied';
+            code = null;
+          } catch (_error) {
+            code = 'preferences-write-failed';
+          }
+        }
+      }
+      const current = snapshot();
+      if (!current) return { applied: false, code: 'preferences-write-failed', settled: false };
+      if (!request || !capable || !isCurrent(runtime)) {
+        return { applied: status === 'applied', code, settled: false, snapshot: current };
+      }
+      const settled = await runtime.transport.call('ui/preferences/settle', {
+        contract: contextBridgeModel.CONTRACT_VERSION,
+        requestToken: request.requestToken,
+        status,
+        code,
+        snapshot: current
+      });
+      return {
+        applied: status === 'applied',
+        code,
+        settled: contextPocExact(settled, ['settled']) && settled.settled === true,
+        snapshot: current
+      };
+    } catch (_error) {
+      return { applied: status === 'applied', code, settled: false };
+    }
+  };
+  const drain = async (runtime, hooks = {}) => {
+    const isCurrent = hooks.isCurrent || contextPocRuntimeCurrent;
+    if (!runtime || runtime.preferencesBusy === true) return false;
+    runtime.preferencesBusy = true;
+    try {
+      const capable = Boolean(runtime.handshake
+        && Array.isArray(runtime.handshake.capabilities)
+        && runtime.handshake.capabilities.includes(CONTEXT_POC_PREFERENCES_CAPABILITY));
+      if (!capable || !isCurrent(runtime)) return false;
+      let current = snapshot();
+      if (!current) return false;
+      if (runtime.preferencesSyncedRevision !== current.revision
+          && !await sync(runtime, hooks)) return false;
+      current = snapshot();
+      if (!current || runtime.preferencesSyncedRevision !== current.revision) return false;
+      const raw = await runtime.transport.call('ui/preferences/read', {
+        contract: contextBridgeModel.CONTRACT_VERSION,
+        hostInstanceId: runtime.handshake.hostInstanceId
+      });
+      if (!isCurrent(runtime)) return false;
+      const batch = contextPocPreferenceReadResponseValue(raw, runtime);
+      if (!batch) return false;
+      for (const request of batch.requests) {
+        if (!isCurrent(runtime)) return false;
+        await applyWrite(runtime, request, hooks);
+      }
+      return true;
+    } catch (_error) {
+      return false;
+    } finally {
+      runtime.preferencesBusy = false;
+    }
+  };
+  return Object.freeze({ snapshot, configChanged, sync, applyWrite, drain });
+}
+
+contextPocPreferences = createContextPocPreferenceCoordinator({
+  read: () => config.get(),
+  write: (patch) => config.set(patch)
+});
 
 function contextPocHandshakeValue(value) {
   if (!contextPocExact(value, [
@@ -5928,6 +6349,9 @@ async function contextPocTick(runtime) {
       }
     }
     if (changed) pushShellState();
+    // 偏好通道没有 core cursor；只在本轮 ACK/turn journal 与 stage 全部完成后
+    // 后台读取。读、验、写或 settle 失败都由该偏好自己的绝对 deadline 收口。
+    void contextPocPreferences.drain(runtime).catch(() => {});
   } catch (error) {
     if (contextPocRuntimeCurrent(runtime)) {
       if (error && error.code === 'ERR_CONTEXT_POC_EVENT_GAP') {
@@ -6005,11 +6429,13 @@ async function startContextPocBridge(state) {
     };
     contextPocBridgeRuntime = runtime;
     contextPocController.runtime.handshake = handshake;
+    reportContextPocAvailability(state, 'ready');
     pushShellState();
     void contextPocTick(runtime);
     return true;
   } catch (_error) {
     if (generation === contextPocBridgeGeneration) {
+      reportContextPocAvailability(state, 'rpc-handshake', 'bridge-unavailable');
       contextPocController.runtime.handshake = null;
       contextPocSuspend('bridge-unavailable');
       pushShellState();
@@ -6566,6 +6992,12 @@ async function onReady() {
   });
   await initializeWorkspaceConfig();
   log.init(path.join(app.getPath('userData'), 'logs'));
+  try {
+    const cleanup = backend.cleanupContextPocRuns(app.getPath('userData'));
+    log.line('context', `context-poc startup cleanup removed=${cleanup.removed} skipped=${cleanup.skipped}`);
+  } catch (_error) {
+    log.line('context', 'context-poc startup cleanup removed=0 skipped=1');
+  }
   initEventService();
   initializeWorkspaceCoordinator();
   log.line('app', `鲸坞 WhaleDock v${app.getVersion()} 启动 (${process.platform}/${process.arch})`);
@@ -6662,6 +7094,14 @@ function startManagedBackend(options = {}) {
   });
   backendState = state;
   spawnedByUs = true;
+  if (contextPocController.enabled === true) {
+    reportContextPocAvailability(
+      state,
+      'asset-mount',
+      state.contextBridgeMounted === true && state.contextBridgeReason === 'ready'
+        ? null : 'bridge-unavailable'
+    );
+  }
   log.line('app', `实际后端命令: ${state.label}；版本: ${state.version}`);
   return state;
 }
@@ -6893,7 +7333,7 @@ async function reconcileDshConfig() {
 function reloadMainWindowAfterRecovery() {
   const win = mainWindow;
   if (!win || win.isDestroyed() || !dshView || dshView.webContents.isDestroyed()) return;
-  void reloadHarnessView().then((loaded) => {
+  void reloadHarnessView(dshView, { transition: 'runtime' }).then((loaded) => {
     // Electron 导航异常可能把完整 URL（含 fragment capability）放进 message。
     // 持久日志只记录固定脱敏文案，绝不拼接异常对象。
     if (!loaded) log.line('app', '后台恢复后重载界面失败（详情已脱敏）');
@@ -7200,10 +7640,21 @@ function openMainWindow() {
 
   let attempts = 0;
   let retryTimer = null;
+  let managedNavigationResignPending = false;
+  let managedNavigationWarningShown = false;
+  const warnManagedNavigationBlocked = () => {
+    if (managedNavigationWarningShown) return;
+    managedNavigationWarningShown = true;
+    warnContextPocManagedNavigationBlocked();
+  };
   const tryLoad = () => {
     if (quitting || win.isDestroyed() || view.webContents.isDestroyed()) return;
     retryTimer = null;
-    void view.webContents.loadURL(harnessViewUrl()).catch(() => { /* did-fail-load 里处理 */ });
+    void reloadHarnessView(view, {
+      owned: true,
+      transition: 'initial',
+      onBlocked: warnManagedNavigationBlocked
+    });
   };
   // 统一统计初次加载、后台恢复重载与用户手动刷新，避免直接 loadURL 时出现“第 0 次”。
   view.webContents.on('did-start-loading', () => { attempts += 1; });
@@ -7260,10 +7711,55 @@ function openMainWindow() {
     if (/^https?:/i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
-  view.webContents.on('will-navigate', (e, url) => {
-    if (!url.startsWith(baseUrl())) {
-      e.preventDefault();
-      if (/^https?:/i.test(url)) shell.openExternal(url);
+  view.webContents.on('will-navigate', (
+    event, deprecatedUrl, deprecatedIsInPlace, deprecatedIsMainFrame
+  ) => {
+    const targetUrl = typeof event.url === 'string' ? event.url : deprecatedUrl;
+    const decision = contextPocManagedNavigationDecision({
+      owned: dshView === view,
+      managed: contextPocManagedViews.get(view)?.mode === 'managed',
+      isMainFrame: typeof event.isMainFrame === 'boolean'
+        ? event.isMainFrame : deprecatedIsMainFrame,
+      isSameDocument: typeof event.isSameDocument === 'boolean'
+        ? event.isSameDocument : deprecatedIsInPlace,
+      currentUrl: view.webContents.getURL(),
+      targetUrl,
+      baseOrigin: baseUrl(),
+      controller: contextPocController,
+      runtime: { backendReady, spawnedByUs, state: backendState }
+    });
+    if (decision.action === 'allow') {
+      contextPocManagedViews.set(view, contextPocViewModeState('managed', {
+        state: backendState, generation: contextPocBridgeGeneration
+      }));
+      return;
+    }
+    if (decision.action === 'resign' || decision.action === 'block') {
+      event.preventDefault();
+      if (decision.action === 'block') {
+        warnManagedNavigationBlocked();
+        return;
+      }
+      if (managedNavigationResignPending) return;
+      managedNavigationResignPending = true;
+      contextPocManagedViews.set(view, contextPocViewModeState('managed', {
+        state: backendState, generation: contextPocBridgeGeneration
+      }));
+      void view.webContents.loadURL(decision.url).then(() => {
+        managedNavigationWarningShown = false;
+      }).catch(() => {
+        warnManagedNavigationBlocked();
+      }).finally(() => {
+        managedNavigationResignPending = false;
+      });
+      return;
+    }
+    let sameOrigin = false;
+    try { sameOrigin = new URL(targetUrl).origin === new URL(baseUrl()).origin; }
+    catch (_error) { /* 非 URL 一律阻止 */ }
+    if (!sameOrigin) {
+      event.preventDefault();
+      if (/^https?:/i.test(targetUrl)) shell.openExternal(targetUrl);
     }
   });
 
@@ -8600,6 +9096,8 @@ function registerSettingsIpc() {
         && normalized[key] !== before[key]);
     const loginChanged = Object.prototype.hasOwnProperty.call(normalized, 'openAtLogin')
       && normalized.openAtLogin !== before.openAtLogin;
+    const preferenceChanged = Object.prototype.hasOwnProperty.call(normalized, 'contentViewMode')
+      && normalized.contentViewMode !== before.contentViewMode;
     let login = loginItemStatus();
     let loginError = '';
     let configWritten = false;
@@ -8687,6 +9185,10 @@ function registerSettingsIpc() {
     if (eventEffects.length) await handleEventEffects(eventEffects, eventMonitor);
     if (loginChanged) login = loginItemStatus(loginError);
     if (Object.prototype.hasOwnProperty.call(normalized, 'checkUpdates')) configureUpdateSchedule();
+    if (preferenceChanged) {
+      contextPocPreferences.configChanged();
+      void contextPocPreferences.sync(contextPocBridgeRuntime);
+    }
     log.line('app', `设置已保存${needsRestart ? '（后端需重启）' : ''}`);
     return {
       ok: true,
@@ -9946,16 +10448,30 @@ if (MAIN_HELPER_TEST) {
     workspaceIdentitySurface,
     shouldRetireExternalAttach,
     confirmExternalAttachRetirement,
+    contextPocDefaultEnabled,
+    createContextPocAvailabilityReporter,
     createContextPocController,
     contextPocShellSurface,
     contextPocShellStateField,
     contextPocHarnessUrl,
+    contextPocNavigationFragmentValid,
+    contextPocManagedNavigationDecision,
+    contextPocViewModeState,
+    contextPocDesiredViewMode,
+    contextPocManagedLoadDecision,
     contextPocReloadOrigin,
     reloadHarnessView,
     contextPocHandshakeValue,
     contextPocBindingValue,
     contextPocEventsValue,
     contextPocStageResponseValue,
+    contextPocPreferencePatchValue,
+    contextPocPreferenceSnapshotValue,
+    contextPocPreferenceSyncResponseValue,
+    contextPocPreferenceRequestValue,
+    contextPocPreferenceReadResponseValue,
+    createContextPocPreferenceCoordinator,
+    CONTEXT_POC_PREFERENCE_WRITE_MARGIN_MS,
     contextPocCurrentEffects,
     contextPocRememberTurnMiss,
     contextPocClearTurnMiss,

@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { HOTFIX_VERSION, verifyHotfixResources } = require('./hotfix-build-config');
+const contextPocManifest = require('./context-poc-manifest');
 
 const DEFAULT_ROOT = path.resolve(__dirname, '..');
 const SDK_NAME = '@larksuiteoapi/node-sdk';
@@ -300,6 +301,21 @@ function assertExactPackagedFiles(expected, actual, label = '成品包') {
   return actualRows;
 }
 
+function verifyPackagedContextPoc(options = {}) {
+  const asar = path.resolve(options.asar || '');
+  const resources = path.resolve(options.resources || '');
+  const baselinePath = path.join(asar, 'lib', 'context-poc-baseline.json');
+  const baseline = contextPocManifest.readBaseline(baselinePath);
+  const actual = contextPocManifest.createManifest(path.join(resources, 'context-poc'));
+  contextPocManifest.assertManifestMatches(baseline, actual);
+  return Object.freeze({
+    contextPocBaselineVerified: true,
+    contextPocFiles: actual.files.length,
+    contextPocBytes: actual.totalBytes,
+    contextPocDigest: actual.digest
+  });
+}
+
 function probeAsar(options = {}) {
   if (options.requireElectron !== false && !process.versions.electron) {
     throw packagedError('PROBE', '私有 probe 必须由成品 Electron 执行');
@@ -311,6 +327,24 @@ function probeAsar(options = {}) {
   const rootManifest = readJson(path.join(asar, 'package.json'), 'app.asar/package.json');
   if (typeof rootManifest.version !== 'string' || !rootManifest.version) {
     throw packagedError('PROBE', 'app.asar 根版本缺失');
+  }
+  const packagedBaselinePath = path.join(asar, 'lib', 'context-poc-baseline.json');
+  const hasPackagedContextPocBaseline = fs.existsSync(packagedBaselinePath);
+  let contextPocReceipt = null;
+  if (hasPackagedContextPocBaseline) {
+    if (!options.resources) {
+      throw packagedError('PROBE', 'app.asar 含 context-poc 信任根但未提供 Resources');
+    }
+    try {
+      contextPocReceipt = verifyPackagedContextPoc({
+        asar,
+        resources: options.resources
+      });
+    } catch (error) {
+      throw packagedError('PROBE', `context-poc 成品信任根失败：${error.message}`);
+    }
+  } else if (options.resources) {
+    throw packagedError('PROBE', 'Resources 对账请求缺少 app.asar context-poc 信任根');
   }
   const expectedQueues = expectedPackageQueues(inventory.packages);
   const actualPackages = nodeModulesPackages(asar);
@@ -378,11 +412,17 @@ function probeAsar(options = {}) {
     lazyLoadVerified: true,
     sdkExportsVerified: ['EventDispatcher', 'WSClient'],
     fileCount: treeRows.length,
-    treeSha256
+    treeSha256,
+    ...(contextPocReceipt || {})
   });
 }
 
-function validateProbeReport(report, inventory, expectedAppVersion = null) {
+function validateProbeReport(
+  report,
+  inventory,
+  expectedAppVersion = null,
+  expectedContextPocBaseline = null
+) {
   inventoryContract(inventory);
   const exportsExpected = ['EventDispatcher', 'WSClient'];
   if (!report || report.status !== 'PASS' || typeof report.electronVersion !== 'string'
@@ -394,6 +434,15 @@ function validateProbeReport(report, inventory, expectedAppVersion = null) {
       || (expectedAppVersion !== null && report.appVersion !== expectedAppVersion)) {
     throw packagedError('PROBE', '成品 probe receipt 无效或与 inventory 不一致');
   }
+  if (expectedContextPocBaseline !== null) {
+    const expected = contextPocManifest.validateBaseline(expectedContextPocBaseline);
+    if (report.contextPocBaselineVerified !== true
+        || report.contextPocFiles !== expected.files.length
+        || report.contextPocBytes !== expected.totalBytes
+        || report.contextPocDigest !== expected.digest) {
+      throw packagedError('PROBE', '成品 context-poc receipt 无效或与固定信任根不一致');
+    }
+  }
   return report;
 }
 
@@ -403,6 +452,9 @@ function verifyApp(options = {}) {
   const materials = verifyPackagedMaterials({ root, resources: layout.resources });
   const inventory = inventoryContract(readJson(materials.inventoryPath, '成品 inventory'));
   const rootPackage = readJson(path.join(root, 'package.json'), '仓库 package.json');
+  const repositoryBaselinePath = path.join(root, 'lib', 'context-poc-baseline.json');
+  const expectedContextPocBaseline = fs.existsSync(repositoryBaselinePath)
+    ? contextPocManifest.readBaseline(repositoryBaselinePath) : null;
   if (rootPackage.version === HOTFIX_VERSION) {
     verifyHotfixResources(layout.resources);
   }
@@ -411,7 +463,8 @@ function verifyApp(options = {}) {
     __filename,
     '--probe',
     `--asar=${layout.asar}`,
-    `--inventory=${materials.inventoryPath}`
+    `--inventory=${materials.inventoryPath}`,
+    ...(expectedContextPocBaseline ? [`--resources=${layout.resources}`] : [])
   ], {
     cwd: root,
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
@@ -426,7 +479,12 @@ function verifyApp(options = {}) {
   let report;
   try { report = JSON.parse(String(result.stdout || '').trim()); }
   catch (_error) { throw packagedError('PROBE', '成品 Electron probe 未返回单一 JSON receipt'); }
-  validateProbeReport(report, inventory, rootPackage.version);
+  validateProbeReport(
+    report,
+    inventory,
+    rootPackage.version,
+    expectedContextPocBaseline
+  );
   return Object.freeze({
     ...report,
     platform: layout.platform,
@@ -442,13 +500,14 @@ function parseArgs(argv) {
     else if (value.startsWith('--app=')) result.app = value.slice('--app='.length);
     else if (value.startsWith('--asar=')) result.asar = value.slice('--asar='.length);
     else if (value.startsWith('--inventory=')) result.inventory = value.slice('--inventory='.length);
+    else if (value.startsWith('--resources=')) result.resources = value.slice('--resources='.length);
     else throw packagedError('ARGS', `未知参数：${value}`);
   }
   if (result.probe) {
     if (!result.asar || !result.inventory || result.app) {
-      throw packagedError('ARGS', 'probe 必须且只能提供 --asar/--inventory');
+      throw packagedError('ARGS', 'probe 必须提供 --asar/--inventory，可提供 --resources');
     }
-  } else if (!result.app || result.asar || result.inventory) {
+  } else if (!result.app || result.asar || result.inventory || result.resources) {
     throw packagedError('ARGS', '用法：verify-packaged-app-runtime.js --app=<unpacked-app-root>');
   }
   return result;
@@ -459,7 +518,8 @@ function main(argv = process.argv.slice(2)) {
   if (args.probe) {
     process.stdout.write(JSON.stringify(probeAsar({
       asar: args.asar,
-      inventoryPath: args.inventory
+      inventoryPath: args.inventory,
+      resources: args.resources
     })) + '\n');
     return;
   }
@@ -479,6 +539,7 @@ module.exports = Object.freeze({
   inventoryContract,
   nodeModulesPackages,
   packagedPackageFiles,
+  verifyPackagedContextPoc,
   probeAsar,
   validateProbeReport,
   verifyApp,

@@ -14,7 +14,8 @@ const CAPABILITIES = Object.freeze([
   'delivery-proof',
   'selection-authority',
   'controller-conflict-fence',
-  'ordered-events'
+  'ordered-events',
+  'ui-preferences-v1'
 ]);
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 const SESSION_REF_RE = /^session-[a-f0-9]{64}$/;
@@ -23,13 +24,34 @@ const PROJECT_REVISION_RE = /^[a-f0-9]{64}$/;
 const WORKBENCH_ID_RE = /^(?:builtin|user):[A-Za-z0-9][A-Za-z0-9._-]{0,87}$/;
 const TOKEN_RE = /^[a-f0-9]{64}$/;
 const NONCE_RE = /^[a-f0-9]{64}$/;
+const REGISTER_NONCE_RE = /^[a-f0-9]{32}$/;
 const CONTROL_RE = /[\u0000-\u001f\u007f]/;
 const LEASE_MS = 15000;
+const REGISTER_NONCE_TTL_MS = 10000;
+const REGISTER_CLOCK_SKEW_MS = 1000;
 const MAX_EVENTS = 512;
 const MAX_EVENT_BYTES = 2048;
 const MAX_CONTROLLERS = 128;
 const MAX_RECORDS = 256;
 const MAX_RPC_SESSIONS = 4;
+const MAX_REGISTER_NONCES = 4096;
+const MAX_PREFERENCE_REVISION = 1_000_000_000;
+const MAX_PENDING_PREFERENCES = 64;
+const MAX_PREFERENCE_READ_BATCH = 16;
+const PREFERENCE_PENDING_MS = 3000;
+const ENDPOINT_RATES = Object.freeze({
+  handshake: 16,
+  'selection/register': 256,
+  'selection/resolve': 32,
+  'context/stage': 64,
+  'context/preflight': 128,
+  'events/read': 64,
+  'ui/preferences/get': 64,
+  'ui/preferences/write': 16,
+  'ui/preferences/read': 64,
+  'ui/preferences/sync': 32,
+  'ui/preferences/settle': 32
+});
 
 function plain(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -95,6 +117,41 @@ function validRawSession(value) {
     && value.length <= 256 && !CONTROL_RE.test(value));
 }
 
+function validPreferenceRevision(value, allowZero = false) {
+  return Number.isSafeInteger(value) && value >= (allowZero ? 0 : 1)
+    && value <= MAX_PREFERENCE_REVISION;
+}
+
+function preferencePatch(value) {
+  if (!plain(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.length < 1 || keys.length > 2
+      || keys.some((key) => key !== 'contentViewMode' && key !== 'contentViewHintSeen')
+      || (Object.prototype.hasOwnProperty.call(value, 'contentViewMode')
+        && value.contentViewMode !== 'content' && value.contentViewMode !== 'sessions')
+      || (Object.prototype.hasOwnProperty.call(value, 'contentViewHintSeen')
+        && typeof value.contentViewHintSeen !== 'boolean')) return null;
+  return Object.freeze({ ...value });
+}
+
+function preferenceSnapshot(value, allowZero = false) {
+  if (!exact(value, ['revision', 'contentViewMode', 'contentViewHintSeen'])
+      || !validPreferenceRevision(value.revision, allowZero)
+      || (value.contentViewMode !== 'content' && value.contentViewMode !== 'sessions')
+      || typeof value.contentViewHintSeen !== 'boolean') return null;
+  return Object.freeze({
+    revision: value.revision,
+    contentViewMode: value.contentViewMode,
+    contentViewHintSeen: value.contentViewHintSeen
+  });
+}
+
+function samePreferenceSnapshot(left, right) {
+  return Boolean(left && right && left.revision === right.revision
+    && left.contentViewMode === right.contentViewMode
+    && left.contentViewHintSeen === right.contentViewHintSeen);
+}
+
 function validRelativePath(value) {
   if (value === '.') return true;
   if (typeof value !== 'string' || !value || Buffer.byteLength(value, 'utf8') > 2048
@@ -154,17 +211,27 @@ export function apply(ctx) {
   const recordsByRaw = new Map();
   const rpcSessions = [];
   const journal = [];
+  const registerNonces = new Map();
+  const endpointBuckets = new Map();
+  const pendingPreferences = new Map();
+  let preferences = Object.freeze({
+    revision: 0,
+    contentViewMode: 'content',
+    contentViewHintSeen: false
+  });
   let eventSeq = 0;
 
   const emit = (type, fields) => {
+    const nextEventSeq = eventSeq + 1;
     const event = Object.freeze({
       contract: CONTRACT,
       hostInstanceId,
-      eventSeq: ++eventSeq,
+      eventSeq: nextEventSeq,
       type,
       ...fields
     });
     if (Buffer.byteLength(JSON.stringify(event), 'utf8') > MAX_EVENT_BYTES) return null;
+    eventSeq = nextEventSeq;
     journal.push(event);
     while (journal.length > MAX_EVENTS) journal.shift();
     return event;
@@ -173,6 +240,32 @@ export function apply(ctx) {
   const mintSessionRef = (raw) => (
     `session-${sha256(`${hostInstanceId}\0${raw}\0${randomUUID()}`)}`
   );
+
+  const takeEndpointBudget = (endpoint, now = Date.now()) => {
+    const limit = ENDPOINT_RATES[endpoint];
+    if (!Number.isSafeInteger(limit)) return false;
+    const windowId = Math.floor(now / 1000);
+    const bucket = endpointBuckets.get(endpoint);
+    if (!bucket || bucket.windowId !== windowId) {
+      endpointBuckets.set(endpoint, { windowId, count: 1 });
+      return true;
+    }
+    if (bucket.count >= limit) return false;
+    bucket.count += 1;
+    return true;
+  };
+
+  const acceptRegisterNonce = (nonce, issuedAtMs, now = Date.now()) => {
+    for (const [key, expiresAt] of registerNonces) {
+      if (expiresAt < now) registerNonces.delete(key);
+    }
+    if (!REGISTER_NONCE_RE.test(nonce) || !Number.isSafeInteger(issuedAtMs)
+        || issuedAtMs < now - REGISTER_NONCE_TTL_MS
+        || issuedAtMs > now + REGISTER_CLOCK_SKEW_MS
+        || registerNonces.has(nonce) || registerNonces.size >= MAX_REGISTER_NONCES) return false;
+    registerNonces.set(nonce, issuedAtMs + REGISTER_NONCE_TTL_MS);
+    return true;
+  };
 
   const sweep = (now = Date.now()) => {
     for (const [controllerId, selection] of controllers) {
@@ -232,16 +325,22 @@ export function apply(ctx) {
   const registerSelection = (payload) => {
     if (!exact(payload, [
       'contract', 'controllerId', 'pageInstanceId', 'selectionRevision',
-      'currentSessionId', 'managed', 'selectionToken'
+      'currentSessionId', 'managed', 'selectionToken', 'registerNonce',
+      'issuedAtMs', 'controllerProof'
     ]) || payload.contract !== CONTRACT || !validId(payload.controllerId)
         || !validId(payload.pageInstanceId)
         || !Number.isSafeInteger(payload.selectionRevision) || payload.selectionRevision < 1
         || !validRawSession(payload.currentSessionId)
         || !tokenMatches(payload.selectionToken, selectionToken)
+        || !TOKEN_RE.test(payload.controllerProof)
         || typeof payload.managed !== 'boolean') return bad();
 
-    sweep();
+    const now = Date.now();
+    if (!takeEndpointBudget('selection/register', now)) return bad();
+    sweep(now);
     const previous = controllers.get(payload.controllerId);
+    if (previous && !tokenMatches(payload.controllerProof, previous.controllerProof)) return bad();
+    if (!acceptRegisterNonce(payload.registerNonce, payload.issuedAtMs, now)) return bad();
     if (previous && previous.pageInstanceId !== payload.pageInstanceId
         && payload.selectionRevision <= previous.selectionRevision) {
       return ok({
@@ -269,7 +368,8 @@ export function apply(ctx) {
       previous.seenAt = Date.now();
       const current = resolveSelectionState(previous);
       return ok({
-        ...current,
+        state: current.state,
+        code: current.code,
         controllerId: previous.controllerId,
         pageInstanceId: previous.pageInstanceId,
         selectionRevision: previous.selectionRevision
@@ -290,6 +390,7 @@ export function apply(ctx) {
       selectionRevision: payload.selectionRevision,
       raw,
       managed: payload.managed,
+      controllerProof: payload.controllerProof,
       sessionRef: raw === null ? null : mintSessionRef(raw),
       seenAt: Date.now()
     };
@@ -316,7 +417,8 @@ export function apply(ctx) {
     sweep();
     const current = resolveSelectionState(selection);
     return ok({
-      ...current,
+      state: current.state,
+      code: current.code,
       controllerId: selection.controllerId,
       pageInstanceId: selection.pageInstanceId,
       selectionRevision: selection.selectionRevision
@@ -324,11 +426,198 @@ export function apply(ctx) {
   };
 
   const withAuth = (payload, required, optional = []) => {
-    if (!exact(payload, [...required, 'authToken'], optional)
-        || !rpcSessions.includes(payload.authToken)) return null;
+    const shapeValid = exact(payload, [...required, 'authToken'], optional);
+    const actualValid = shapeValid && typeof payload.authToken === 'string'
+      && TOKEN_RE.test(payload.authToken);
+    const actual = Buffer.from(actualValid ? payload.authToken : '00'.repeat(32), 'hex');
+    let matched = 0;
+    for (let index = 0; index < MAX_RPC_SESSIONS; index += 1) {
+      const expected = rpcSessions[index] || '00'.repeat(32);
+      const equal = timingSafeEqual(actual, Buffer.from(expected, 'hex'));
+      if (index < rpcSessions.length && equal) matched |= 1;
+    }
+    if (!actualValid || matched !== 1) return null;
     const { authToken: _secret, ...value } = payload;
     return value;
   };
+
+  const preferencePageSelection = (payload, extra) => {
+    if (!exact(payload, [
+      'contract', 'controllerId', 'pageInstanceId', 'selectionRevision',
+      'selectionToken', 'controllerProof', ...extra
+    ]) || payload.contract !== CONTRACT || !validId(payload.controllerId)
+        || !validId(payload.pageInstanceId)
+        || !validPreferenceRevision(payload.selectionRevision)
+        || !tokenMatches(payload.selectionToken, selectionToken)
+        || !TOKEN_RE.test(payload.controllerProof)) return null;
+    sweep();
+    const selection = controllers.get(payload.controllerId);
+    if (!selection || selection.managed !== true
+        || selection.pageInstanceId !== payload.pageInstanceId
+        || selection.selectionRevision !== payload.selectionRevision
+        || !tokenMatches(payload.controllerProof, selection.controllerProof)) return null;
+    return selection;
+  };
+
+  const syncPreferences = (payload) => {
+    const value = withAuth(payload, ['contract', 'snapshot']);
+    const snapshot = value && preferenceSnapshot(value.snapshot);
+    if (!value || value.contract !== CONTRACT || !snapshot) return bad();
+    if (!takeEndpointBudget('ui/preferences/sync')) return bad();
+    sweep();
+    if (snapshot.revision < preferences.revision) {
+      return ok({ accepted: false, code: 'preferences-stale', snapshot: preferences });
+    }
+    if (snapshot.revision === preferences.revision
+        && !samePreferenceSnapshot(snapshot, preferences)) {
+      return ok({ accepted: false, code: 'preferences-conflict', snapshot: preferences });
+    }
+    preferences = snapshot;
+    return ok({ accepted: true, code: null, snapshot: preferences });
+  };
+
+  const expirePendingPreference = (requestToken, pending, now = Date.now()) => {
+    if (pendingPreferences.get(requestToken) !== pending || now < pending.deadlineMs) {
+      return false;
+    }
+    pendingPreferences.delete(requestToken);
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.resolve(ok({
+      accepted: false,
+      code: 'preferences-timeout',
+      snapshot: preferences
+    }));
+    return true;
+  };
+
+  const expirePendingPreferences = (now = Date.now()) => {
+    for (const [requestToken, pending] of pendingPreferences) {
+      expirePendingPreference(requestToken, pending, now);
+    }
+  };
+
+  const readPreferences = (payload) => {
+    const value = withAuth(payload, ['contract', 'hostInstanceId']);
+    if (!value || value.contract !== CONTRACT || value.hostInstanceId !== hostInstanceId) {
+      return bad();
+    }
+    if (!takeEndpointBudget('ui/preferences/read')) return bad();
+    expirePendingPreferences();
+    return ok({
+      contract: CONTRACT,
+      hostInstanceId,
+      requests: [...pendingPreferences.values()]
+        .slice(0, MAX_PREFERENCE_READ_BATCH)
+        .map((pending) => pending.request)
+    });
+  };
+
+  const settlePreferences = (payload) => {
+    const value = withAuth(payload, [
+      'contract', 'requestToken', 'status', 'code', 'snapshot'
+    ]);
+    const snapshot = value && preferenceSnapshot(value.snapshot);
+    const rejectedCodes = new Set([
+      'preferences-invalid', 'preferences-stale',
+      'preferences-unavailable', 'preferences-write-failed', 'preferences-timeout'
+    ]);
+    if (!value || value.contract !== CONTRACT || !TOKEN_RE.test(value.requestToken)
+        || !snapshot || !['applied', 'rejected'].includes(value.status)
+        || (value.status === 'applied' ? value.code !== null : !rejectedCodes.has(value.code))) {
+      return bad();
+    }
+    if (!takeEndpointBudget('ui/preferences/settle')) return bad();
+    sweep();
+    expirePendingPreferences();
+    const pending = pendingPreferences.get(value.requestToken);
+    if (!pending) return bad();
+    if (value.status === 'applied') {
+      const expected = {
+        ...preferences,
+        ...pending.patch,
+        revision: pending.baseRevision + 1
+      };
+      if (preferences.revision !== pending.baseRevision
+          || snapshot.revision !== expected.revision
+          || !samePreferenceSnapshot(snapshot, expected)) return bad();
+    } else if (snapshot.revision < preferences.revision
+        || (snapshot.revision === preferences.revision
+          && !samePreferenceSnapshot(snapshot, preferences))) return bad();
+
+    pendingPreferences.delete(value.requestToken);
+    if (pending.timer) clearTimeout(pending.timer);
+    preferences = snapshot;
+    pending.resolve(ok({
+      accepted: value.status === 'applied',
+      code: value.code,
+      snapshot: preferences
+    }));
+    return ok({ settled: true });
+  };
+
+  const getPreferences = (payload) => {
+    if (!preferencePageSelection(payload, [])) return bad();
+    if (!takeEndpointBudget('ui/preferences/get')) return bad();
+    return ok({ snapshot: preferences });
+  };
+
+  const writePreferences = (payload) => {
+    if (!preferencePageSelection(payload, ['baseRevision', 'patch'])
+        || !validPreferenceRevision(payload.baseRevision)) return bad();
+    const patch = preferencePatch(payload.patch);
+    if (!patch) return bad();
+    if (!takeEndpointBudget('ui/preferences/write')) return bad();
+    expirePendingPreferences();
+    if (preferences.revision < 1) {
+      return ok({ accepted: false, code: 'preferences-unavailable', snapshot: preferences });
+    }
+    if (payload.baseRevision !== preferences.revision) {
+      return ok({ accepted: false, code: 'preferences-stale', snapshot: preferences });
+    }
+    if (pendingPreferences.size >= MAX_PENDING_PREFERENCES) {
+      return ok({ accepted: false, code: 'preferences-busy', snapshot: preferences });
+    }
+    const issuedAtMs = Date.now();
+    const deadlineMs = issuedAtMs + PREFERENCE_PENDING_MS;
+    if (!Number.isSafeInteger(issuedAtMs) || issuedAtMs < 0
+        || !Number.isSafeInteger(deadlineMs)) return internal();
+    const requestToken = sha256(
+      `preferences\0${randomUUID()}\0${issuedAtMs}\0${pendingPreferences.size}`
+    );
+    const request = Object.freeze({
+      controllerId: payload.controllerId,
+      pageInstanceId: payload.pageInstanceId,
+      selectionRevision: payload.selectionRevision,
+      requestToken,
+      baseRevision: payload.baseRevision,
+      issuedAtMs,
+      deadlineMs,
+      patch
+    });
+    return new Promise((resolve) => {
+      const pending = {
+        baseRevision: payload.baseRevision,
+        deadlineMs,
+        patch,
+        request,
+        resolve,
+        timer: null
+      };
+      pendingPreferences.set(requestToken, pending);
+      const remainingMs = Math.max(0, Math.min(
+        PREFERENCE_PENDING_MS, deadlineMs - Date.now()
+      ));
+      pending.timer = setTimeout(() => {
+        expirePendingPreference(requestToken, pending);
+      }, remainingMs);
+      if (pending.timer && typeof pending.timer.unref === 'function') pending.timer.unref();
+    });
+  };
+
+  const validPreflightAuth = (payload) => exact(payload, [
+    'contract', 'controllerId', 'pageInstanceId', 'selectionRevision',
+    'currentSessionId', 'mode', 'managed', 'selectionToken'
+  ]) && tokenMatches(payload.selectionToken, selectionToken);
 
   const stageContext = (payload) => {
     const value = withAuth(payload, [
@@ -431,7 +720,6 @@ export function apply(ctx) {
 
   const handler = async (endpoint, payload) => {
     try {
-      sweep();
       if (endpoint === 'selection/register') return registerSelection(payload);
       if (endpoint === 'handshake') {
         if (!exact(payload, ['type', 'protocol', 'clientNonce', 'requestProof'])
@@ -440,6 +728,8 @@ export function apply(ctx) {
             || !tokenMatches(payload.requestProof, bridgeHmac(
               authToken, 'handshake-request', payload.clientNonce, ''
             ))) return bad();
+        if (!takeEndpointBudget(endpoint)) return bad();
+        sweep();
         const proof = bridgeHmac(
           authToken, 'handshake-proof', payload.clientNonce, hostInstanceId
         );
@@ -462,6 +752,8 @@ export function apply(ctx) {
       if (endpoint === 'selection/resolve') {
         const value = withAuth(payload, ['contract', 'controllerId']);
         if (!value || value.contract !== CONTRACT || !validId(value.controllerId)) return bad();
+        if (!takeEndpointBudget(endpoint)) return bad();
+        sweep();
         const selection = controllers.get(value.controllerId);
         if (!selection || selection.managed !== true) {
           return ok({ state: 'none', hostInstanceId, sessionRef: null, code: null });
@@ -475,12 +767,31 @@ export function apply(ctx) {
           selectionRevision: selection.selectionRevision
         });
       }
-      if (endpoint === 'context/stage') return stageContext(payload);
-      if (endpoint === 'context/preflight') return preflightContext(payload);
+      if (endpoint === 'context/stage') {
+        if (!withAuth(payload, [
+          'controllerId', 'pageInstanceId', 'selectionRevision', 'envelope'
+        ])) return bad();
+        if (!takeEndpointBudget(endpoint)) return bad();
+        sweep();
+        return stageContext(payload);
+      }
+      if (endpoint === 'context/preflight') {
+        if (!validPreflightAuth(payload)) return bad();
+        if (!takeEndpointBudget(endpoint)) return bad();
+        sweep();
+        return preflightContext(payload);
+      }
+      if (endpoint === 'ui/preferences/get') return getPreferences(payload);
+      if (endpoint === 'ui/preferences/write') return writePreferences(payload);
+      if (endpoint === 'ui/preferences/read') return readPreferences(payload);
+      if (endpoint === 'ui/preferences/sync') return syncPreferences(payload);
+      if (endpoint === 'ui/preferences/settle') return settlePreferences(payload);
       if (endpoint === 'events/read') {
         const value = withAuth(payload, ['contract', 'hostInstanceId', 'afterEventSeq']);
         if (!value || value.contract !== CONTRACT || value.hostInstanceId !== hostInstanceId
             || !Number.isSafeInteger(value.afterEventSeq) || value.afterEventSeq < 0) return bad();
+        if (!takeEndpointBudget(endpoint)) return bad();
+        sweep();
         const oldestEventSeq = journal[0]?.eventSeq || eventSeq + 1;
         const resyncRequired = value.afterEventSeq < oldestEventSeq - 1
           || value.afterEventSeq > eventSeq;
