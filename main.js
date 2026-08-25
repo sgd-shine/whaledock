@@ -3065,7 +3065,6 @@ function videoTacticLegacyBodyText(document) {
 function videoTacticText(document) {
   if (!document || document.stage !== 'review'
       || typeof document.relativePath !== 'string'
-      || document.relativePath.startsWith('07_打法库/')
       || videoCockpit.safeRelativePath(document.relativePath) !== document.relativePath
       || !/^[a-f0-9]{64}$/.test(String(document.hash || ''))) {
     throw new Error('打法来源文档无效');
@@ -3343,7 +3342,6 @@ function videoTacticScanBlocked(scanned) {
 function findVideoTacticDocumentsByRevision(runtime, sourceDocument, options = {}) {
   assertVideoRuntimeIdentity(runtime);
   if (!sourceDocument || sourceDocument.stage !== 'review'
-      || sourceDocument.relativePath.startsWith('07_打法库/')
       || videoCockpit.safeRelativePath(sourceDocument.relativePath) !== sourceDocument.relativePath
       || !/^[a-f0-9]{64}$/.test(String(sourceDocument.hash || ''))) {
     throw new Error('打法来源版本无效');
@@ -3554,7 +3552,6 @@ function solidifyVideoTactic(runtime, sourceDocument, sourceProjectToken, option
     throw error;
   }
   if (!sourceDocument || sourceDocument.stage !== 'review'
-      || sourceDocument.relativePath.startsWith('07_打法库/')
       || typeof sourceDocument.body !== 'string' || !sourceDocument.body.trim()) {
     throw new Error('打法只能由你从复盘项目显式固化');
   }

@@ -307,7 +307,7 @@ async function run() {
 
   await test('复盘打法 revision key、确定性正文与 UTF-8 摘要精确收口', async () => {
     const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-tactic-pure-')));
-    const relativePath = '02_脚本/复盘  two---spaces.md';
+    const relativePath = '07_打法库/复盘  two---spaces.md';
     const target = path.join(root, relativePath);
     try {
       fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -498,9 +498,8 @@ async function run() {
   });
 
   await test('打法固化 0→1 与重试幂等，可能写入后 source 漂移只能 outcome-unknown', async () => {
-    const makeFixture = () => {
+    const makeFixture = (sourceRelativePath = '02_脚本/复盘.md') => {
       const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-tactic-write-')));
-      const sourceRelativePath = '02_脚本/复盘.md';
       const sourcePath = path.join(root, sourceRelativePath);
       fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
       fs.writeFileSync(sourcePath, [
@@ -564,6 +563,34 @@ async function run() {
         )}`);
     } finally {
       fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+
+    const sameDirectoryFixture = makeFixture('07_打法库/真实复盘.md');
+    try {
+      const result = main.solidifyVideoTactic(
+        sameDirectoryFixture.runtime,
+        sameDirectoryFixture.sourceDocument,
+        sameDirectoryFixture.sourceToken,
+        {
+          refresh: sameDirectoryFixture.rebuild,
+          readSource: sameDirectoryFixture.readByToken,
+          readTactic: sameDirectoryFixture.readByToken
+        }
+      );
+      assert.equal(result.created, true);
+      const created = cockpit.readDocument(
+        sameDirectoryFixture.root,
+        main.videoTacticRelativePath(
+          sameDirectoryFixture.sourceDocument.relativePath,
+          sameDirectoryFixture.sourceDocument.hash
+        )
+      );
+      assert.equal(created.fields.source, sameDirectoryFixture.sourceDocument.relativePath);
+      assert.equal(fs.readdirSync(path.join(
+        sameDirectoryFixture.root, '07_打法库'
+      )).length, 2, '同目录中复盘源与打法资产必须按 stage 共存');
+    } finally {
+      fs.rmSync(sameDirectoryFixture.root, { recursive: true, force: true });
     }
 
     const unknownFixture = makeFixture();
