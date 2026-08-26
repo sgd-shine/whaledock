@@ -24,6 +24,7 @@ window.__ModuleLoader__.load({
       'proposal.read', 'proposal.decide', 'proposal.undo',
       'publish.read', 'publish.create', 'publish.update',
       'review.tactics.read', 'review.solidify',
+      'shoot.open', 'shoot.history.read',
       'receipts.read', 'receipts.ack', 'receipts.open'
     ]);
     const WORKSPACE_FILE_STATES = new Set([
@@ -46,6 +47,8 @@ window.__ModuleLoader__.load({
     const MAX_WORKSPACE_FILE_RESULT_BYTES = 6 * 1024;
     const MAX_CONTENT_CATALOG_PAGES = 128;
     const MAX_TACTIC_PAGES = 512;
+    const MAX_SHOOT_HISTORY_PAGES = 128;
+    const MAX_BROWSER_PROMPTER_BYTES = 64 * 1024;
     const PROJECT_TOKEN_RE = /^project-[a-f0-9]{24}$/;
     const CONTENT_REF_RE = /^content-[a-f0-9]{24}$/;
     const BLOCK_TOKEN_RE = /^block-[a-f0-9]{24}$/;
@@ -53,6 +56,7 @@ window.__ModuleLoader__.load({
     const PROPOSAL_REVISION_TOKEN_RE = /^proposal-revision-[a-f0-9]{24}$/;
     const REVISION_TOKEN_RE = /^revision-[a-f0-9]{24}$/;
     const COLLECTION_TOKEN_RE = /^collection-[a-f0-9]{24}$/;
+    const RECORD_REF_RE = /^[a-f0-9]{24}$/;
     const BLOCK_ACTIONS = Object.freeze([
       ['revise', '改这段'], ['spoken', '更口语'],
       ['shorten', '压时长'], ['ask', '问一句']
@@ -79,6 +83,8 @@ window.__ModuleLoader__.load({
     const SCRIPT_CSS = `.wd10-script{display:flex;flex-direction:column;gap:10px}.wd10-scriptHead,.wd10-blockMeta{display:flex;align-items:center;justify-content:space-between;gap:8px}.wd10-scriptHead h3{margin:0;color:var(--dsw-alias-fg-primary);font-size:14px}.wd10-scriptHead span,.wd10-blockMeta span{font-size:10px;color:var(--dsw-alias-fg-tertiary)}.wd10-block{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:13px;background:var(--dsw-alias-bg-layer-1)}.wd10-blockMeta strong{font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-block pre,.wd10-compare pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:9px 0 0;font:inherit;font-size:12px;line-height:1.6;color:var(--dsw-alias-fg-primary)}.wd10-blockActions,.wd10-proposalActions{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}.wd10-blockActions button,.wd10-proposalActions button,.wd10-undo{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 9px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:11px;cursor:pointer}.wd10-blockActions button:disabled,.wd10-proposalActions button:disabled,.wd10-undo:disabled{opacity:.5;cursor:default}.wd10-proposal{border-color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-state-warn-tertiary)}.wd10-compare{margin-top:10px;border-radius:9px;padding:10px;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1)}.wd10-compare h4{margin:0;font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-proposalActions button:first-child,.wd10-undo{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);font-weight:600}.wd10-undo{margin-top:11px}`;
     const PUBLISH_CSS = `.wd10-publish{display:flex;flex-direction:column;gap:12px}.wd10-publishHead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.wd10-publishHead h3{margin:0 0 5px;font-size:14px;color:var(--dsw-alias-fg-primary)}.wd10-publishState{flex:none;border-radius:999px;padding:3px 8px;font-size:10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-secondary);border:1px solid var(--dsw-alias-border-l1)}.wd10-publishState[data-ready=true]{color:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary)}.wd10-publishLights{display:grid;gap:7px;margin-top:12px}.wd10-publishLight{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--dsw-alias-border-l1);border-radius:9px;padding:9px 10px;background:var(--dsw-alias-bg-base)}.wd10-publishLight span{font-size:12px;color:var(--dsw-alias-fg-primary)}.wd10-publishLight input{margin:0}.wd10-publishLight[data-satisfied=true]{border-color:var(--dsw-alias-state-business-primary)}.wd10-aiChoices{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}.wd10-aiChoices button,.wd10-createPublish{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:7px 10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:11px;cursor:pointer}.wd10-aiChoices button[aria-pressed=true]{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-tertiary);font-weight:600}.wd10-aiChoices button:disabled,.wd10-createPublish:disabled{opacity:.5;cursor:default}.wd10-createPublish{margin-top:12px;border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);font-weight:600}.wd10-publishInvalid{border-color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-state-warn-tertiary)}.wd10-publishNotice{border-left:3px solid var(--dsw-alias-state-warn-primary);padding:8px 10px;border-radius:0 8px 8px 0;background:var(--dsw-alias-state-warn-tertiary)}`;
     const REVIEW_CSS = `.wd10-review{display:flex;flex-direction:column;gap:12px}.wd10-reviewHead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.wd10-reviewHead h3{margin:0 0 5px;font-size:14px;color:var(--dsw-alias-fg-primary)}.wd10-reviewBlocks,.wd10-tacticWall{display:grid;gap:9px;margin-top:11px}.wd10-reviewBlock,.wd10-tactic{border:1px solid var(--dsw-alias-border-l1);border-radius:10px;padding:11px;background:var(--dsw-alias-bg-base)}.wd10-reviewBlock pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:7px 0 0;font:inherit;font-size:12px;line-height:1.6;color:var(--dsw-alias-fg-primary)}.wd10-reviewMeta,.wd10-tacticMeta{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:10px;color:var(--dsw-alias-fg-tertiary)}.wd10-tactic[data-highlight=true]{border-color:var(--dsw-alias-state-business-primary);box-shadow:0 0 0 1px var(--dsw-alias-state-business-primary)}.wd10-tactic h4{margin:7px 0 5px;font-size:13px;color:var(--dsw-alias-fg-primary)}.wd10-tacticBadge{border-radius:999px;padding:2px 7px;color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-tertiary)}.wd10-solidify{border:1px solid var(--dsw-alias-state-business-primary);border-radius:8px;padding:7px 10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-state-business-primary);font:inherit;font-size:11px;font-weight:600;cursor:pointer}.wd10-solidify:disabled{opacity:.5;cursor:default}.wd10-reviewTruth{border-left:3px solid var(--dsw-alias-state-warn-primary);padding:8px 10px;border-radius:0 8px 8px 0;background:var(--dsw-alias-state-warn-tertiary)}`;
+    const SHOOT_CSS = `.wd10-shoot{display:flex;flex-direction:column;gap:12px}.wd10-shootHead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.wd10-shootHead h3,.wd10-shootRecord h4{margin:0 0 5px;color:var(--dsw-alias-fg-primary)}.wd10-shootHead h3{font-size:14px}.wd10-shootRecord h4{font-size:13px}.wd10-shootActions,.wd10-prompterControls,.wd10-prompterChoices{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}.wd10-shootActions button,.wd10-prompterControls button,.wd10-prompterChoices button{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:7px 10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:11px;cursor:pointer}.wd10-shootActions button:first-child{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);font-weight:600}.wd10-shootActions button:disabled,.wd10-prompterControls button:disabled,.wd10-prompterChoices button:disabled{opacity:.5;cursor:default}.wd10-prompterChoices button[aria-pressed=true]{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-tertiary)}.wd10-prompter{height:300px;overflow:auto;scroll-behavior:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:110px 18px;background:#111;color:#f7f7f7;margin-top:12px}.wd10-prompter pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:inherit;line-height:1.75}.wd10-prompter[data-font=medium] pre{font-size:26px}.wd10-prompter[data-font=large] pre{font-size:36px}.wd10-shootTruth{border-left:3px solid var(--dsw-alias-state-warn-primary);padding:8px 10px;border-radius:0 8px 8px 0;background:var(--dsw-alias-state-warn-tertiary)}.wd10-shootRecords{display:grid;gap:9px;margin-top:11px}.wd10-shootRecord{border:1px solid var(--dsw-alias-border-l1);border-radius:10px;padding:11px;background:var(--dsw-alias-bg-base)}.wd10-shootRecord[data-confirmed=true]{border-color:var(--dsw-alias-state-business-primary)}`;
+    const BROWSER_PROMPTER_CSS = `.wd10-browserPrompt{min-width:0;height:100%;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base);border-right:1px solid var(--dsw-alias-border-l2);overflow:hidden}.wd10-browserPrompt textarea{box-sizing:border-box;width:100%;min-height:150px;resize:vertical;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:12px;line-height:1.55}.wd10-browserPromptMeta{display:flex;justify-content:space-between;gap:8px;margin-top:6px;font-size:10px;color:var(--dsw-alias-fg-tertiary)}`;
     const CREATOR_TABS = Object.freeze([
       ['overview', '概览'], ['script', '脚本'], ['shoot', '拍摄'],
       ['publish', '发布'], ['review', '复盘']
@@ -93,7 +99,7 @@ window.__ModuleLoader__.load({
       const tag = document.createElement('style');
       tag.dataset.plugin = '@whaledock/context-bridge-poc';
       tag.dataset.pluginCss = tagId;
-      tag.textContent = `${SHELL_CSS}${SCRIPT_CSS}${PUBLISH_CSS}${REVIEW_CSS}`;
+      tag.textContent = `${SHELL_CSS}${SCRIPT_CSS}${PUBLISH_CSS}${REVIEW_CSS}${SHOOT_CSS}${BROWSER_PROMPTER_CSS}`;
       document.head.appendChild(tag);
       return () => { tag.remove(); };
     }
@@ -213,6 +219,7 @@ window.__ModuleLoader__.load({
         workflowLabel: boundedUiText(value.workflowLabel,
           boundedUiText(value.stageLabel, '未分类', 24), 24),
         updated: boundedUiText(value.updated, '', 64) || null,
+        canShoot: value.canShoot === true,
         actions: Object.freeze(actions)
       });
     }
@@ -469,6 +476,90 @@ window.__ModuleLoader__.load({
     function sameDocumentHeader(left, right) {
       return left && right && [
         'projectToken', 'title', 'stage', 'stageLabel', 'blockCount'
+      ].every((key) => Object.is(left[key], right[key]));
+    }
+
+    function shootOpenResult(snapshot, expected) {
+      const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+      if (!exact(value, [
+        'kind', 'contentRef', 'projectToken', 'state', 'message'
+      ]) || value.kind !== 'shoot-open'
+          || value.contentRef !== expected.contentRef
+          || value.projectToken !== expected.projectToken
+          || !CONTENT_REF_RE.test(String(value.contentRef || ''))
+          || !PROJECT_TOKEN_RE.test(String(value.projectToken || ''))
+          || !['opened', 'focused', 'busy', 'unavailable'].includes(value.state)) return null;
+      const message = strictUtf8Text(value.message, 240, false);
+      return message === undefined ? null : Object.freeze({
+        kind: 'shoot-open', contentRef: value.contentRef,
+        projectToken: value.projectToken, state: value.state, message
+      });
+    }
+
+    function shootHistoryRecord(value) {
+      if (!exact(value, [
+        'recordRef', 'title', 'confirmedCount', 'totalShots',
+        'missingCount', 'retakeCount', 'allConfirmed'
+      ]) || !RECORD_REF_RE.test(String(value.recordRef || ''))
+          || !Number.isSafeInteger(value.confirmedCount) || value.confirmedCount < 0
+          || !Number.isSafeInteger(value.totalShots) || value.totalShots < 1
+          || value.totalShots > 200 || value.confirmedCount > value.totalShots
+          || !Number.isSafeInteger(value.missingCount) || value.missingCount < 0
+          || value.missingCount > value.totalShots
+          || value.confirmedCount + value.missingCount !== value.totalShots
+          || !Number.isSafeInteger(value.retakeCount) || value.retakeCount < 0
+          || value.retakeCount > 1_000_000_000
+          || typeof value.allConfirmed !== 'boolean'
+          || value.allConfirmed !== (value.missingCount === 0)) return null;
+      const title = strictUtf8Text(value.title, 120, false);
+      return title === undefined ? null : Object.freeze({
+        recordRef: value.recordRef, title,
+        confirmedCount: value.confirmedCount, totalShots: value.totalShots,
+        missingCount: value.missingCount, retakeCount: value.retakeCount,
+        allConfirmed: value.allConfirmed
+      });
+    }
+
+    function shootHistoryPageResult(snapshot, expected) {
+      const value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+      if (!exact(value, [
+        'kind', 'contentRef', 'projectToken', 'collectionToken', 'itemCount',
+        'complete', 'cursor', 'nextCursor', 'records'
+      ]) || value.kind !== 'shoot-history'
+          || value.contentRef !== expected.contentRef
+          || value.projectToken !== expected.projectToken
+          || !CONTENT_REF_RE.test(String(value.contentRef || ''))
+          || !PROJECT_TOKEN_RE.test(String(value.projectToken || ''))
+          || !COLLECTION_TOKEN_RE.test(String(value.collectionToken || ''))
+          || expected.collectionToken !== null
+            && value.collectionToken !== expected.collectionToken
+          || !Number.isSafeInteger(value.itemCount) || value.itemCount < 0
+          || value.itemCount > MAX_SHOOT_HISTORY_PAGES * 4
+          || typeof value.complete !== 'boolean'
+          || !Number.isSafeInteger(value.cursor) || value.cursor !== expected.cursor
+          || !(value.nextCursor === null || Number.isSafeInteger(value.nextCursor))
+          || !Array.isArray(value.records) || value.records.length > 4
+          || value.cursor + value.records.length > value.itemCount) return null;
+      const records = value.records.map(shootHistoryRecord);
+      const endCursor = value.cursor + records.length;
+      if (records.some((record) => record === null)
+          || new Set(records.map((record) => record.recordRef)).size !== records.length
+          || (value.nextCursor === null
+            ? endCursor !== value.itemCount
+            : value.nextCursor !== endCursor || value.nextCursor <= value.cursor
+              || value.nextCursor >= value.itemCount)) return null;
+      return Object.freeze({
+        kind: 'shoot-history', contentRef: value.contentRef,
+        projectToken: value.projectToken, collectionToken: value.collectionToken,
+        itemCount: value.itemCount, complete: value.complete,
+        cursor: value.cursor, nextCursor: value.nextCursor,
+        records: Object.freeze(records)
+      });
+    }
+
+    function sameShootHistoryHeader(left, right) {
+      return left && right && [
+        'contentRef', 'projectToken', 'collectionToken', 'itemCount', 'complete'
       ].every((key) => Object.is(left[key], right[key]));
     }
 
@@ -1866,6 +1957,530 @@ window.__ModuleLoader__.load({
       });
     }
 
+    function ShootPanel({ project, workspaceFiles, workspaceIdentity, onCatalogRefresh }) {
+      const [documentState, setDocumentState] = react.useState({ status: 'idle', document: null });
+      const [historyState, setHistoryState] = react.useState({
+        status: 'idle', header: null, records: []
+      });
+      const [feedback, setFeedback] = react.useState('');
+      const [nativePending, setNativePending] = react.useState(false);
+      const [nativeBlocked, setNativeBlocked] = react.useState(false);
+      const [readRefreshKey, setReadRefreshKey] = react.useState(0);
+      const [inlineOpen, setInlineOpen] = react.useState(false);
+      const [inlinePlaying, setInlinePlaying] = react.useState(false);
+      const [speed, setSpeed] = react.useState(1);
+      const [fontSize, setFontSize] = react.useState('medium');
+      const readAttempt = react.useRef(0);
+      const readAbort = react.useRef(null);
+      const nativeAttempt = react.useRef(0);
+      const nativeAbort = react.useRef(null);
+      const nativePendingRef = react.useRef(false);
+      const readIdentityRef = react.useRef(null);
+      const documentCacheRef = react.useRef(null);
+      const historyCacheRef = react.useRef(null);
+      const scrollRef = react.useRef(null);
+      const frameRef = react.useRef(null);
+      const frameTimeRef = react.useRef(null);
+      const viewIdentity = project && typeof workspaceIdentity === 'string' && workspaceIdentity
+        ? `${workspaceIdentity}\u0000${project.contentRef}\u0000${project.projectToken}` : null;
+      const eligible = Boolean(project && project.canShoot === true);
+
+      const clearStale = (message) => {
+        readAttempt.current += 1;
+        readAbort.current?.abort();
+        readAbort.current = null;
+        nativeAttempt.current += 1;
+        nativeAbort.current?.abort();
+        nativeAbort.current = null;
+        nativePendingRef.current = false;
+        documentCacheRef.current = null;
+        historyCacheRef.current = null;
+        setDocumentState({ status: 'error', document: null });
+        setHistoryState({ status: 'error', header: null, records: [] });
+        setInlinePlaying(false);
+        setInlineOpen(false);
+        setNativePending(false);
+        setNativeBlocked(true);
+        setFeedback(message);
+        onCatalogRefresh?.();
+      };
+
+      react.useLayoutEffect(() => {
+        const identityChanged = readIdentityRef.current !== viewIdentity;
+        readIdentityRef.current = viewIdentity;
+        const attempt = ++readAttempt.current;
+        readAbort.current?.abort();
+        const controller = new AbortController();
+        readAbort.current = controller;
+        if (identityChanged) {
+          nativeAttempt.current += 1;
+          nativeAbort.current?.abort();
+          nativeAbort.current = null;
+          nativePendingRef.current = false;
+          documentCacheRef.current = null;
+          historyCacheRef.current = null;
+          setNativePending(false);
+          setNativeBlocked(false);
+          setFeedback('');
+          setInlineOpen(false);
+          setInlinePlaying(false);
+          setSpeed(1);
+          setFontSize('medium');
+        }
+        const priorDocument = !identityChanged
+          && documentCacheRef.current?.identity === viewIdentity
+          ? documentCacheRef.current.document : null;
+        const priorHistory = !identityChanged
+          && historyCacheRef.current?.identity === viewIdentity
+          ? historyCacheRef.current.value : null;
+        const waiting = Boolean(project && eligible && viewIdentity);
+        setDocumentState({ status: waiting ? 'loading' : project ? 'not-applicable' : 'idle',
+          document: waiting ? priorDocument : null });
+        setHistoryState(priorHistory && waiting ? { ...priorHistory, status: 'loading' } : {
+          status: waiting ? 'loading' : project ? 'not-applicable' : 'idle',
+          header: null, records: []
+        });
+        if (!project || !eligible || !viewIdentity
+            || !workspaceFiles || typeof workspaceFiles.execute !== 'function') {
+          if (project && eligible && viewIdentity
+              && (!workspaceFiles || typeof workspaceFiles.execute !== 'function')) {
+            setDocumentState({ status: 'error', document: null });
+            setHistoryState({ status: 'error', header: null, records: [] });
+          }
+          return () => controller.abort();
+        }
+        const expected = Object.freeze({
+          contentRef: project.contentRef, projectToken: project.projectToken
+        });
+        const invalidateRead = (message) => {
+          if (controller.signal.aborted || readAttempt.current !== attempt) return;
+          readAttempt.current += 1;
+          controller.abort();
+          if (readAbort.current === controller) readAbort.current = null;
+          nativeAttempt.current += 1;
+          nativeAbort.current?.abort();
+          nativeAbort.current = null;
+          nativePendingRef.current = false;
+          documentCacheRef.current = null;
+          historyCacheRef.current = null;
+          setDocumentState({ status: 'error', document: null });
+          setHistoryState({ status: 'error', header: null, records: [] });
+          setInlinePlaying(false);
+          setInlineOpen(false);
+          setNativePending(false);
+          setNativeBlocked(true);
+          setFeedback(message);
+          onCatalogRefresh?.();
+        };
+        const readDocument = async () => {
+          let cursor = 0;
+          let first = null;
+          let last = null;
+          let pagesComplete = false;
+          let failed = false;
+          const blocks = [];
+          const seen = new Set();
+          for (let pageIndex = 0; pageIndex < 2048; pageIndex += 1) {
+            let snapshot = null;
+            try {
+              snapshot = await workspaceFiles.execute('document.read', {
+                projectToken: expected.projectToken, cursor, limit: 2
+              }, controller.signal);
+            } catch (_error) { snapshot = null; }
+            if (controller.signal.aborted || readAttempt.current !== attempt) return;
+            if (snapshot?.code === 'operation-stale') {
+              invalidateRead('口播稿已变化；已清空旧拍摄视图并刷新内容库。');
+              return;
+            }
+            const page = documentPageResult(snapshot, expected.projectToken, cursor);
+            if (!page || first && !sameDocumentHeader(first, page)) {
+              failed = true;
+              break;
+            }
+            first ||= page;
+            last = page;
+            let duplicate = false;
+            for (const block of page.blocks) {
+              if (seen.has(block.blockToken)) { duplicate = true; break; }
+              seen.add(block.blockToken);
+              blocks.push(block);
+            }
+            if (duplicate) { failed = true; break; }
+            if (page.nextCursor === null) { pagesComplete = true; break; }
+            cursor = page.nextCursor;
+          }
+          if (controller.signal.aborted || readAttempt.current !== attempt) return;
+          if (!first) {
+            if (priorDocument) setDocumentState({ status: 'stale-read', document: priorDocument });
+            else setDocumentState({ status: 'error', document: null });
+            return;
+          }
+          const document = Object.freeze({
+            ...first, blocks: Object.freeze(blocks),
+            truncated: last?.truncated === true
+              || blocks.some((block) => block.textTruncated)
+          });
+          const value = {
+            status: pagesComplete && !failed && !document.truncated ? 'ready' : 'partial',
+            document
+          };
+          documentCacheRef.current = { identity: viewIdentity, document };
+          setDocumentState(value);
+          if (value.status !== 'ready') setInlinePlaying(false);
+        };
+        const readHistory = async () => {
+          let cursor = 0;
+          let collectionToken = null;
+          let first = null;
+          let pagesComplete = false;
+          let failed = false;
+          const records = [];
+          const seen = new Set();
+          for (let pageIndex = 0; pageIndex < MAX_SHOOT_HISTORY_PAGES; pageIndex += 1) {
+            let snapshot = null;
+            try {
+              snapshot = await workspaceFiles.execute('shoot.history.read', {
+                ...expected, cursor, limit: 4, collectionToken
+              }, controller.signal);
+            } catch (_error) { snapshot = null; }
+            if (controller.signal.aborted || readAttempt.current !== attempt) return;
+            if (snapshot?.code === 'operation-stale') {
+              invalidateRead('拍摄记录已变化；已清空旧拍摄视图并刷新内容库。');
+              return;
+            }
+            const page = shootHistoryPageResult(snapshot, {
+              ...expected, cursor, collectionToken
+            });
+            if (!page || first && !sameShootHistoryHeader(first, page)) {
+              failed = true;
+              break;
+            }
+            first ||= page;
+            collectionToken = page.collectionToken;
+            let duplicate = false;
+            for (const record of page.records) {
+              if (seen.has(record.recordRef)) { duplicate = true; break; }
+              seen.add(record.recordRef);
+              records.push(record);
+            }
+            if (duplicate) { failed = true; break; }
+            if (page.nextCursor === null) { pagesComplete = true; break; }
+            cursor = page.nextCursor;
+          }
+          if (controller.signal.aborted || readAttempt.current !== attempt) return;
+          if (!first) {
+            if (priorHistory) setHistoryState({ ...priorHistory, status: 'stale-read' });
+            else setHistoryState({ status: 'error', header: null, records: [] });
+            return;
+          }
+          const header = Object.freeze({
+            contentRef: first.contentRef, projectToken: first.projectToken,
+            collectionToken: first.collectionToken,
+            itemCount: first.itemCount, complete: first.complete
+          });
+          const value = Object.freeze({
+            status: pagesComplete && !failed && first.complete ? 'ready' : 'partial',
+            header, records: Object.freeze(records)
+          });
+          historyCacheRef.current = { identity: viewIdentity, value };
+          setHistoryState(value);
+        };
+        void Promise.all([readDocument(), readHistory()]);
+        return () => {
+          controller.abort();
+          if (readAbort.current === controller) readAbort.current = null;
+        };
+      }, [project?.contentRef, project?.projectToken, project?.canShoot,
+        workspaceIdentity, workspaceFiles, readRefreshKey]);
+
+      react.useEffect(() => () => {
+        readAttempt.current += 1;
+        readAbort.current?.abort();
+        readAbort.current = null;
+        nativeAttempt.current += 1;
+        nativeAbort.current?.abort();
+        nativeAbort.current = null;
+        nativePendingRef.current = false;
+      }, []);
+
+      react.useEffect(() => {
+        const page = globalThis.document;
+        if (!page || typeof page.addEventListener !== 'function') return undefined;
+        const pauseWhenHidden = () => {
+          if (page.hidden === true) setInlinePlaying(false);
+        };
+        page.addEventListener('visibilitychange', pauseWhenHidden);
+        return () => page.removeEventListener?.('visibilitychange', pauseWhenHidden);
+      }, []);
+
+      react.useEffect(() => {
+        if (!inlineOpen || !inlinePlaying
+            || typeof globalThis.requestAnimationFrame !== 'function') return undefined;
+        let cancelled = false;
+        frameTimeRef.current = null;
+        const step = (now) => {
+          if (cancelled) return;
+          const scroller = scrollRef.current;
+          const previous = frameTimeRef.current;
+          frameTimeRef.current = now;
+          if (scroller && previous !== null) {
+            const elapsed = Math.min(48, Math.max(0, now - previous));
+            scroller.scrollTop += (32 * speed * elapsed) / 1000;
+            if (Math.ceil(scroller.scrollTop + scroller.clientHeight) >= scroller.scrollHeight) {
+              setInlinePlaying(false);
+              return;
+            }
+          }
+          frameRef.current = globalThis.requestAnimationFrame(step);
+        };
+        frameRef.current = globalThis.requestAnimationFrame(step);
+        return () => {
+          cancelled = true;
+          if (frameRef.current !== null
+              && typeof globalThis.cancelAnimationFrame === 'function') {
+            globalThis.cancelAnimationFrame(frameRef.current);
+          }
+          frameRef.current = null;
+          frameTimeRef.current = null;
+        };
+      }, [inlineOpen, inlinePlaying, speed]);
+
+      const document = documentState.document;
+      const canInline = documentState.status === 'ready' && document
+        && document.blockCount > 0 && document.blocks.length === document.blockCount
+        && !document.truncated && !document.blocks.some((block) => block.textTruncated);
+      const openNative = async () => {
+        if (!eligible || !viewIdentity || !workspaceFiles
+            || typeof workspaceFiles.execute !== 'function'
+            || nativeBlocked || nativePendingRef.current) return;
+        nativePendingRef.current = true;
+        setNativePending(true);
+        setFeedback('正在打开全屏拍摄现场…');
+        const controller = new AbortController();
+        nativeAbort.current?.abort();
+        nativeAbort.current = controller;
+        const attempt = ++nativeAttempt.current;
+        const identity = viewIdentity;
+        const expected = Object.freeze({
+          contentRef: project.contentRef, projectToken: project.projectToken
+        });
+        try {
+          const snapshot = await workspaceFiles.execute('shoot.open', expected, controller.signal);
+          if (controller.signal.aborted || nativeAttempt.current !== attempt
+              || readIdentityRef.current !== identity) return;
+          if (snapshot?.code === 'operation-stale') {
+            clearStale('口播稿已变化；已清空旧拍摄视图并刷新内容库。');
+            return;
+          }
+          const result = shootOpenResult(snapshot, expected);
+          if (!result) {
+            if (snapshot?.code === 'outcome-unknown' || snapshot?.state === 'fulfilled') {
+              setNativeBlocked(true);
+              setFeedback('全屏拍摄现场可能已经打开；请先检查桌面，不要重复点击。');
+            } else setFeedback(operationError(snapshot, '全屏拍摄现场没有打开。'));
+            return;
+          }
+          if (result.state === 'opened') setFeedback(result.message || '全屏拍摄现场已打开。');
+          else if (result.state === 'focused') setFeedback(result.message
+            || '已切回这份口播稿的全屏拍摄现场。');
+          else if (result.state === 'busy') setFeedback(result.message
+            || '另一场拍摄尚未收工；当前稿件没有打开。');
+          else {
+            setFeedback(canInline
+              ? `${result.message} 可改用下方页内简版。`
+              : `${result.message} 当前口播稿尚未完整读回，页内简版也没有启动。`);
+            if (canInline) setInlineOpen(true);
+          }
+        } catch (_error) {
+          if (!controller.signal.aborted && nativeAttempt.current === attempt
+              && readIdentityRef.current === identity) {
+            setNativeBlocked(true);
+            setFeedback('全屏拍摄现场可能已经打开；请先检查桌面，不要重复点击。');
+          }
+        } finally {
+          if (nativeAbort.current === controller) nativeAbort.current = null;
+          if (nativeAttempt.current === attempt) {
+            nativePendingRef.current = false;
+            setNativePending(false);
+          }
+        }
+      };
+      const resetInline = () => {
+        setInlinePlaying(false);
+        if (scrollRef.current) scrollRef.current.scrollTop = 0;
+      };
+      const refresh = () => {
+        setInlinePlaying(false);
+        setInlineOpen(false);
+        if (!nativeBlocked) setFeedback('');
+        setReadRefreshKey((current) => current + 1);
+      };
+
+      if (!project) return react_jsx_runtime.jsx('section', {
+        className: 'wd10-shoot', 'data-whaledock-shoot': true, children:
+          react_jsx_runtime.jsx('section', { className: 'wd10-card', children:
+            react_jsx_runtime.jsx('p', { children: '请从左侧选择一张真实内容卡。' })
+          })
+      });
+      if (!eligible) return react_jsx_runtime.jsx('section', {
+        className: 'wd10-shoot', 'data-whaledock-shoot': true, children:
+          react_jsx_runtime.jsxs('section', { className: 'wd10-card', children: [
+            react_jsx_runtime.jsx('h3', { children: '当前内容不能进入拍摄现场' }),
+            react_jsx_runtime.jsx('p', { role: 'status', children:
+              '拍摄现场只接受 WhaleDock 明确标记的 03_口播稿；当前内容不会被当作台词。'
+            })
+          ] })
+      });
+
+      const sourceStatus = documentState.status === 'loading' && !document
+        ? '正在完整读取本地口播稿…'
+        : !document ? '口播稿正文暂时读不到；没有使用内容卡摘要冒充台词。'
+          : `${document.title} · ${document.blocks.length}/${document.blockCount} 块`;
+      const promptText = document?.blocks.map((block) => block.text).join('\n\n') || '';
+      return react_jsx_runtime.jsxs('section', {
+        className: 'wd10-shoot', 'data-whaledock-shoot': true, children: [
+          react_jsx_runtime.jsxs('section', { className: 'wd10-card', children: [
+            react_jsx_runtime.jsxs('div', { className: 'wd10-shootHead', children: [
+              react_jsx_runtime.jsxs('div', { children: [
+                react_jsx_runtime.jsx('h3', { children: '拍摄现场' }),
+                react_jsx_runtime.jsx('p', { children: sourceStatus })
+              ] }),
+              document && react_jsx_runtime.jsx('span', { className: 'wd10-publishState', children:
+                canInline ? '全文已读回' : '正文不完整'
+              })
+            ] }),
+            documentState.status === 'partial' && document
+              && react_jsx_runtime.jsx('p', { className: 'wd10-incomplete', role: 'status', children:
+                `口播稿读取不完整或含截断内容；只显示已成功读取的 ${document.blocks.length}/${document.blockCount} 块。`
+              }),
+            documentState.status === 'stale-read' && document
+              && react_jsx_runtime.jsx('p', { className: 'wd10-incomplete', role: 'status', children:
+                '口播稿刷新失败；以下保留上次成功结果，不代表当前文件状态。'
+              }),
+            documentState.status === 'loading' && document
+              && react_jsx_runtime.jsx('p', { className: 'wd10-incomplete', role: 'status', children:
+                '正在重新读取口播稿；以下暂存上次已验证正文。'
+              }),
+            react_jsx_runtime.jsxs('div', { className: 'wd10-shootActions', children: [
+              react_jsx_runtime.jsx('button', { type: 'button',
+                disabled: !viewIdentity || nativePending || nativeBlocked,
+                onClick: () => { void openNative(); },
+                children: nativePending ? '正在打开…' : '打开全屏拍摄现场'
+              }),
+              react_jsx_runtime.jsx('button', { type: 'button', disabled: !canInline,
+                onClick: () => {
+                  setInlinePlaying(false);
+                  setInlineOpen((current) => !current);
+                }, children: inlineOpen ? '收起页内简版' : '打开页内简版'
+              }),
+              react_jsx_runtime.jsx('button', { type: 'button', className: 'wd10-refresh',
+                disabled: documentState.status === 'loading'
+                  || historyState.status === 'loading',
+                onClick: refresh, children: '刷新口播稿与拍摄记录'
+              })
+            ] }),
+            nativeBlocked && react_jsx_runtime.jsx('p', {
+              className: 'wd10-incomplete', role: 'status', children:
+                feedback || '全屏拍摄现场结果未知；请先检查桌面，不要重复点击。'
+            }),
+            !nativeBlocked && feedback && react_jsx_runtime.jsx('p', {
+              className: 'wd10-feedback', role: 'status', children: feedback
+            }),
+            !canInline && documentState.status !== 'loading'
+              && react_jsx_runtime.jsx('p', { className: 'wd10-feedback', children:
+                '页内简版只会在口播稿全文完整读回后开放。'
+              })
+          ] }),
+          react_jsx_runtime.jsxs('section', { className: 'wd10-card', children: [
+            react_jsx_runtime.jsx('h3', { children: '页内简版提词器' }),
+            react_jsx_runtime.jsx('p', { className: 'wd10-shootTruth', children:
+              '页内简版只在当前页面滚动，不记录镜头完成状态，也不会写入拍摄记录。'
+            }),
+            inlineOpen && canInline && react_jsx_runtime.jsxs(react_jsx_runtime.Fragment, { children: [
+              react_jsx_runtime.jsxs('div', { className: 'wd10-prompterControls', children: [
+                react_jsx_runtime.jsx('button', { type: 'button',
+                  onClick: () => setInlinePlaying(true), disabled: inlinePlaying,
+                  children: '开始'
+                }),
+                react_jsx_runtime.jsx('button', { type: 'button',
+                  onClick: () => setInlinePlaying(false), disabled: !inlinePlaying,
+                  children: '暂停'
+                }),
+                react_jsx_runtime.jsx('button', { type: 'button', onClick: resetInline,
+                  children: '重置'
+                })
+              ] }),
+              react_jsx_runtime.jsxs('div', { className: 'wd10-prompterChoices', children: [
+                ...[0.8, 1, 1.2].map((value) => react_jsx_runtime.jsx('button', {
+                  type: 'button', 'aria-pressed': speed === value,
+                  onClick: () => setSpeed(value), children: `${value} 倍`
+                }, `speed-${value}`)),
+                react_jsx_runtime.jsx('button', { type: 'button',
+                  'aria-pressed': fontSize === 'medium', onClick: () => setFontSize('medium'),
+                  children: '中字'
+                }),
+                react_jsx_runtime.jsx('button', { type: 'button',
+                  'aria-pressed': fontSize === 'large', onClick: () => setFontSize('large'),
+                  children: '大字'
+                })
+              ] }),
+              react_jsx_runtime.jsx('div', { ref: scrollRef, className: 'wd10-prompter',
+                'data-font': fontSize, tabIndex: 0, 'aria-label': '页内简版提词正文', children:
+                  react_jsx_runtime.jsx('pre', { children: promptText })
+              })
+            ] })
+          ] }),
+          react_jsx_runtime.jsxs('section', {
+            className: 'wd10-card', 'data-shoot-history': true, children: [
+              react_jsx_runtime.jsxs('div', { className: 'wd10-shootHead', children: [
+                react_jsx_runtime.jsxs('div', { children: [
+                  react_jsx_runtime.jsx('h3', { children: '本地拍摄记录' }),
+                  react_jsx_runtime.jsx('p', { className: 'wd10-shootTruth', children:
+                    '以下是 WhaleDock 标记的本地收工记录；不是视频、设备或平台数据回读。'
+                  })
+                ] }),
+                react_jsx_runtime.jsx('button', { type: 'button', className: 'wd10-refresh',
+                  disabled: historyState.status === 'loading', onClick: refresh,
+                  children: '刷新拍摄记录'
+                })
+              ] }),
+              historyState.status === 'loading' && historyState.records.length === 0
+                && react_jsx_runtime.jsx('p', { children: '正在读取 WhaleDock 本地收工记录…' }),
+              historyState.status === 'error' && historyState.records.length === 0
+                && react_jsx_runtime.jsx('p', { role: 'status', children:
+                  '本地收工记录暂时读不到；没有推断任何记录。'
+                }),
+              historyState.status === 'stale-read'
+                && react_jsx_runtime.jsx('p', { className: 'wd10-incomplete', role: 'status', children:
+                  '拍摄记录刷新失败；以下保留上次成功结果，不代表当前文件状态。'
+                }),
+              historyState.status === 'partial'
+                && react_jsx_runtime.jsx('p', { className: 'wd10-incomplete', role: 'status', children:
+                  `拍摄记录读取不完整；只显示已成功读取的 ${historyState.records.length} 条 WhaleDock 本地记录。`
+                }),
+              historyState.status === 'loading' && historyState.records.length > 0
+                && react_jsx_runtime.jsx('p', { className: 'wd10-incomplete', role: 'status', children:
+                  '正在重新读取拍摄记录；以下暂存上次已验证条目。'
+                }),
+              historyState.status === 'ready' && historyState.records.length === 0
+                && react_jsx_runtime.jsx('p', { children: '还没有 WhaleDock 标记的本地收工记录。' }),
+              react_jsx_runtime.jsx('div', { className: 'wd10-shootRecords', children:
+                historyState.records.map((record) => react_jsx_runtime.jsxs('article', {
+                  className: 'wd10-shootRecord', 'data-shoot-record-ref': record.recordRef,
+                  'data-confirmed': record.allConfirmed, children: [
+                    react_jsx_runtime.jsx('h4', { children: record.title }),
+                    react_jsx_runtime.jsx('p', { children:
+                      `记录中写着：确认 ${record.confirmedCount}/${record.totalShots}、缺拍 ${record.missingCount}、重来 ${record.retakeCount}`
+                    })
+                  ]
+                }, record.recordRef))
+              })
+            ]
+          })
+        ]
+      });
+    }
+
     function ReviewPanel({ project, workspaceFiles, workspaceIdentity, onCatalogRefresh }) {
       const [documentState, setDocumentState] = react.useState({ status: 'idle', document: null });
       const [tacticsState, setTacticsState] = react.useState({
@@ -2572,6 +3187,9 @@ window.__ModuleLoader__.load({
             proposalRefreshKey: proposalRefresh,
             onProjectMutation
           })
+          : tab === 'shoot' ? react_jsx_runtime.jsx(ShootPanel, {
+            project, workspaceFiles, workspaceIdentity, onCatalogRefresh
+          })
           : tab === 'publish' ? react_jsx_runtime.jsx(PublishPanel, {
             project, workspaceFiles, workspaceIdentity,
             onProjectMutation, onPublishCreated, onCatalogRefresh
@@ -2680,13 +3298,149 @@ window.__ModuleLoader__.load({
       });
     }
 
+    function BrowserOnlyPrompter() {
+      const [text, setText] = react.useState('');
+      const [feedback, setFeedback] = react.useState('');
+      const [playing, setPlaying] = react.useState(false);
+      const [speed, setSpeed] = react.useState(1);
+      const [fontSize, setFontSize] = react.useState('medium');
+      const scrollRef = react.useRef(null);
+      const frameRef = react.useRef(null);
+      const frameTimeRef = react.useRef(null);
+
+      react.useEffect(() => {
+        const page = globalThis.document;
+        if (!page || typeof page.addEventListener !== 'function') return undefined;
+        const pauseWhenHidden = () => {
+          if (page.hidden === true) setPlaying(false);
+        };
+        page.addEventListener('visibilitychange', pauseWhenHidden);
+        return () => page.removeEventListener?.('visibilitychange', pauseWhenHidden);
+      }, []);
+
+      react.useEffect(() => {
+        if (!playing || typeof globalThis.requestAnimationFrame !== 'function') return undefined;
+        let cancelled = false;
+        frameTimeRef.current = null;
+        const step = (now) => {
+          if (cancelled) return;
+          const scroller = scrollRef.current;
+          const previous = frameTimeRef.current;
+          frameTimeRef.current = now;
+          if (scroller && previous !== null) {
+            const elapsed = Math.min(48, Math.max(0, now - previous));
+            scroller.scrollTop += (32 * speed * elapsed) / 1000;
+            if (Math.ceil(scroller.scrollTop + scroller.clientHeight) >= scroller.scrollHeight) {
+              setPlaying(false);
+              return;
+            }
+          }
+          frameRef.current = globalThis.requestAnimationFrame(step);
+        };
+        frameRef.current = globalThis.requestAnimationFrame(step);
+        return () => {
+          cancelled = true;
+          if (frameRef.current !== null
+              && typeof globalThis.cancelAnimationFrame === 'function') {
+            globalThis.cancelAnimationFrame(frameRef.current);
+          }
+          frameRef.current = null;
+          frameTimeRef.current = null;
+        };
+      }, [playing, speed]);
+
+      const changeText = (event) => {
+        const next = event?.target?.value;
+        if (typeof next !== 'string') return;
+        setPlaying(false);
+        if (utf8Bytes(next) > MAX_BROWSER_PROMPTER_BYTES) {
+          setFeedback('手动提词文本最多 64 KiB；超出部分没有载入。');
+          return;
+        }
+        if (WORKSPACE_TEXT_CONTROL_RE.test(next)) {
+          setFeedback('手动提词文本含不安全控制字符；没有载入。');
+          return;
+        }
+        setText(next);
+        setFeedback('');
+        if (scrollRef.current) scrollRef.current.scrollTop = 0;
+      };
+      const reset = () => {
+        setPlaying(false);
+        if (scrollRef.current) scrollRef.current.scrollTop = 0;
+      };
+      const hasText = Boolean(text.trim());
+      return react_jsx_runtime.jsxs('main', {
+        className: 'wd10-browserPrompt', 'data-browser-only-prompter': true, children: [
+          react_jsx_runtime.jsxs('header', { className: 'wd10-detailHead', children: [
+            react_jsx_runtime.jsx('div', { className: 'wd10-eyebrow', children: '浏览器页内工具' }),
+            react_jsx_runtime.jsx('h1', { children: '手动页内提词' }),
+            react_jsx_runtime.jsx('p', { children:
+              '这里不读取工作区、不创建内容身份；文本只保留在当前页面内存。'
+            })
+          ] }),
+          react_jsx_runtime.jsxs('div', { className: 'wd10-panel', children: [
+            react_jsx_runtime.jsxs('section', { className: 'wd10-card', children: [
+              react_jsx_runtime.jsx('h3', { children: '粘贴提词文本' }),
+              react_jsx_runtime.jsx('textarea', {
+                value: text, rows: 7, spellCheck: false,
+                'aria-label': '手动粘贴提词文本',
+                placeholder: '在这里手动粘贴需要滚动的文本（最多 64 KiB）',
+                onChange: changeText
+              }),
+              react_jsx_runtime.jsxs('div', { className: 'wd10-browserPromptMeta', children: [
+                react_jsx_runtime.jsx('span', { children: `${utf8Bytes(text)}/65536 字节` }),
+                react_jsx_runtime.jsx('span', { children: '不保存 · 不上传' })
+              ] }),
+              feedback && react_jsx_runtime.jsx('p', {
+                className: 'wd10-incomplete', role: 'status', children: feedback
+              }),
+              react_jsx_runtime.jsx('p', { className: 'wd10-shootTruth', children:
+                '页内简版只在当前页面滚动，不记录镜头完成状态，也不会写入拍摄记录。'
+              }),
+              react_jsx_runtime.jsxs('div', { className: 'wd10-prompterControls', children: [
+                react_jsx_runtime.jsx('button', { type: 'button',
+                  disabled: !hasText || playing, onClick: () => setPlaying(true),
+                  children: '开始'
+                }),
+                react_jsx_runtime.jsx('button', { type: 'button', disabled: !playing,
+                  onClick: () => setPlaying(false), children: '暂停'
+                }),
+                react_jsx_runtime.jsx('button', { type: 'button', disabled: !hasText,
+                  onClick: reset, children: '重置'
+                })
+              ] }),
+              react_jsx_runtime.jsxs('div', { className: 'wd10-prompterChoices', children: [
+                ...[0.8, 1, 1.2].map((value) => react_jsx_runtime.jsx('button', {
+                  type: 'button', 'aria-pressed': speed === value,
+                  onClick: () => setSpeed(value), children: `${value} 倍`
+                }, `browser-speed-${value}`)),
+                react_jsx_runtime.jsx('button', { type: 'button',
+                  'aria-pressed': fontSize === 'medium', onClick: () => setFontSize('medium'),
+                  children: '中字'
+                }),
+                react_jsx_runtime.jsx('button', { type: 'button',
+                  'aria-pressed': fontSize === 'large', onClick: () => setFontSize('large'),
+                  children: '大字'
+                })
+              ] }),
+              react_jsx_runtime.jsx('div', { ref: scrollRef, className: 'wd10-prompter',
+                'data-font': fontSize, tabIndex: 0, 'aria-label': '浏览器页内提词正文', children:
+                  react_jsx_runtime.jsx('pre', { children: text })
+              })
+            ] })
+          ] })
+        ]
+      });
+    }
+
     function WhaleDockContentShell({ useSessions, useWorkspaces, mount, integration }) {
       const sessionState = useSessions((state) => state);
       const workspaceState = useWorkspaces((state) => state);
       const projects = react.useMemo(
         () => creatorProjects(sessionState, workspaceState), [sessionState, workspaceState]
       );
-      const { preferences, projectActions, workspaceFiles } = integration;
+      const { preferences, projectActions, workspaceFiles, browserOnly } = integration;
       const [mode, setMode] = react.useState('sessions');
       const [hintSeen, setHintSeen] = react.useState(false);
       const [preferenceError, setPreferenceError] = react.useState('');
@@ -2715,7 +3469,8 @@ window.__ModuleLoader__.load({
         || projects[0];
       const routingMismatch = activeRoutingProject !== undefined
         && activeRoutingProject.key !== currentProjectKey;
-      const currentCatalogIdentity = mode === 'content' && !routingMismatch && activeRoutingProject
+      const currentCatalogIdentity = !browserOnly && mode === 'content'
+        && !routingMismatch && activeRoutingProject
         && sessionState.current !== undefined
         ? `${activeRoutingProject.key}\u0000${activeRoutingProject.pathTail}\u0000${sessionState.current}`
         : null;
@@ -2954,7 +3709,7 @@ window.__ModuleLoader__.load({
       };
       const selectMode = (next) => {
         setMode(next);
-        void writePreference({ contentViewMode: next });
+        if (!browserOnly) void writePreference({ contentViewMode: next });
       };
       const alignProject = async (project, connectMissing) => {
         if (project === undefined) return;
@@ -2992,9 +3747,44 @@ window.__ModuleLoader__.load({
           react_jsx_runtime.jsx('button', { type: 'button', role: 'tab',
             'aria-selected': mode === 'sessions', onClick: () => selectMode('sessions'), children: '会话' }),
           react_jsx_runtime.jsx('button', { type: 'button', role: 'tab',
-            'aria-selected': mode === 'content', onClick: () => selectMode('content'), children: '内容' })
+            'aria-selected': mode === 'content', onClick: () => selectMode('content'),
+            children: browserOnly ? '页内提词' : '内容' })
         ]
       });
+      if (browserOnly && mode === 'content') {
+        const left = mount.viewport < 1120 ? 232 : 264;
+        const prompt = Math.min(460, Math.max(mount.viewport < 1120 ? 320 : 360,
+          Math.round(mount.viewport * 0.33)));
+        return react_jsx_runtime.jsxs('div', {
+          ref: mount.frameRef,
+          className: mount.frameClassName,
+          style: { gridTemplateColumns: `${left}px ${prompt}px minmax(0, 1fr)` },
+          'data-whaledock-layout': 'v0.10-p1',
+          'data-whaledock-mode': 'browser-prompter',
+          'data-details-collapsed': mount.columns.details === 0 || undefined,
+          children: [
+            react_jsx_runtime.jsxs('aside', { className: 'wd10-left', children: [
+              modeSwitch,
+              react_jsx_runtime.jsx('div', { className: 'wd10-nativeSidebar', children:
+                mount.renderSidebar(left)
+              })
+            ] }),
+            react_jsx_runtime.jsx(BrowserOnlyPrompter, {}),
+            react_jsx_runtime.jsxs('section', { className: 'wd10-chat',
+              'aria-label': '原生对话', children: [
+                react_jsx_runtime.jsx('div', { className: 'wd10-chatMain',
+                  children: mount.renderConversation(true) }),
+                mount.renderDetails({
+                  className: 'wd10-contentDetails',
+                  style: { width: mount.columns.details, flexBasis: mount.columns.details },
+                  'aria-hidden': mount.columns.details === 0
+                })
+              ]
+            }),
+            mount.renderOverlay()
+          ]
+        });
+      }
       if (mode === 'content') {
         const left = mount.viewport < 1120 ? 232 : 272;
         const detail = Math.min(440, Math.max(mount.viewport < 1120 ? 300 : 340,
@@ -3116,13 +3906,15 @@ window.__ModuleLoader__.load({
       });
     }
 
-    function createContentShell(ctx, preferences, workspaceFiles) {
+    function createContentShell(ctx, preferences, workspaceFiles, options = {}) {
+      const browserOnly = options.browserOnly === true;
       return Object.freeze({
         contract: SHELL_CONTRACT,
         Component: WhaleDockContentShell,
-        preferences,
-        workspaceFiles,
-        projectActions: createProjectActions(ctx)
+        preferences: browserOnly ? undefined : preferences,
+        workspaceFiles: browserOnly ? undefined : workspaceFiles,
+        projectActions: browserOnly ? null : createProjectActions(ctx),
+        browserOnly
       });
     }
 
@@ -3236,10 +4028,30 @@ window.__ModuleLoader__.load({
       });
     }
 
+    function provideBrowserOnlyContentShell(ctx) {
+      if (!ctx?.reflect || typeof ctx.reflect.provide !== 'function') return;
+      let disposeContentShell = () => {};
+      let disposeShellStyle = () => {};
+      try {
+        const shell = createContentShell(ctx, undefined, undefined, { browserOnly: true });
+        const dispose = ctx.reflect.provide('whaledockContentShell', shell);
+        if (typeof dispose === 'function') disposeContentShell = dispose;
+        disposeShellStyle = installShellStyle();
+      } catch (_error) {
+        try { disposeShellStyle(); } catch (_cleanupError) { /* 保持上游原生三栏 */ }
+        try { disposeContentShell(); } catch (_cleanupError) { /* 保持上游原生三栏 */ }
+        return;
+      }
+      ctx.effect?.(() => () => {
+        try { disposeShellStyle(); } catch (_error) { /* 原生三栏继续接管 */ }
+        try { disposeContentShell(); } catch (_error) { /* 原生三栏继续接管 */ }
+      }, 'whaledock-context-bridge: browser-only content shell');
+    }
+
     function apply(ctx) {
       const connection = ctx.get('connection');
       const sessions = ctx.get('sessions');
-      if (!connection || !sessions || connection.isLoopback !== true) return;
+      if (!sessions) return;
 
       const rawFragment = globalThis.location?.hash || '';
       const parameters = new URLSearchParams(
@@ -3247,9 +4059,13 @@ window.__ModuleLoader__.load({
       );
       const controllerId = parameters.get('whaledockController');
       const selectionToken = parameters.get('whaledockSelectionToken');
-      const managed = typeof controllerId === 'string' && ID_RE.test(controllerId)
+      const managed = connection?.isLoopback === true
+        && typeof controllerId === 'string' && ID_RE.test(controllerId)
         && typeof selectionToken === 'string' && TOKEN_RE.test(selectionToken);
-      if (!managed) return;
+      if (!managed) {
+        provideBrowserOnlyContentShell(ctx);
+        return;
+      }
       try {
         Object.defineProperty(globalThis, '__WHALEDOCK_CONTEXT_MANAGED__', {
           value: true, configurable: false, enumerable: false, writable: false

@@ -994,7 +994,8 @@ async function mainTest() {
       'overview.read', 'project.action.prepare', 'project.action.submit',
       'proposal.decide', 'proposal.read', 'proposal.undo', 'publish.create',
       'publish.read', 'publish.update', 'receipts.ack', 'receipts.open',
-      'receipts.read', 'review.solidify', 'review.tactics.read', 'topic.choose'
+      'receipts.read', 'review.solidify', 'review.tactics.read',
+      'shoot.history.read', 'shoot.open', 'topic.choose'
     ]);
     const mainSource = source('main.js');
     assert.equal((mainSource.match(
@@ -2639,6 +2640,396 @@ async function mainTest() {
       /records\.map\(\(record\) => \[record\.relativePath, record\.hash\]\)/,
       'collection token 只能绑定 epoch + ordered asset\(path,hash\)');
     assert.doesNotMatch(collectionFlow, /sourceTitleChanged|complete\s*,\s*records/);
+  });
+
+  await test('拍摄打开与历史同时绑定真实 03 口播稿，分页与副作终态 fail-closed', async () => {
+    const epoch = 91;
+    const sourceRelativePath = '03_口播稿/真实口播.md';
+    const sourceText = '这是真实口播稿。';
+    const sourceHash = cockpit.hashText(sourceText);
+    const contentRef = main.videoContentRef(epoch, sourceRelativePath);
+    const projectToken = main.videoProjectToken(epoch, sourceRelativePath, sourceHash);
+    const changedHash = cockpit.hashText(`${sourceText}\n已变化`);
+    const collectionA = `collection-${'a'.repeat(24)}`;
+    const collectionB = `collection-${'b'.repeat(24)}`;
+    const current = { assertCurrent: () => true };
+    const records = Array.from({ length: 5 }, (_unused, index) => ({
+      recordRef: (index + 1).toString(16).padStart(24, '0'),
+      title: index === 0 ? '鲸'.repeat(40) : `拍摄记录 ${index + 1}`,
+      confirmedCount: index % 3,
+      totalShots: 2,
+      missingCount: 2 - (index % 3),
+      retakeCount: index,
+      allConfirmed: index % 3 === 2
+    }));
+    let cardStage = 'shoot';
+    let activeCollectionToken = collectionA;
+    let activeComplete = true;
+    let openState = 'opened';
+    let sourceReads = 0;
+    let openCalls = 0;
+    let historyCalls = 0;
+    const catalog = () => ({
+      generation: 91,
+      projects: [{
+        contentRef, projectToken, title: '真实口播',
+        stage: cardStage, stageLabel: '拍摄'
+      }]
+    });
+    const shootSource = () => {
+      sourceReads += 1;
+      return {
+        runtime: { epoch },
+        record: {
+          relativePath: sourceRelativePath, hash: sourceHash, stage: 'shoot'
+        },
+        document: {
+          relativePath: sourceRelativePath, hash: sourceHash,
+          stage: 'shoot', text: sourceText
+        }
+      };
+    };
+    const shootOpenAction = async () => {
+      openCalls += 1;
+      return { kind: 'shoot-open', state: openState };
+    };
+    const shootHistoryCollection = () => {
+      historyCalls += 1;
+      return {
+        collectionToken: activeCollectionToken,
+        complete: activeComplete,
+        records
+      };
+    };
+    const ops = main.contextPocWorkspaceFileOperations({
+      catalog, shootSource, shootOpenAction, shootHistoryCollection
+    });
+    const identity = { contentRef, projectToken };
+    const page0Input = {
+      ...identity, cursor: 0, limit: 4, collectionToken: null
+    };
+    assert.deepEqual(ops['shoot.open'].validate(identity), identity);
+    assert.deepEqual(ops['shoot.history.read'].validate(page0Input), page0Input);
+    assert.throws(() => ops['shoot.open'].validate({
+      ...identity, relativePath: sourceRelativePath
+    }));
+    for (const invalid of [
+      { ...page0Input, cursor: -1 },
+      { ...page0Input, cursor: 513 },
+      { ...page0Input, limit: 0 },
+      { ...page0Input, limit: 5 },
+      { ...page0Input, collectionToken: collectionA },
+      { ...page0Input, cursor: 1, collectionToken: null },
+      { ...page0Input, cursor: 1, collectionToken: 'collection-not-opaque' },
+      { ...page0Input, sourceHash }
+    ]) assert.throws(() => ops['shoot.history.read'].validate(invalid));
+
+    const openResults = [];
+    for (const state of ['opened', 'focused', 'busy', 'unavailable']) {
+      openState = state;
+      const result = ops['shoot.open'].redact(await ops['shoot.open'].handle({
+        input: identity, context: current
+      }));
+      openResults.push(result);
+      assert.deepEqual(Object.keys(result).sort(), [
+        'contentRef', 'kind', 'message', 'projectToken', 'state'
+      ]);
+      assert.equal(result.kind, 'shoot-open');
+      assert.equal(result.contentRef, contentRef);
+      assert.equal(result.projectToken, projectToken);
+      assert.equal(result.state, state);
+      assert.equal(result.message, main.shootingOpenMessage(state));
+      assert.equal(Buffer.byteLength(result.message, 'utf8') <= 240, true);
+      assert.doesNotMatch(JSON.stringify(result),
+        /03_口播稿|relativePath|sourceHash|session|root|control|windowId|\/private/i);
+    }
+    assert.equal(openCalls, 4);
+    assert.equal(sourceReads, 8, '每次打开必须在 disposition 前后各重读一次源 capability');
+    assert.throws(() => ops['shoot.open'].redact({
+      ...openResults[0], message: '/private/workspace/不得泄漏'
+    }));
+    assert.throws(() => ops['shoot.open'].redact({
+      ...openResults[0], windowId: 123
+    }));
+
+    const page0 = ops['shoot.history.read'].redact(
+      await ops['shoot.history.read'].handle({ input: page0Input, context: current })
+    );
+    assert.deepEqual(Object.keys(page0).sort(), [
+      'collectionToken', 'complete', 'contentRef', 'cursor', 'itemCount',
+      'kind', 'nextCursor', 'projectToken', 'records'
+    ]);
+    assert.equal(page0.kind, 'shoot-history');
+    assert.equal(page0.contentRef, contentRef);
+    assert.equal(page0.projectToken, projectToken);
+    assert.equal(page0.collectionToken, collectionA);
+    assert.equal(page0.itemCount, 5);
+    assert.equal(page0.complete, true);
+    assert.equal(page0.cursor, 0);
+    assert.equal(page0.nextCursor, 4);
+    assert.equal(page0.records.length, 4);
+    assert.equal(Buffer.byteLength(page0.records[0].title, 'utf8'), 120);
+    for (const record of page0.records) {
+      assert.deepEqual(Object.keys(record).sort(), [
+        'allConfirmed', 'confirmedCount', 'missingCount', 'recordRef',
+        'retakeCount', 'title', 'totalShots'
+      ]);
+      assert.match(record.recordRef, /^[a-f0-9]{24}$/);
+      assert.equal(record.confirmedCount + record.missingCount, record.totalShots);
+      assert.equal(record.allConfirmed, record.missingCount === 0);
+    }
+    assert.equal(Buffer.byteLength(JSON.stringify(page0), 'utf8') <= 5600, true);
+    assert.doesNotMatch(JSON.stringify(page0),
+      /relativePath|sourceHash|session|root|platform|metrics|completedAt|createdAt|updatedAt|\/private/i);
+
+    const page1 = ops['shoot.history.read'].redact(
+      await ops['shoot.history.read'].handle({
+        input: {
+          ...identity, cursor: 4, limit: 4, collectionToken: collectionA
+        }, context: current
+      })
+    );
+    assert.equal(page1.records.length, 1);
+    assert.equal(page1.nextCursor, null);
+    const terminal = ops['shoot.history.read'].redact(
+      await ops['shoot.history.read'].handle({
+        input: {
+          ...identity, cursor: 5, limit: 4, collectionToken: collectionA
+        }, context: current
+      })
+    );
+    assert.deepEqual(terminal.records, []);
+    assert.equal(terminal.collectionToken, collectionA);
+    assert.equal(terminal.nextCursor, null);
+
+    const emptyOps = main.contextPocWorkspaceFileOperations({
+      catalog, shootSource,
+      shootHistoryCollection: () => ({
+        collectionToken: collectionA, complete: true, records: []
+      })
+    });
+    const empty = emptyOps['shoot.history.read'].redact(
+      await emptyOps['shoot.history.read'].handle({ input: page0Input, context: current })
+    );
+    assert.equal(empty.collectionToken, collectionA);
+    assert.equal(empty.itemCount, 0);
+    assert.deepEqual(empty.records, []);
+    assert.equal(empty.nextCursor, null);
+
+    activeComplete = false;
+    const partial = ops['shoot.history.read'].redact(
+      await ops['shoot.history.read'].handle({ input: page0Input, context: current })
+    );
+    assert.equal(partial.complete, false);
+    assert.equal(partial.itemCount, 5);
+    activeComplete = true;
+
+    activeCollectionToken = collectionB;
+    let collectionDrift;
+    try {
+      await ops['shoot.history.read'].handle({
+        input: {
+          ...identity, cursor: 4, limit: 4, collectionToken: collectionA
+        }, context: current
+      });
+    } catch (error) { collectionDrift = error; }
+    assert.equal(ops['shoot.history.read'].errorCode(collectionDrift), 'operation-stale');
+    activeCollectionToken = collectionA;
+    assert.equal((await ops['shoot.history.read'].handle({
+      input: {
+        ...identity, cursor: 4, limit: 4, collectionToken: collectionA
+      }, context: current
+    })).records.length, 1, 'A→B→A 回到同一集合后可继续读 A 的后页');
+
+    const duplicateRecords = records.map((record) => ({ ...record }));
+    duplicateRecords[4].recordRef = duplicateRecords[0].recordRef;
+    const duplicateOps = main.contextPocWorkspaceFileOperations({
+      catalog, shootSource,
+      shootHistoryCollection: () => ({
+        collectionToken: collectionA, complete: true, records: duplicateRecords
+      })
+    });
+    let duplicateError;
+    try {
+      await duplicateOps['shoot.history.read'].handle({
+        input: page0Input, context: current
+      });
+    } catch (error) { duplicateError = error; }
+    assert.equal(duplicateOps['shoot.history.read'].errorCode(duplicateError),
+      'operation-failed');
+    const tooManyOps = main.contextPocWorkspaceFileOperations({
+      catalog, shootSource,
+      shootHistoryCollection: () => ({
+        collectionToken: collectionA, complete: false,
+        records: Array.from({ length: 513 }, () => records[0])
+      })
+    });
+    let tooManyError;
+    try {
+      await tooManyOps['shoot.history.read'].handle({
+        input: page0Input, context: current
+      });
+    } catch (error) { tooManyError = error; }
+    assert.equal(tooManyOps['shoot.history.read'].errorCode(tooManyError),
+      'operation-failed');
+
+    for (const malformed of [
+      { ...page0, completedAt: '2026-08-25' },
+      { ...page0, records: [{ ...page0.records[0], sourceHash }] },
+      { ...page0, records: [{ ...page0.records[0], recordRef: `record-${'a'.repeat(24)}` }] },
+      { ...page0, records: [{ ...page0.records[0], title: '鲸'.repeat(41) }] },
+      { ...page0, records: [{ ...page0.records[0], missingCount: 1 }] },
+      { ...page0, records: [{ ...page0.records[0], allConfirmed: false }] }
+    ]) assert.throws(() => ops['shoot.history.read'].redact(malformed));
+
+    const path04 = '04_素材清单/不是台词.md';
+    const contentRef04 = main.videoContentRef(epoch, path04);
+    const projectToken04 = main.videoProjectToken(epoch, path04, sourceHash);
+    let forbiddenOpenCalls = 0;
+    const pathOps = main.contextPocWorkspaceFileOperations({
+      catalog: () => ({ projects: [{
+        contentRef: contentRef04, projectToken: projectToken04, stage: 'shoot'
+      }] }),
+      shootSource: () => ({
+        runtime: { epoch },
+        record: { relativePath: path04, hash: sourceHash, stage: 'shoot' },
+        document: { relativePath: path04, hash: sourceHash, stage: 'shoot' }
+      }),
+      shootOpenAction: () => {
+        forbiddenOpenCalls += 1;
+        return { kind: 'shoot-open', state: 'opened' };
+      }
+    });
+    let pathError;
+    try {
+      await pathOps['shoot.open'].handle({
+        input: { contentRef: contentRef04, projectToken: projectToken04 }, context: current
+      });
+    } catch (error) { pathError = error; }
+    assert.equal(pathOps['shoot.open'].errorCode(pathError), 'operation-failed');
+    assert.equal(forbiddenOpenCalls, 0, '04 素材清单即使 stage=shoot 也不得打开拍摄窗');
+
+    cardStage = 'script';
+    const callsBeforeWrongStage = openCalls;
+    let stageError;
+    try {
+      await ops['shoot.open'].handle({ input: identity, context: current });
+    } catch (error) { stageError = error; }
+    assert.equal(ops['shoot.open'].errorCode(stageError), 'operation-failed');
+    assert.equal(openCalls, callsBeforeWrongStage);
+    cardStage = 'shoot';
+
+    let driftReads = 0;
+    const openDriftOps = main.contextPocWorkspaceFileOperations({
+      catalog,
+      shootSource: () => {
+        driftReads += 1;
+        const hash = driftReads === 1 ? sourceHash : changedHash;
+        return {
+          runtime: { epoch },
+          record: { relativePath: sourceRelativePath, hash, stage: 'shoot' },
+          document: { relativePath: sourceRelativePath, hash, stage: 'shoot' }
+        };
+      },
+      shootOpenAction: () => ({ kind: 'shoot-open', state: 'opened' })
+    });
+    let openDriftError;
+    try {
+      await openDriftOps['shoot.open'].handle({ input: identity, context: current });
+    } catch (error) { openDriftError = error; }
+    assert.equal(openDriftOps['shoot.open'].errorCode(openDriftError), 'outcome-unknown');
+
+    driftReads = 0;
+    const historyDriftOps = main.contextPocWorkspaceFileOperations({
+      catalog,
+      shootSource: () => {
+        driftReads += 1;
+        const hash = driftReads === 1 ? sourceHash : changedHash;
+        return {
+          runtime: { epoch },
+          record: { relativePath: sourceRelativePath, hash, stage: 'shoot' },
+          document: { relativePath: sourceRelativePath, hash, stage: 'shoot' }
+        };
+      },
+      shootHistoryCollection
+    });
+    let historyDriftError;
+    try {
+      await historyDriftOps['shoot.history.read'].handle({
+        input: page0Input, context: current
+      });
+    } catch (error) { historyDriftError = error; }
+    assert.equal(historyDriftOps['shoot.history.read'].errorCode(historyDriftError),
+      'operation-stale', '只读历史后源漂移没有副作，应该 stale');
+
+    const malformedOpenOps = main.contextPocWorkspaceFileOperations({
+      catalog, shootSource,
+      shootOpenAction: () => ({
+        kind: 'shoot-open', state: 'opened', path: '/private/window'
+      })
+    });
+    let malformedOpenError;
+    try {
+      await malformedOpenOps['shoot.open'].handle({ input: identity, context: current });
+    } catch (error) { malformedOpenError = error; }
+    assert.equal(malformedOpenOps['shoot.open'].errorCode(malformedOpenError),
+      'outcome-unknown');
+    const unknownOpenOps = main.contextPocWorkspaceFileOperations({
+      catalog, shootSource,
+      shootOpenAction: () => { throw new Error('聚焦后适配器失败'); }
+    });
+    let unknownOpenError;
+    try {
+      await unknownOpenOps['shoot.open'].handle({ input: identity, context: current });
+    } catch (error) { unknownOpenError = error; }
+    assert.equal(unknownOpenOps['shoot.open'].errorCode(unknownOpenError), 'outcome-unknown');
+
+    let staleSideEffects = 0;
+    const staleOps = main.contextPocWorkspaceFileOperations({
+      catalog: () => { staleSideEffects += 1; return catalog(); },
+      shootSource: () => { staleSideEffects += 1; return {}; },
+      shootOpenAction: () => { staleSideEffects += 1; return {}; },
+      shootHistoryCollection: () => { staleSideEffects += 1; return {}; }
+    });
+    await assert.rejects(staleOps['shoot.open'].handle({
+      input: identity, context: { assertCurrent: () => false }
+    }));
+    await assert.rejects(staleOps['shoot.history.read'].handle({
+      input: page0Input, context: { assertCurrent: () => false }
+    }));
+    assert.equal(staleSideEffects, 0);
+    for (const code of ['ERR_ROOT_CHANGED', 'ERR_VIDEO_ROOT_CHANGED',
+      'ERR_ROOT_UNREADABLE', 'ERR_PATH_SYMLINK', 'ERR_PATH_OUTSIDE',
+      'ERR_PATH_NOT_FILE', 'ERR_CONTEXT_PROJECT_STALE']) {
+      assert.equal(ops['shoot.history.read'].errorCode({ code }), 'operation-stale', code);
+    }
+    assert.equal(historyCalls >= 6, true);
+
+    const mainSource = source('main.js');
+    const openFlow = mainSource.slice(
+      mainSource.indexOf('function openShootingWindowForProject'),
+      mainSource.indexOf('function writeShootingOutputs')
+    );
+    assert.match(openFlow, /shootingRuntimeContext, runtime/);
+    assert.match(openFlow, /rootIdentityKey: runtime\.rootIdentityKey/);
+    assert.match(openFlow, /ERR_OPERATION_OUTCOME_UNKNOWN/);
+    const historyFlow = mainSource.slice(
+      mainSource.indexOf('function videoShootingHistoryCollection'),
+      mainSource.indexOf('function shootingRuntimeBindingMatches')
+    );
+    assert.match(historyFlow, /scanShootingRecords/);
+    assert.match(historyFlow, /parseOwnedRecord/);
+    assert.match(historyFlow, /shooting-history\/v1/);
+    assert.match(historyFlow,
+      /left\.relativePath > right\.relativePath \? -1/,
+      '历史资产必须按 relativePath 降序确定排列');
+    const contextOpsFlow = mainSource.slice(
+      mainSource.indexOf("'shoot.open': Object.freeze"),
+      mainSource.indexOf("'project.action.prepare': Object.freeze")
+    );
+    assert.doesNotMatch(contextOpsFlow,
+      /shooting:get|shooting:command|shooting:finish|sourceRelativePath|sourceHash|\.text/,
+      '远端 workspace-files 不得直连本地拍摄窗 IPC 或脚本正文');
   });
 
   await test('shell 公开面按当前 sessionRef 投影，不泄露 ref、路径或标题', async () => {

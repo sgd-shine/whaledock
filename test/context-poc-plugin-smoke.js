@@ -131,6 +131,7 @@ async function main() {
       'proposal.read', 'proposal.decide', 'proposal.undo',
       'publish.read', 'publish.create', 'publish.update',
       'review.tactics.read', 'review.solidify',
+      'shoot.open', 'shoot.history.read',
       'receipts.read', 'receipts.ack', 'receipts.open'
     ];
     const operationSet = (source, name) => {
@@ -148,8 +149,20 @@ async function main() {
       'Main/Host/Client 三处 operation exact set 必须同步');
     assert.match(pluginClient, /contentRef/);
     assert.match(pluginClient, /function ReviewPanel/);
+    assert.match(pluginClient, /function ShootPanel/);
     assert.match(pluginClient, /const MAX_TACTIC_PAGES = 512;/,
       '打法分页必须覆盖 backend 最多 512 条且允许因响应体积每页少于 4 条');
+    assert.match(pluginClient, /const MAX_SHOOT_HISTORY_PAGES = 128;/,
+      '拍摄记录分页最多 128 页，每页固定上限 4 条');
+    assert.match(pluginClient, /const MAX_BROWSER_PROMPTER_BYTES = 64 \* 1024;/,
+      'browserOnly 手动提词文本必须有 64 KiB 硬上限');
+    assert.match(pluginClient, /function provideBrowserOnlyContentShell/);
+    assert.match(pluginClient,
+      /页内简版只在当前页面滚动，不记录镜头完成状态，也不会写入拍摄记录。/);
+    assert.match(pluginClient,
+      /以下是 WhaleDock 标记的本地收工记录；不是视频、设备或平台数据回读。/);
+    assert.match(pluginClient, /page\.addEventListener\('visibilitychange', pauseWhenHidden\)/,
+      '页内简版必须在页面隐藏时暂停');
     assert.match(pluginClient, /打法只能由你从真实复盘显式固化。/);
     assert.match(pluginClient,
       /一期没有平台数据通道；以下都是本地文件，不显示播放量、评论聚类、使用次数或胜率。/);
@@ -170,6 +183,65 @@ async function main() {
       '无 gate 且 marker/fragment 均未证明受管时必须保持原生发送');
     assert.match(conversationFork, /这是鲸坞受管页面：上下文闸门没有加载，本次未发送/,
       'marker 或合法 loopback fragment 证明受管时，缺 gate 必须 fail-closed');
+  });
+
+  await test('browserOnly 无 fragment/非 loopback 只注册官方 shell，零 gate 与零 RPC', async () => {
+    const source = fs.readFileSync(path.join(sourceRoot, 'plugin', 'lib', 'client.js'), 'utf8');
+    const scenarios = [
+      { isLoopback: true, hash: '' },
+      { isLoopback: false,
+        hash: `#whaledockController=controller-12345678&whaledockSelectionToken=${SELECTION_TOKEN}` }
+    ];
+    for (const scenario of scenarios) {
+      let definition = null;
+      let rpcCalls = 0;
+      let disposed = false;
+      let cleanup = null;
+      const provided = [];
+      const sandbox = {
+        window: { __ModuleLoader__: { load(value) { definition = value; } } },
+        location: { hash: scenario.hash, pathname: '/', search: '' },
+        URLSearchParams,
+        AbortController,
+        setTimeout,
+        clearTimeout
+      };
+      sandbox.globalThis = sandbox;
+      vm.runInNewContext(source, sandbox, { filename: 'context-poc/browser-client.js' });
+      const plugin = definition.factory(clientImport);
+      const connection = {
+        isLoopback: scenario.isLoopback,
+        rpc: { call() { rpcCalls += 1; throw new Error('browserOnly must not call RPC'); } }
+      };
+      const sessions = {};
+      plugin.apply({
+        get(name) { return name === 'connection' ? connection : sessions; },
+        reflect: {
+          provide(name, value) {
+            provided.push({ name, value });
+            return () => { disposed = true; };
+          }
+        },
+        effect(factory, label) {
+          assert.equal(label, 'whaledock-context-bridge: browser-only content shell');
+          cleanup = factory();
+        }
+      });
+      assert.deepEqual(provided.map((item) => item.name), ['whaledockContentShell']);
+      const shell = provided[0].value;
+      assert.equal(shell.contract, 'whaledock.content-shell/v1');
+      assert.equal(shell.browserOnly, true);
+      assert.equal(shell.preferences, undefined);
+      assert.equal(shell.workspaceFiles, undefined);
+      assert.equal(shell.projectActions, null);
+      assert.equal(rpcCalls, 0);
+      assert.equal(Object.prototype.hasOwnProperty.call(
+        sandbox, '__WHALEDOCK_CONTEXT_MANAGED__'
+      ), false);
+      assert.equal(typeof cleanup, 'function');
+      cleanup();
+      assert.equal(disposed, true);
+    }
   });
 
   await test('Client 静态 bundle 上报选择，并串行保留偏好写入的最后意图', async () => {

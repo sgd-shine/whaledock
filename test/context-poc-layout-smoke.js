@@ -188,6 +188,13 @@ function loadBundle(services = {}, options = {}) {
     clearTimeout(id) { timers.delete(id); },
     console
   };
+  if (options.document) sandbox.document = options.document;
+  if (typeof options.requestAnimationFrame === 'function') {
+    sandbox.requestAnimationFrame = options.requestAnimationFrame;
+  }
+  if (typeof options.cancelAnimationFrame === 'function') {
+    sandbox.cancelAnimationFrame = options.cancelAnimationFrame;
+  }
   sandbox.globalThis = sandbox;
   vm.runInNewContext(pluginSource, sandbox, { filename: 'context-poc/client.js' });
   vm.runInNewContext(layoutSource, sandbox, { filename: 'ui-layout/client.js' });
@@ -206,7 +213,9 @@ function loadBundle(services = {}, options = {}) {
   const contextPlugin = contextDefinition.factory(requireModule);
   const integration = options.noShell ? undefined : contextPlugin.createContentShell({
     get: (name) => services[name]
-  }, services.whaledockShellPreferences, services.whaledockWorkspaceFiles);
+  }, services.whaledockShellPreferences, services.whaledockWorkspaceFiles, {
+    browserOnly: options.browserOnly === true
+  });
   const plugin = layoutDefinition.factory(requireModule);
   let registration;
   plugin.apply({
@@ -453,6 +462,37 @@ function tacticsPage(project, tactics = [], extra = {}) {
     nextCursor: Object.prototype.hasOwnProperty.call(extra, 'nextCursor')
       ? extra.nextCursor : null,
     tactics
+  });
+}
+
+function shootRecord(hex, title, extra = {}) {
+  return {
+    recordRef: hex.repeat(24).slice(0, 24),
+    title, confirmedCount: 2, totalShots: 3,
+    missingCount: 1, retakeCount: 0, allConfirmed: false,
+    ...extra
+  };
+}
+
+function shootHistory(project, records = [], extra = {}) {
+  const cursor = extra.cursor || 0;
+  const itemCount = Object.prototype.hasOwnProperty.call(extra, 'itemCount')
+    ? extra.itemCount : cursor + records.length;
+  return fulfilled({
+    kind: 'shoot-history', contentRef: project.contentRef,
+    projectToken: project.projectToken,
+    collectionToken: extra.collectionToken || `collection-${'b'.repeat(24)}`,
+    itemCount, complete: extra.complete ?? true, cursor,
+    nextCursor: Object.prototype.hasOwnProperty.call(extra, 'nextCursor')
+      ? extra.nextCursor : null,
+    records
+  });
+}
+
+function shootOpen(project, state = 'opened', message = '全屏拍摄现场已打开。') {
+  return fulfilled({
+    kind: 'shoot-open', contentRef: project.contentRef,
+    projectToken: project.projectToken, state, message
   });
 }
 
@@ -705,6 +745,162 @@ async function main() {
     assert.equal(slots.filter((call) => call.name === 'details').length, 1);
   });
 
+  await test('browserOnly 默认原生会话三栏，手动页内提词 64KiB 精确有界且离开即取消 RAF', async () => {
+    let workspaceCalls = 0;
+    let visibilityListener = null;
+    let rafSequence = 0;
+    const pendingRaf = new Map();
+    const cancelledRaf = [];
+    const requestAnimationFrame = (callback) => {
+      const id = ++rafSequence;
+      pendingRaf.set(id, callback);
+      return id;
+    };
+    const cancelAnimationFrame = (id) => {
+      cancelledRaf.push(id);
+      pendingRaf.delete(id);
+    };
+    const advanceRaf = (id, now) => {
+      const callback = pendingRaf.get(id);
+      assert.equal(typeof callback, 'function', `RAF ${id} 必须仍在等待`);
+      pendingRaf.delete(id);
+      callback(now);
+    };
+    const page = {
+      hidden: false,
+      querySelector() { return {}; },
+      addEventListener(name, listener) {
+        if (name === 'visibilitychange') visibilityListener = listener;
+      },
+      removeEventListener(name, listener) {
+        if (name === 'visibilitychange' && visibilityListener === listener) {
+          visibilityListener = null;
+        }
+      }
+    };
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/browser') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({
+      whaledockWorkspaceFiles: { execute() { workspaceCalls += 1; throw new Error('forbidden'); } },
+      sessions: { open() {} }
+    }, {
+      browserOnly: true,
+      document: page,
+      requestAnimationFrame,
+      cancelAnimationFrame
+    });
+    assert.equal(harness.integration.browserOnly, true);
+    assert.equal(harness.integration.workspaceFiles, undefined);
+    assert.equal(harness.integration.projectActions, null);
+    const slots = [];
+    const props = uiProps(state, harness.integration, slots);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    assert.match(textOf(tree), /会话页内提词/u);
+    assert.doesNotMatch(textOf(tree), /手动页内提词|WhaleDock内容库/u);
+    assert(slots.some((call) => call.name === 'sidebar'));
+    assert(slots.some((call) => call.name === 'conversation'));
+    assert(slots.some((call) => call.name === 'details'));
+    assert.equal(workspaceCalls, 0);
+
+    slots.length = 0;
+    button(tree, '页内提词').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.match(textOf(tree), /手动页内提词/u);
+    assert.match(textOf(tree), /不读取工作区、不创建内容身份/u);
+    assert.equal(findAll(tree, (node) => node.props?.['data-browser-only-prompter']).length, 1);
+    assert(slots.some((call) => call.name === 'sidebar'));
+    assert(slots.some((call) => call.name === 'conversation'));
+    assert(slots.some((call) => call.name === 'details'));
+    const textarea = findAll(tree, (node) => node.type === 'textarea'
+      && node.props?.['aria-label'] === '手动粘贴提词文本')[0];
+    const asciiBoundary = 'a'.repeat(65536);
+    textarea.props.onChange({ target: { value: asciiBoundary } });
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.equal(findAll(tree, (node) => node.type === 'textarea')[0].props.value, asciiBoundary,
+      '精确 65536 个 ASCII 字节必须接受');
+    assert.match(textOf(tree), /65536\/65536 字节/u);
+
+    findAll(tree, (node) => node.type === 'textarea')[0]
+      .props.onChange({ target: { value: `${asciiBoundary}b` } });
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.match(textOf(tree), /手动提词文本最多 64 KiB；超出部分没有载入/u);
+    assert.equal(findAll(tree, (node) => node.type === 'textarea')[0].props.value, asciiBoundary,
+      '65537 个 ASCII 字节必须拒绝且保留上次合法文本');
+
+    const chineseBoundary = `${'中'.repeat(21845)}a`;
+    assert.equal(Buffer.byteLength(chineseBoundary, 'utf8'), 65536);
+    findAll(tree, (node) => node.type === 'textarea')[0]
+      .props.onChange({ target: { value: chineseBoundary } });
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.equal(findAll(tree, (node) => node.type === 'textarea')[0].props.value, chineseBoundary,
+      '含中文的精确 65536 UTF-8 字节必须接受');
+    findAll(tree, (node) => node.type === 'textarea')[0]
+      .props.onChange({ target: { value: `${chineseBoundary}b` } });
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.equal(findAll(tree, (node) => node.type === 'textarea')[0].props.value, chineseBoundary,
+      '含中文的 65537 UTF-8 字节必须拒绝且保留上次合法文本');
+    assert.match(textOf(tree), /手动提词文本最多 64 KiB；超出部分没有载入/u);
+
+    const valid = '浏览器手动提词\n第二行';
+    findAll(tree, (node) => node.type === 'textarea')[0]
+      .props.onChange({ target: { value: valid } });
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.match(textOf(tree), /浏览器手动提词\s*第二行/u);
+    assert.match(textOf(tree), /不保存 · 不上传/u);
+    const operationCount = workspaceCalls;
+    button(tree, '开始').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.equal(button(tree, '暂停').props.disabled, false);
+    const hiddenInitialRaf = rafSequence;
+    assert(pendingRaf.has(hiddenInitialRaf), '开始后必须存在未完成 RAF');
+    advanceRaf(hiddenInitialRaf, 100);
+    const hiddenPendingRaf = rafSequence;
+    assert(pendingRaf.has(hiddenPendingRaf), 'RAF 回调后必须排入下一帧');
+    button(tree, '0.8 倍').props.onClick();
+    button(tree, '1.2 倍').props.onClick();
+    button(tree, '大字').props.onClick();
+    button(tree, '中字').props.onClick();
+    assert(visibilityListener, 'browserOnly 页内提词必须监听页面隐藏');
+    page.hidden = true;
+    visibilityListener();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.equal(button(tree, '暂停').props.disabled, true);
+    assert(cancelledRaf.includes(hiddenPendingRaf), '页面隐藏必须取消未完成 RAF');
+    assert.equal(pendingRaf.has(hiddenPendingRaf), false);
+    button(tree, '重置').props.onClick();
+    assert.equal(workspaceCalls, operationCount,
+      'browserOnly 手动文本和全部控制都不得访问 workspace RPC');
+
+    page.hidden = false;
+    button(tree, '开始').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    const sessionsInitialRaf = rafSequence;
+    advanceRaf(sessionsInitialRaf, 200);
+    const sessionsPendingRaf = rafSequence;
+    button(tree, '会话').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert(cancelledRaf.includes(sessionsPendingRaf), '切回会话必须取消未完成 RAF');
+    assert.equal(pendingRaf.has(sessionsPendingRaf), false);
+
+    button(tree, '页内提词').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    findAll(tree, (node) => node.type === 'textarea')[0]
+      .props.onChange({ target: { value: valid } });
+    tree = harness.renderer.render(harness.AppFrame, props);
+    button(tree, '开始').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    const unmountInitialRaf = rafSequence;
+    advanceRaf(unmountInitialRaf, 300);
+    const unmountPendingRaf = rafSequence;
+    function UnmountedRoot() { return null; }
+    harness.renderer.render(UnmountedRoot, {});
+    assert(cancelledRaf.includes(unmountPendingRaf), '组件卸载必须取消未完成 RAF');
+    assert.equal(pendingRaf.has(unmountPendingRaf), false);
+  });
+
   await test('fillDraft 严格 connect→input→setDraft→open，且轮询有界', async () => {
     const events = [];
     let scopeCount = 0;
@@ -931,9 +1127,9 @@ async function main() {
     assert(calls.some((call) => call.operation === 'catalog.read' && call.input.cursor === 4));
   });
 
-  await test('概览、脚本、发布与复盘接通真实能力且拍摄诚实标未完成，TaskReceiptStrip 不卸载', async () => {
+  await test('概览、脚本、拍摄、发布与复盘都接通真实能力，TaskReceiptStrip 不卸载', async () => {
     const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
-    const project = contentProject('8', '回执项目', '拍摄中');
+    const project = contentProject('8', '回执项目', '拍摄中', { canShoot: true });
     project.contentRef = `content-${'8'.repeat(24)}`;
     const workspaceFiles = { async execute(operation, input) {
       if (operation === 'catalog.read') return catalog([project]);
@@ -947,6 +1143,10 @@ async function main() {
       if (operation === 'publish.read') return fulfilled(publishSurface(project, {
         stage: 'shoot', stageLabel: '拍摄', checklist: null
       }));
+      if (operation === 'shoot.history.read') return shootHistory(project, [
+        shootRecord('2', '第一次真实收工')
+      ]);
+      if (operation === 'shoot.open') return shootOpen(project);
       if (operation === 'review.tactics.read') return tacticsPage(project);
       if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
         projectToken: input.projectToken, receipts: [{
@@ -981,7 +1181,13 @@ async function main() {
     assert.equal(harness.renderer.fiberIds('TaskReceiptStrip')[0], receiptFiber);
     button(tree, '拍摄').props.onClick();
     tree = harness.renderer.render(harness.AppFrame, props);
-    assert.match(textOf(tree), /这一格还没做/u);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.doesNotMatch(textOf(tree), /这一格还没做/u);
+    assert.match(textOf(tree), /打开全屏拍摄现场/u);
+    assert.match(textOf(tree), /第一次真实收工/u);
+    assert.match(textOf(tree), /记录中写着：确认 2\/3、缺拍 1、重来 0/u);
+    assert.match(textOf(tree), /页内简版只在当前页面滚动，不记录镜头完成状态，也不会写入拍摄记录/u);
     assert.match(textOf(tree), /投递中/u);
     assert.equal(harness.renderer.fiberIds('TaskReceiptStrip')[0], receiptFiber);
     button(tree, '复盘').props.onClick();
@@ -1005,6 +1211,395 @@ async function main() {
     button(tree, '刚更新').props.onClick();
     tree = await settle(harness, props);
     assert.doesNotMatch(textOf(tree), /刚更新/u);
+  });
+
+  await test('拍摄页完整分页、全屏单飞与页内隐藏暂停，页内控件保持零写入', async () => {
+    const project = contentProject('1', '完整口播稿', '拍摄', { canShoot: true });
+    const blocks = [
+      scriptBlock('1', '第一段完整台词'),
+      scriptBlock('2', '第二段完整台词'),
+      scriptBlock('3', '第三段完整台词')
+    ];
+    const records = [
+      shootRecord('1', '收工一'), shootRecord('2', '收工二'),
+      shootRecord('3', '收工三'), shootRecord('4', '收工四'),
+      shootRecord('5', '收工五', {
+        confirmedCount: 3, totalShots: 3, missingCount: 0,
+        retakeCount: 2, allConfirmed: true
+      })
+    ];
+    const opening = deferred();
+    const calls = [];
+    let openCalls = 0;
+    const workspaceFiles = { async execute(operation, input) {
+      calls.push({ operation, input: { ...input } });
+      if (operation === 'catalog.read') return catalog([project]);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'document.read' && input.cursor === 0) {
+        return documentPage(project, blocks.slice(0, 2), {
+          blockCount: 3, nextCursor: 2, truncated: true
+        });
+      }
+      if (operation === 'document.read' && input.cursor === 2) {
+        return documentPage(project, blocks.slice(2), {
+          blockCount: 3, cursor: 2, truncated: false
+        });
+      }
+      if (operation === 'shoot.history.read' && input.cursor === 0) {
+        return shootHistory(project, records.slice(0, 4), {
+          itemCount: 5, nextCursor: 4,
+          collectionToken: `collection-${'4'.repeat(24)}`
+        });
+      }
+      if (operation === 'shoot.history.read' && input.cursor === 4) {
+        return shootHistory(project, records.slice(4), {
+          itemCount: 5, cursor: 4,
+          collectionToken: `collection-${'4'.repeat(24)}`
+        });
+      }
+      if (operation === 'shoot.open') {
+        openCalls += 1;
+        return opening.promise;
+      }
+      throw new Error(operation);
+    } };
+    let visibilityListener = null;
+    const page = {
+      hidden: false,
+      querySelector() { return {}; },
+      addEventListener(name, listener) {
+        if (name === 'visibilitychange') visibilityListener = listener;
+      },
+      removeEventListener(name, listener) {
+        if (name === 'visibilitychange' && visibilityListener === listener) {
+          visibilityListener = null;
+        }
+      }
+    };
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+      creatorTab: 'shoot', document: page
+    });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /完整口播稿 · 3\/3 块/u);
+    assert.match(textOf(tree), /收工五/u);
+    assert.match(textOf(tree), /记录中写着：确认 3\/3、缺拍 0、重来 2/u);
+    assert.equal(button(tree, '打开页内简版').props.disabled, false);
+    assert.deepEqual(calls.filter((call) => call.operation === 'document.read')
+      .map((call) => call.input), [
+      { projectToken: project.projectToken, cursor: 0, limit: 2 },
+      { projectToken: project.projectToken, cursor: 2, limit: 2 }
+    ]);
+    assert.deepEqual(calls.filter((call) => call.operation === 'shoot.history.read')
+      .map((call) => call.input), [
+      { contentRef: project.contentRef, projectToken: project.projectToken,
+        cursor: 0, limit: 4, collectionToken: null },
+      { contentRef: project.contentRef, projectToken: project.projectToken,
+        cursor: 4, limit: 4, collectionToken: `collection-${'4'.repeat(24)}` }
+    ]);
+
+    const native = button(tree, '打开全屏拍摄现场');
+    native.props.onClick();
+    native.props.onClick();
+    assert.equal(openCalls, 1, 'pendingRef 必须在首个 await 前锁住全屏打开');
+    opening.resolve(shootOpen(project, 'unavailable',
+      '这份内容当前不能进入本地拍摄现场；没有创建拍摄会话。'));
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /没有创建拍摄会话。 可改用下方页内简版/u);
+    assert.match(textOf(tree), /收起页内简版/u,
+      'native unavailable 且全文完整时必须自动开放页内简版');
+    assert.match(textOf(tree), /第一段完整台词/u);
+    assert.match(textOf(tree), /第三段完整台词/u);
+    const operationCount = calls.length;
+    button(tree, '开始').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.equal(button(tree, '暂停').props.disabled, false);
+    button(tree, '0.8 倍').props.onClick();
+    button(tree, '1.2 倍').props.onClick();
+    button(tree, '大字').props.onClick();
+    button(tree, '中字').props.onClick();
+    button(tree, '重置').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    button(tree, '开始').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert(visibilityListener, '拍摄页必须监听页面隐藏');
+    page.hidden = true;
+    visibilityListener();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.equal(button(tree, '暂停').props.disabled, true,
+      '页面隐藏必须自动暂停页内滚动');
+    assert.equal(calls.length, operationCount,
+      '页内开始/暂停/重置/速度/字号都不得触发 workspace 写入或任何 RPC');
+  });
+
+  await test('拍摄页只信 canShoot，其他内容在 document/history/native RPC 前停止', async () => {
+    const project = contentProject('2', '不是口播稿', '写稿', { canShoot: false });
+    const calls = [];
+    const workspaceFiles = { async execute(operation, input) {
+      calls.push({ operation, input: { ...input } });
+      if (operation === 'catalog.read') return catalog([project]);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      throw new Error(operation);
+    } };
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+      creatorTab: 'shoot'
+    });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /拍摄现场只接受 WhaleDock 明确标记的 03_口播稿/u);
+    assert.doesNotMatch(textOf(tree), /打开全屏拍摄现场|页内简版提词器/u);
+    assert.equal(calls.some((call) => [
+      'document.read', 'shoot.history.read', 'shoot.open'
+    ].includes(call.operation)), false);
+  });
+
+  await test('拍摄记录 parser 拒绝路径额外字段，正文/历史 partial 与截断都明示', async () => {
+    const project = contentProject('3', '严格口播稿', '拍摄', { canShoot: true });
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const makeHarness = (mode) => {
+      const workspaceFiles = { async execute(operation, input) {
+        if (operation === 'catalog.read') return catalog([project]);
+        if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+          projectToken: input.projectToken, receipts: [] });
+        if (operation === 'document.read' && mode === 'partial' && input.cursor === 0) {
+          return documentPage(project, [
+            scriptBlock('3', 'partial 第一段'), scriptBlock('4', 'partial 第二段')
+          ], { blockCount: 3, nextCursor: 2, truncated: true });
+        }
+        if (operation === 'document.read' && mode === 'partial') {
+          return { state: 'rejected', code: 'operation-failed', result: null };
+        }
+        if (operation === 'document.read') return documentPage(project, [
+          scriptBlock('5', '完整严格正文')
+        ]);
+        if (operation === 'shoot.history.read' && mode === 'path') {
+          return shootHistory(project, [{
+            ...shootRecord('6', '不得显示的路径记录'),
+            relativePath: '05_拍摄记录/private-secret.md'
+          }]);
+        }
+        if (operation === 'shoot.history.read') return shootHistory(project, [
+          shootRecord('7', '只读回一条')
+        ], { complete: false });
+        throw new Error(operation);
+      } };
+      const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+      return loadBundle({ whaledockShellPreferences: pref,
+        whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+        creatorTab: 'shoot'
+      });
+    };
+
+    const pathHarness = makeHarness('path');
+    const pathProps = uiProps(state, pathHarness.integration, []);
+    let tree = pathHarness.renderer.render(pathHarness.AppFrame, pathProps);
+    tree = await settle(pathHarness, pathProps);
+    tree = await settle(pathHarness, pathProps);
+    assert.match(textOf(tree), /本地收工记录暂时读不到/u);
+    assert.doesNotMatch(textOf(tree), /private-secret|不得显示的路径记录/u);
+    assert.match(textOf(tree), /严格口播稿 · 1\/1 块/u);
+    assert.equal(button(tree, '打开页内简版').props.disabled, false);
+
+    const partialHarness = makeHarness('partial');
+    const partialProps = uiProps(state, partialHarness.integration, []);
+    tree = partialHarness.renderer.render(partialHarness.AppFrame, partialProps);
+    tree = await settle(partialHarness, partialProps);
+    tree = await settle(partialHarness, partialProps);
+    assert.match(textOf(tree), /严格口播稿 · 2\/3 块/u);
+    assert.match(textOf(tree), /口播稿读取不完整或含截断内容；只显示已成功读取的 2\/3 块/u);
+    assert.match(textOf(tree), /拍摄记录读取不完整；只显示已成功读取的 1 条 WhaleDock 本地记录/u);
+    assert.equal(button(tree, '打开页内简版').props.disabled, true,
+      'partial/truncated 正文不得开放页内提词器');
+    assert.equal(button(tree, '打开全屏拍摄现场').props.disabled, false,
+      '完整正文只约束页内降级，不应伪造 native 不可用');
+  });
+
+  await test('拍摄页 A→B→A 与 workspace 变化立即清旧视图并丢弃迟到响应', async () => {
+    const projectA = contentProject('4', '口播稿 A', '拍摄', { canShoot: true });
+    const projectB = contentProject('5', '口播稿 B', '拍摄', { canShoot: true });
+    const delayedHistoryA = deferred();
+    let documentAReads = 0;
+    let historyAReads = 0;
+    const workspaceFiles = { async execute(operation, input) {
+      if (operation === 'catalog.read') return catalog([projectA, projectB]);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'document.read' && input.projectToken === projectA.projectToken) {
+        documentAReads += 1;
+        return documentPage(projectA, [scriptBlock('8', documentAReads === 1
+          ? 'A 初始口播正文' : 'A 最新口播正文')]);
+      }
+      if (operation === 'document.read') return documentPage(projectB, [
+        scriptBlock('9', 'B 当前口播正文')
+      ]);
+      if (operation === 'shoot.history.read' && input.contentRef === projectA.contentRef) {
+        historyAReads += 1;
+        return historyAReads === 1 ? delayedHistoryA.promise
+          : shootHistory(projectA, [shootRecord('a', 'A 最新收工记录')], {
+            collectionToken: `collection-${'a'.repeat(24)}`
+          });
+      }
+      if (operation === 'shoot.history.read') return shootHistory(projectB, [
+        shootRecord('b', 'B 当前收工记录')
+      ], { collectionToken: `collection-${'b'.repeat(24)}` });
+      throw new Error(operation);
+    } };
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+      creatorTab: 'shoot'
+    });
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    button(tree, '打开页内简版').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.match(textOf(tree), /A 初始口播正文/u);
+    const card = (title) => findAll(tree, (node) => node.props?.className === 'wd10-project'
+      && textOf(node).includes(title))[0];
+
+    card('口播稿 B').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.doesNotMatch(textOf(tree), /A 初始口播正文|A 最新收工记录/u);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /B 当前收工记录/u);
+    button(tree, '打开页内简版').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.match(textOf(tree), /B 当前口播正文/u);
+
+    card('口播稿 A').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.doesNotMatch(textOf(tree), /B 当前口播正文|B 当前收工记录/u);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.equal(documentAReads, 2);
+    assert.equal(historyAReads, 2);
+    assert.match(textOf(tree), /A 最新收工记录/u);
+    button(tree, '打开页内简版').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.match(textOf(tree), /A 最新口播正文/u);
+    delayedHistoryA.resolve(shootHistory(projectA, [
+      shootRecord('c', 'A 迟到收工记录')
+    ], { collectionToken: `collection-${'c'.repeat(24)}` }));
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /A 最新口播正文|A 最新收工记录/u);
+    assert.doesNotMatch(textOf(tree), /A 迟到收工记录/u);
+
+    state.sessions = {
+      ids: ['a', 'z'], current: 'z', byId: {
+        ...state.sessions.byId, z: session('z', '/projects/other-workspace')
+      }
+    };
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.doesNotMatch(textOf(tree), /A 最新口播正文|A 最新收工记录/u,
+      'workspace identity 变化必须在新读取前清空旧口播稿和记录');
+  });
+
+  await test('拍摄 native outcome-unknown 锁重试，operation-stale 清空并刷新内容库', async () => {
+    const project = contentProject('6', '不确定口播稿', '拍摄', { canShoot: true });
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/alpha') } },
+      workspaces: { items: [] }
+    };
+    const makeHarness = (mode) => {
+      let openCalls = 0;
+      let catalogReads = 0;
+      const workspaceFiles = { async execute(operation, input) {
+        if (operation === 'catalog.read') {
+          catalogReads += 1;
+          return catalog([project]);
+        }
+        if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+          projectToken: input.projectToken, receipts: [] });
+        if (operation === 'document.read') return documentPage(project, [
+          scriptBlock('d', '必须清理的旧口播正文')
+        ]);
+        if (operation === 'shoot.history.read') return shootHistory(project, [
+          shootRecord('e', '必须清理的旧收工记录')
+        ]);
+        if (operation === 'shoot.open') {
+          openCalls += 1;
+          return { state: 'rejected', code: mode === 'unknown'
+            ? 'outcome-unknown' : 'operation-stale', result: null };
+        }
+        throw new Error(operation);
+      } };
+      const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+      return {
+        get openCalls() { return openCalls; },
+        get catalogReads() { return catalogReads; },
+        harness: loadBundle({ whaledockShellPreferences: pref,
+          whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } }, {
+          creatorTab: 'shoot'
+        })
+      };
+    };
+
+    const unknown = makeHarness('unknown');
+    const unknownProps = uiProps(state, unknown.harness.integration, []);
+    let tree = unknown.harness.renderer.render(unknown.harness.AppFrame, unknownProps);
+    tree = await settle(unknown.harness, unknownProps);
+    tree = await settle(unknown.harness, unknownProps);
+    button(tree, '打开全屏拍摄现场').props.onClick();
+    tree = await settle(unknown.harness, unknownProps);
+    assert.match(textOf(tree), /全屏拍摄现场可能已经打开；请先检查桌面，不要重复点击/u);
+    assert.equal(button(tree, '打开全屏拍摄现场').props.disabled, true);
+    button(tree, '打开全屏拍摄现场').props.onClick();
+    assert.equal(unknown.openCalls, 1, 'outcome-unknown 后当前 identity 不得重试');
+    button(tree, '刷新拍摄记录').props.onClick();
+    tree = await settle(unknown.harness, unknownProps);
+    tree = await settle(unknown.harness, unknownProps);
+    assert.equal(button(tree, '打开全屏拍摄现场').props.disabled, true,
+      '只读刷新不得解除 native outcome-unknown 锁');
+    assert.equal(unknown.openCalls, 1);
+
+    const stale = makeHarness('stale');
+    const staleProps = uiProps(state, stale.harness.integration, []);
+    tree = stale.harness.renderer.render(stale.harness.AppFrame, staleProps);
+    tree = await settle(stale.harness, staleProps);
+    tree = await settle(stale.harness, staleProps);
+    button(tree, '打开页内简版').props.onClick();
+    tree = stale.harness.renderer.render(stale.harness.AppFrame, staleProps);
+    assert.match(textOf(tree), /必须清理的旧口播正文/u);
+    assert.match(textOf(tree), /必须清理的旧收工记录/u);
+    button(tree, '打开全屏拍摄现场').props.onClick();
+    tree = await settle(stale.harness, staleProps);
+    tree = await settle(stale.harness, staleProps);
+    assert.match(textOf(tree), /口播稿已变化；已清空旧拍摄视图并刷新内容库/u);
+    assert.doesNotMatch(textOf(tree), /必须清理的旧口播正文|必须清理的旧收工记录/u);
+    assert(stale.catalogReads >= 2, 'operation-stale 必须触发 catalog refresh');
+    assert.equal(button(tree, '打开全屏拍摄现场').props.disabled, true);
   });
 
   await test('复盘正文与打法墙自动分页，后页失败保留真实 partial 且不开放固化', async () => {

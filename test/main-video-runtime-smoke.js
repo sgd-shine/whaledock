@@ -567,17 +567,32 @@ async function run() {
 
     const sameDirectoryFixture = makeFixture('07_打法库/真实复盘.md');
     try {
+      const options = {
+        refresh: sameDirectoryFixture.rebuild,
+        readSource: sameDirectoryFixture.readByToken,
+        readTactic: sameDirectoryFixture.readByToken
+      };
       const result = main.solidifyVideoTactic(
         sameDirectoryFixture.runtime,
         sameDirectoryFixture.sourceDocument,
         sameDirectoryFixture.sourceToken,
-        {
-          refresh: sameDirectoryFixture.rebuild,
-          readSource: sameDirectoryFixture.readByToken,
-          readTactic: sameDirectoryFixture.readByToken
-        }
+        options
+      );
+      const reused = main.solidifyVideoTactic(
+        sameDirectoryFixture.runtime,
+        sameDirectoryFixture.sourceDocument,
+        sameDirectoryFixture.sourceToken,
+        options
       );
       assert.equal(result.created, true);
+      assert.equal(reused.created, false);
+      assert.equal(reused.contentRef, result.contentRef);
+      assert.equal(reused.projectToken, result.projectToken);
+      assert.notEqual(result.contentRef, main.videoContentRef(
+        sameDirectoryFixture.runtime.epoch,
+        sameDirectoryFixture.sourceDocument.relativePath
+      ));
+      assert.notEqual(result.projectToken, sameDirectoryFixture.sourceToken);
       const created = cockpit.readDocument(
         sameDirectoryFixture.root,
         main.videoTacticRelativePath(
@@ -589,6 +604,17 @@ async function run() {
       assert.equal(fs.readdirSync(path.join(
         sameDirectoryFixture.root, '07_打法库'
       )).length, 2, '同目录中复盘源与打法资产必须按 stage 共存');
+      const scanned = cockpit.scanWorkspace(sameDirectoryFixture.root, {
+        expectedRootIdentity: sameDirectoryFixture.runtime.rootIdentity
+      });
+      sameDirectoryFixture.rebuild();
+      const collection = main.videoTacticCollection(sameDirectoryFixture.runtime, {
+        refresh: false, scanned
+      });
+      assert.equal(collection.tactics.length, 1,
+        '同在 07 的 review 源不得进入 asset 打法 collection');
+      assert.equal(collection.tactics[0].contentRef, result.contentRef);
+      assert.equal(collection.tactics[0].projectToken, result.projectToken);
     } finally {
       fs.rmSync(sameDirectoryFixture.root, { recursive: true, force: true });
     }
@@ -852,6 +878,271 @@ async function run() {
       total: 1, confirmed: 0, missing: 1, retakes: 0, gapsProvided: 0
     });
     assert.equal(JSON.stringify(surface).includes('03_口播稿/'), false);
+  });
+
+  await test('拍摄历史只投影自有摘要，降序 token、partial 与 A→B→A 精确绑定', async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-history-main-')));
+    const rootStat = fs.lstatSync(root);
+    const runtime = {
+      root, epoch: 31,
+      rootIdentity: { dev: rootStat.dev, ino: rootStat.ino },
+      rootIdentityKey: `${String(rootStat.dev)}:${String(rootStat.ino)}`,
+      generation: 9, closed: false, recoveryIssues: [], projectTokens: new Map()
+    };
+    const recordText = (title, confirmed, retakes) => {
+      const text = '[镜头 1 · 约 8 秒]\n第一段。\n\n[镜头 2 · 约 9 秒]\n第二段。';
+      let state = shooting.createShootingSession({ text, title }, {
+        sessionId: `history_${confirmed}_${retakes}`,
+        sourceRelativePath: `03_口播稿/来源-${confirmed}-${retakes}.md`,
+        sourceHash: shooting.hashText(text), speed: 1, fontSize: 64
+      });
+      for (let index = 0; index < confirmed; index += 1) {
+        state = shooting.reduceSession(state, {
+          type: 'confirm', shotId: `shot-${String(index + 1).padStart(3, '0')}`
+        });
+      }
+      for (let index = 0; index < retakes; index += 1) {
+        state = shooting.reduceSession(state, { type: 'retake', shotId: 'shot-002' });
+      }
+      state = shooting.reduceSession(state, { type: 'finish-preview' });
+      state = shooting.reduceSession(state, { type: 'finish-confirm' });
+      return shooting.planWriteback(shooting.buildSummary(state)).record.content;
+    };
+    const files = new Map([
+      ['05_拍摄记录/A.md', recordText('A 旧记录', 0, 2)],
+      ['05_拍摄记录/C.md', recordText('C 新记录', 2, 0)],
+      ['05_拍摄记录/B.md', recordText('鲸'.repeat(100), 1, 1)]
+    ]);
+    try {
+      for (const [relativePath, text] of files) {
+        const target = path.join(root, relativePath);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, text, 'utf8');
+      }
+      let scanned = cockpit.scanShootingRecords(root, {
+        expectedRootIdentity: runtime.rootIdentity
+      });
+      const initial = main.videoShootingHistoryCollection(runtime, { scanned });
+      assert.match(initial.collectionToken, /^collection-[a-f0-9]{24}$/);
+      assert.equal(initial.complete, true);
+      assert.equal(initial.records.length, 3);
+      assert.deepEqual(initial.records.map((record) => record.title), [
+        'C 新记录', '鲸'.repeat(40), 'A 旧记录'
+      ], 'A/C/B 三份记录必须按 relativePath 字节序降序投影为 C/B/A');
+      assert(initial.records.every((record) => /^[a-f0-9]{24}$/.test(record.recordRef)));
+      assert.deepEqual(initial.records[0], {
+        recordRef: initial.records[0].recordRef,
+        title: 'C 新记录', confirmedCount: 2, totalShots: 2,
+        missingCount: 0, retakeCount: 0, allConfirmed: true
+      });
+      assert.doesNotMatch(JSON.stringify(initial.records),
+        /session|source|sha256|relativePath|root|platform|metrics|completedAt/i);
+
+      const invalidOwnedPath = path.join(root, '05_拍摄记录/q-invalid.md');
+      fs.writeFileSync(invalidOwnedPath, '# 不是 WhaleDock 自有拍摄记录\n', 'utf8');
+      let invalidScanned = cockpit.scanShootingRecords(root, {
+        expectedRootIdentity: runtime.rootIdentity
+      });
+      const invalidOwned = main.videoShootingHistoryCollection(runtime, {
+        scanned: invalidScanned
+      });
+      assert.equal(invalidOwned.complete, false);
+      assert.equal(invalidOwned.records.length, 3,
+        '非自有记录不得投影，但必须让集合诚实标记 partial');
+      assert.notEqual(invalidOwned.collectionToken, initial.collectionToken,
+        '无法投影的安全资产仍必须进 \(path,hash\) digest');
+      fs.unlinkSync(invalidOwnedPath);
+      invalidScanned = cockpit.scanShootingRecords(root, {
+        expectedRootIdentity: runtime.rootIdentity
+      });
+      assert.equal(main.videoShootingHistoryCollection(runtime, {
+        scanned: invalidScanned
+      }).collectionToken, initial.collectionToken);
+
+      const emptyHistory = main.videoShootingHistoryCollection(runtime, {
+        scanned: { items: [], issues: [], truncated: false }
+      });
+      const emptyTactics = main.videoTacticCollection(runtime, {
+        refresh: false, scanned: { items: [], issues: [], truncated: false }
+      });
+      assert.notEqual(emptyHistory.collectionToken, emptyTactics.collectionToken,
+        '拍摄历史与打法库的空 collection 也必须 HMAC 域分离');
+
+      const issuePartial = main.videoShootingHistoryCollection(runtime, {
+        scanned: {
+          items: scanned.items,
+          issues: [{ relativePath: '05_拍摄记录/linked.md', reason: 'path-symlink' }],
+          truncated: false
+        }
+      });
+      assert.equal(issuePartial.complete, false);
+      assert.equal(issuePartial.collectionToken, initial.collectionToken);
+      const truncated = main.videoShootingHistoryCollection(runtime, {
+        scanned: { items: scanned.items, issues: [], truncated: true }
+      });
+      assert.equal(truncated.complete, false);
+      runtime.recoveryIssues = [{ relativePath: null }];
+      assert.equal(main.videoShootingHistoryCollection(runtime, { scanned }).complete, false);
+      runtime.recoveryIssues = [];
+      assert.throws(() => main.videoShootingHistoryCollection(runtime, {
+        scanned: { items: [], issues: [] }
+      }), /扫描结果无效/);
+      assert.throws(() => main.videoShootingHistoryCollection(runtime, {
+        scanned: {
+          items: Array.from({ length: 513 }, () => scanned.items[0]),
+          issues: [], truncated: true
+        }
+      }), /扫描结果无效/);
+
+      const changedPath = '05_拍摄记录/C.md';
+      fs.writeFileSync(path.join(root, changedPath), `${files.get(changedPath)}\n`, 'utf8');
+      scanned = cockpit.scanShootingRecords(root, {
+        expectedRootIdentity: runtime.rootIdentity
+      });
+      const changed = main.videoShootingHistoryCollection(runtime, { scanned });
+      assert.notEqual(changed.collectionToken, initial.collectionToken);
+      fs.writeFileSync(path.join(root, changedPath), files.get(changedPath), 'utf8');
+      scanned = cockpit.scanShootingRecords(root, {
+        expectedRootIdentity: runtime.rootIdentity
+      });
+      const restored = main.videoShootingHistoryCollection(runtime, { scanned });
+      assert.equal(restored.collectionToken, initial.collectionToken,
+        'A→B→A 回到同一降序 \(path,hash\) 快照时 token 必须回到 A');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await test('拍摄窗 disposition 绑定 runtime，只声明 requested 且副作后失败为 unknown', async () => {
+    const sourceText = '真实口播稿。';
+    const hash = cockpit.hashText(sourceText);
+    const document = {
+      stage: 'shoot', relativePath: '03_口播稿/当前.md', hash,
+      text: sourceText, title: '当前口播稿'
+    };
+    const runtimeA = {
+      root: '/workspace-a', generation: 2, epoch: 3, rootIdentityKey: '1:2'
+    };
+    const runtimeB = {
+      root: '/workspace-b', generation: 2, epoch: 3, rootIdentityKey: '4:5'
+    };
+    const active = {
+      status: 'active', sourceRelativePath: document.relativePath, sourceHash: document.hash
+    };
+    const contextA = { ...runtimeA };
+    assert.equal(main.shootingOpenDisposition(null, false, document, null, runtimeA), 'opened');
+    assert.equal(main.shootingOpenDisposition(active, true, document, contextA, runtimeA),
+      'focused');
+    assert.equal(main.shootingOpenDisposition(active, true, document, contextA, runtimeB),
+      'busy', '同 path/hash 跨 runtime 也不得冒充复用');
+    assert.equal(main.shootingOpenDisposition(active, true, {
+      ...document, relativePath: '03_口播稿/另一份.md'
+    }, contextA, runtimeA), 'busy');
+    assert.equal(main.shootingOpenDisposition(null, false, {
+      ...document, relativePath: '04_素材清单/不是台词.md'
+    }, null, runtimeA), 'unavailable');
+
+    class FakeWindow {
+      constructor() {
+        FakeWindow.last = this;
+        this.destroyed = false;
+        this.handlers = {};
+        this.showCalls = 0;
+        this.focusCalls = 0;
+        this.webContents = { on: () => {} };
+      }
+      isDestroyed() { return this.destroyed; }
+      show() { this.showCalls += 1; }
+      focus() { this.focusCalls += 1; }
+      once(name, handler) { this.handlers[name] = handler; }
+      on(name, handler) { this.handlers[name] = handler; }
+      loadFile() { return Promise.resolve(); }
+      destroy() {
+        if (this.destroyed) return;
+        this.destroyed = true;
+        if (this.handlers.closed) this.handlers.closed();
+      }
+    }
+    const projectTokenForOpen = `project-${'f'.repeat(24)}`;
+    const readDocument = () => ({ runtime: runtimeA, document });
+    const openOptions = {
+      readDocument, BrowserWindowClass: FakeWindow, secureWindow: () => {},
+      now: () => 1, randomBytes: () => Buffer.alloc(5, 1)
+    };
+    const requested = main.openShootingWindowForProject({
+      projectToken: projectTokenForOpen
+    }, openOptions);
+    assert.deepEqual(requested, { kind: 'shoot-open', state: 'opened' });
+    assert.match(main.shootingOpenMessage('opened'), /仍需在本机确认/);
+    assert.deepEqual(main.openShootingWindowForProject({
+      projectToken: projectTokenForOpen
+    }, openOptions), { kind: 'shoot-open', state: 'focused' });
+    assert.deepEqual(main.openShootingWindowForProject({
+      projectToken: projectTokenForOpen
+    }, { ...openOptions, readDocument: () => ({ runtime: runtimeB, document }) }), {
+      kind: 'shoot-open', state: 'busy'
+    });
+    FakeWindow.last.destroy();
+
+    class ThrowingWindow { constructor() { throw new Error('原生窗口构造失败'); } }
+    assert.throws(() => main.openShootingWindowForProject({
+      projectToken: projectTokenForOpen
+    }, { ...openOptions, BrowserWindowClass: ThrowingWindow }), (error) => (
+      error && error.code === 'ERR_OPERATION_OUTCOME_UNKNOWN'
+    ));
+
+    class LoadThrowWindow extends FakeWindow {
+      loadFile() { throw new Error('加载已开始后失败'); }
+    }
+    assert.throws(() => main.openShootingWindowForProject({
+      projectToken: projectTokenForOpen
+    }, { ...openOptions, BrowserWindowClass: LoadThrowWindow }), (error) => (
+      error && error.code === 'ERR_OPERATION_OUTCOME_UNKNOWN'
+    ));
+  });
+
+  await test('拍摄收工部分写入保留证据，不再 read→unlink 误删用户文件', async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-shoot-partial-')));
+    const rootIdentity = directoryIdentity(root);
+    try {
+      fs.mkdirSync(path.join(root, '04_素材清单'), { recursive: true });
+      fs.writeFileSync(path.join(root, '04_素材清单/已存在.md'), '# 用户文件\n', 'utf8');
+      const plan = {
+        files: [
+          { kind: 'record', relativePath: '05_拍摄记录/部分.md', content: '# 已创建记录\n' },
+          { kind: 'gaps', relativePath: '04_素材清单/已存在.md', content: '# 不得覆盖\n' }
+        ]
+      };
+      assert.throws(() => main.writeShootingOutputs(root, plan, rootIdentity), (error) => (
+        error && error.code === 'ERR_OPERATION_OUTCOME_UNKNOWN'
+      ));
+      assert.equal(fs.readFileSync(path.join(root, '05_拍摄记录/部分.md'), 'utf8'),
+        '# 已创建记录\n', '第一份 partial 证据必须保留供核对');
+      assert.equal(fs.readFileSync(path.join(root, '04_素材清单/已存在.md'), 'utf8'),
+        '# 用户文件\n', '碰撞的用户文件不得被覆盖或删除');
+      const flow = source('main.js').slice(
+        source('main.js').indexOf('function writeShootingOutputs'),
+        source('main.js').indexOf('function registerShootingIpc')
+      );
+      assert.doesNotMatch(flow, /readFileSync|unlinkSync|sameOwnedOutput/,
+        '收工失败不得再用 bytes-equal 代替 inode 绑定后删除');
+      const finishFlow = source('main.js').slice(
+        source('main.js').indexOf('function registerShootingIpc'),
+        source('main.js').indexOf('// ---------- v0.10 P0B')
+      );
+      assert.match(finishFlow, /shootingRuntimeContext\.writeLocked\s*=\s*true;[\s\S]*?pushShootingState\(\)/,
+        '部分写入 outcome unknown 后必须锁定当前 session 并立即投影');
+      assert.match(finishFlow, /shootingRuntimeContext\s*&&\s*shootingRuntimeContext\.writeLocked[\s\S]*?避免重复写入/,
+        '锁定后的再次收工必须在进入写入路径前明确拒绝');
+      const surfaceFlow = source('main.js').slice(
+        source('main.js').indexOf('function shootingSurface'),
+        source('main.js').indexOf('function shootingRendererCommand')
+      );
+      assert.match(surfaceFlow, /canFinish:\s*!writeLocked/,
+        '未知终态锁必须让拍摄面板停止提供可重复写入的收工动作');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   await test('文本写回不覆盖并发版本，CAS 错误保留对方原文', async () => {
@@ -1156,7 +1447,9 @@ async function run() {
     assert.match(windowBlock, /nodeIntegration:\s*false/);
     assert.match(windowBlock, /sandbox:\s*true/);
     assert.match(windowBlock, /secureLocalWindow\(win, shootingFileUrl\)/);
-    assert.match(windowBlock, /shootingRuntimeContext = \{/);
+    assert.match(windowBlock, /const nextRuntimeContext = \{/);
+    assert.match(windowBlock, /rootIdentityKey: runtime\.rootIdentityKey/);
+    assert.match(windowBlock, /shootingRuntimeContext = nextRuntimeContext/);
     const ipcBlock = value.slice(
       value.indexOf('function registerShootingIpc('),
       value.indexOf('function budgetIsPaused(')

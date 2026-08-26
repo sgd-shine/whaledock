@@ -6343,6 +6343,119 @@ function undoVideoProposal(value) {
   return { kind: 'ok', text: '已撤销上一次块级采用。' };
 }
 
+function videoShootingRecordRef(epoch, relativePath, hash) {
+  if (!Number.isSafeInteger(epoch) || epoch < 0
+      || videoCockpit.safeRelativePath(relativePath) !== relativePath
+      || !relativePath.startsWith('05_拍摄记录/')
+      || !/^[a-f0-9]{64}$/.test(String(hash || ''))) {
+    throw new Error('拍摄记录引用输入无效');
+  }
+  return videoToken('record', epoch, relativePath, hash).slice('record-'.length);
+}
+
+function videoShootingHistoryCollection(runtime, options = {}) {
+  assertVideoRuntimeIdentity(runtime);
+  const scanned = options.scanned || videoCockpit.scanShootingRecords(runtime.root, {
+    expectedRootIdentity: runtime.rootIdentity
+  });
+  if (!contextPocExact(scanned, ['items', 'issues', 'truncated'])
+      || !Array.isArray(scanned.items) || scanned.items.length > 512
+      || !Array.isArray(scanned.issues)
+      || scanned.issues.length > videoCockpit.LIMITS.maxScanEntries + 1
+      || typeof scanned.truncated !== 'boolean') {
+    throw new Error('拍摄历史扫描结果无效');
+  }
+  let complete = scanned.truncated !== true && scanned.issues.length === 0
+    && !(Array.isArray(runtime.recoveryIssues) && runtime.recoveryIssues.length);
+  const assets = [];
+  const records = [];
+  const items = [...scanned.items].sort((left, right) => (
+    left.relativePath > right.relativePath ? -1 : (left.relativePath < right.relativePath ? 1 : 0)
+  ));
+  for (const item of items) {
+    if (!item || typeof item.relativePath !== 'string'
+        || !item.relativePath.startsWith('05_拍摄记录/')
+        || videoCockpit.safeRelativePath(item.relativePath) !== item.relativePath
+        || typeof item.text !== 'string'
+        || !/^[a-f0-9]{64}$/.test(String(item.hash || ''))
+        || videoCockpit.hashText(item.text) !== item.hash) {
+      const error = new Error('拍摄历史资产身份已变化');
+      error.code = 'ERR_CONTEXT_PROJECT_STALE';
+      throw error;
+    }
+    assets.push([item.relativePath, item.hash]);
+    let parsed;
+    try { parsed = videoShooting.parseOwnedRecord(item.text); }
+    catch (_error) {
+      complete = false;
+      continue;
+    }
+    const title = contextPocUtf8Clip(parsed.title, 120).text.trim();
+    if (!title) {
+      complete = false;
+      continue;
+    }
+    records.push({
+      recordRef: videoShootingRecordRef(runtime.epoch, item.relativePath, item.hash),
+      title,
+      confirmedCount: parsed.confirmedCount,
+      totalShots: parsed.totalShots,
+      missingCount: parsed.missingCount,
+      retakeCount: parsed.retakeCount,
+      allConfirmed: parsed.allConfirmed
+    });
+  }
+  if (new Set(records.map((record) => record.recordRef)).size !== records.length) {
+    throw new Error('拍摄历史引用重复');
+  }
+  if (new Set(assets.map((asset) => asset[0])).size !== assets.length) {
+    throw new Error('拍摄历史资产路径重复');
+  }
+  assertVideoRuntimeIdentity(runtime);
+  const digest = crypto.createHash('sha256')
+    .update(JSON.stringify(assets), 'utf8').digest('hex');
+  return {
+    collectionToken: videoToken(
+      'collection', runtime.epoch, 'shooting-history/v1', digest
+    ),
+    complete,
+    records
+  };
+}
+
+function shootingRuntimeBindingMatches(context, runtime) {
+  return Boolean(context && runtime
+    && context.root === runtime.root
+    && context.generation === runtime.generation
+    && context.epoch === runtime.epoch
+    && typeof context.rootIdentityKey === 'string'
+    && context.rootIdentityKey === runtime.rootIdentityKey);
+}
+
+function shootingOpenDisposition(state, windowAvailable, document, context = null, runtime = null) {
+  if (!document || document.stage !== 'shoot'
+      || typeof document.relativePath !== 'string'
+      || !document.relativePath.startsWith('03_口播稿/')
+      || typeof document.hash !== 'string' || !/^[a-f0-9]{64}$/.test(document.hash)) {
+    return 'unavailable';
+  }
+  if (state && state.status !== 'finished' && windowAvailable === true) {
+    return shootingRuntimeBindingMatches(context, runtime)
+      && state.sourceRelativePath === document.relativePath
+      && state.sourceHash === document.hash ? 'focused' : 'busy';
+  }
+  return 'opened';
+}
+
+function shootingOpenMessage(state) {
+  return Object.freeze({
+    opened: '已请求打开本地拍摄现场；窗口可见与交互仍需在本机确认。',
+    focused: '已请求聚焦这份口播稿现有的本地拍摄现场。',
+    busy: '已有另一场本地拍摄尚未收工；已请求聚焦原窗口，本次没有切换稿件。',
+    unavailable: '这份内容当前不能进入本地拍摄现场；没有创建拍摄会话。'
+  })[state] || '本地拍摄现场当前不可用。';
+}
+
 function shootingSurface(state = shootingSession) {
   if (!state) {
     return {
@@ -6354,12 +6467,14 @@ function shootingSurface(state = shootingSession) {
   const fontLabels = new Map([[40, 'small'], [48, 'small'], [56, 'medium'], [64, 'medium'],
     [72, 'medium'], [84, 'large'], [96, 'large']]);
   const summary = state.status === 'preview' ? videoShooting.buildSummary(state) : null;
+  const writeLocked = state === shootingSession
+    && shootingRuntimeContext && shootingRuntimeContext.writeLocked === true;
   return {
     phase: state.status === 'finished' ? 'finished' : (state.status === 'preview' ? 'preview' : 'ready'),
     mode: state.mode,
     title: safeText(state.sourceTitle, '未命名拍摄', 120),
     sourceLabel: safeText(path.posix.basename(state.sourceRelativePath), '本地口播稿', 140),
-    notice: null,
+    notice: writeLocked ? '收工写回结果未知；为防止重复写入，请先在工作区核对。' : null,
     shots: state.shots.map((shot) => ({
       id: shot.id,
       label: safeText(shot.label, `镜头 ${shot.ordinal}`, 80),
@@ -6373,7 +6488,7 @@ function shootingSurface(state = shootingSession) {
     playing: state.paused !== true && state.status === 'active',
     speed: state.speed,
     fontSize: fontLabels.get(state.fontSize) || 'medium',
-    canFinish: state.status === 'active' || state.status === 'preview',
+    canFinish: !writeLocked && (state.status === 'active' || state.status === 'preview'),
     finishSummary: summary ? {
       total: summary.totalShots,
       confirmed: summary.confirmedCount,
@@ -6459,77 +6574,133 @@ function pushShootingState() {
   catch (_error) { /* 窗口正在销毁 */ }
 }
 
-function openShootingWindowForProject(value) {
+function openShootingWindowForProject(value, options = {}) {
   const request = videoDocumentRequest(value);
-  const { runtime, document } = readVideoDocumentByToken(request.projectToken);
-  if (!document.relativePath.startsWith('03_口播稿/')) {
-    return { kind: 'error', text: '拍摄现场只接受你明确选中的 03_口播稿 文件。' };
+  const readDocument = options.readDocument || readVideoDocumentByToken;
+  let current;
+  try { current = readDocument(request.projectToken); }
+  catch (error) {
+    if (error && error.code) throw error;
+    throw contextPocWorkspaceOperationError(
+      'ERR_CONTEXT_PROJECT_STALE', '拍摄来源在打开前已变化'
+    );
   }
-  if (shootingSession && shootingSession.status !== 'finished'
-      && shootingWindow && !shootingWindow.isDestroyed()) {
-    shootingWindow.show();
-    shootingWindow.focus();
-    if (shootingSession.sourceRelativePath === document.relativePath
-        && shootingSession.sourceHash === document.hash) return { kind: 'ok' };
-    return { kind: 'error', text: '已有一场拍摄尚未收工；已为你切回原拍摄窗口。' };
+  const { runtime, document } = current;
+  const windowAvailable = Boolean(shootingWindow && !shootingWindow.isDestroyed());
+  const disposition = shootingOpenDisposition(
+    shootingSession, windowAvailable, document, shootingRuntimeContext, runtime
+  );
+  if (disposition === 'unavailable') {
+    return { kind: 'shoot-open', state: 'unavailable' };
   }
-  const sessionId = `shoot-${Date.now().toString(36)}-${crypto.randomBytes(5).toString('hex')}`;
-  shootingSession = videoShooting.createShootingSession({
-    text: document.text,
-    title: document.title
-  }, {
-    sessionId,
-    sourceRelativePath: document.relativePath,
-    sourceHash: document.hash,
-    speed: 1,
-    fontSize: 64
-  });
-  shootingRuntimeContext = {
+  if (disposition === 'focused' || disposition === 'busy') {
+    try {
+      shootingWindow.show();
+      shootingWindow.focus();
+    } catch (_error) {
+      throw contextPocWorkspaceOperationError(
+        'ERR_OPERATION_OUTCOME_UNKNOWN', '本地拍摄窗口已可能收到聚焦请求'
+      );
+    }
+    return { kind: 'shoot-open', state: disposition };
+  }
+  const now = typeof options.now === 'function' ? options.now : Date.now;
+  const randomBytes = typeof options.randomBytes === 'function'
+    ? options.randomBytes : crypto.randomBytes;
+  const sessionId = `shoot-${now().toString(36)}-${randomBytes(5).toString('hex')}`;
+  let nextSession;
+  try {
+    nextSession = videoShooting.createShootingSession({
+      text: document.text,
+      title: document.title
+    }, {
+      sessionId,
+      sourceRelativePath: document.relativePath,
+      sourceHash: document.hash,
+      speed: 1,
+      fontSize: 64
+    });
+  } catch (_error) {
+    return { kind: 'shoot-open', state: 'unavailable' };
+  }
+  const nextRuntimeContext = {
     root: runtime.root,
     generation: runtime.generation,
     epoch: runtime.epoch,
+    rootIdentityKey: runtime.rootIdentityKey,
     sourceRelativePath: document.relativePath,
     sourceHash: document.hash,
-    finished: false
+    finished: false,
+    writeLocked: false
   };
   if (shootingWindow && !shootingWindow.isDestroyed()) {
-    shootingWindow.show();
-    shootingWindow.focus();
-    pushShootingState();
-    return { kind: 'ok' };
+    try {
+      shootingSession = nextSession;
+      shootingRuntimeContext = nextRuntimeContext;
+      shootingWindow.show();
+      shootingWindow.focus();
+      pushShootingState();
+      return { kind: 'shoot-open', state: 'opened' };
+    } catch (_error) {
+      throw contextPocWorkspaceOperationError(
+        'ERR_OPERATION_OUTCOME_UNKNOWN', '本地拍摄会话已可能切换'
+      );
+    }
   }
   shootingFileUrl = pathToFileURL(path.join(__dirname, 'shooting.html')).href;
-  const win = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 900,
-    minHeight: 620,
-    fullscreen: true,
-    show: false,
-    title: '拍摄现场 · 鲸坞 WhaleDock',
-    backgroundColor: '#020608',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload-shooting.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true
+  const BrowserWindowClass = options.BrowserWindowClass || BrowserWindow;
+  let win = null;
+  try {
+    // BrowserWindow 构造本身可能已创建原生窗口；构造后任一失败都是 outcome unknown。
+    win = new BrowserWindowClass({
+      width: 1440,
+      height: 900,
+      minWidth: 900,
+      minHeight: 620,
+      fullscreen: true,
+      show: false,
+      title: '拍摄现场 · 鲸坞 WhaleDock',
+      backgroundColor: '#020608',
+      webPreferences: {
+        preload: path.join(__dirname, 'preload-shooting.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true
+      }
+    });
+    shootingSession = nextSession;
+    shootingRuntimeContext = nextRuntimeContext;
+    shootingWindow = win;
+    if (typeof options.secureWindow === 'function') {
+      options.secureWindow(win, shootingFileUrl);
+    } else {
+      secureLocalWindow(win, shootingFileUrl);
     }
-  });
-  shootingWindow = win;
-  secureLocalWindow(win, shootingFileUrl);
-  win.once('ready-to-show', () => {
-    if (!win.isDestroyed()) { win.show(); win.focus(); }
-  });
-  win.webContents.on('did-finish-load', () => pushShootingState());
-  win.on('closed', () => {
-    if (shootingWindow === win) {
-      shootingWindow = null;
-      shootingSession = null;
-      shootingRuntimeContext = null;
+    win.once('ready-to-show', () => {
+      if (!win.isDestroyed()) { win.show(); win.focus(); }
+    });
+    win.webContents.on('did-finish-load', () => pushShootingState());
+    win.on('closed', () => {
+      if (shootingWindow === win) {
+        shootingWindow = null;
+        shootingSession = null;
+        shootingRuntimeContext = null;
+      }
+    });
+    const loading = win.loadFile('shooting.html');
+    if (loading && typeof loading.catch === 'function') {
+      void loading.catch((error) => {
+        log.line('video', `拍摄窗请求后加载失败：${error && error.code || 'unknown'}`);
+        try { if (!win.isDestroyed()) win.destroy(); } catch (_error) { /* closed 会收口 */ }
+      });
     }
-  });
-  void win.loadFile('shooting.html');
-  return { kind: 'ok' };
+    return { kind: 'shoot-open', state: 'opened' };
+  } catch (_error) {
+    try { if (win && !win.isDestroyed()) win.destroy(); } catch (_cleanupError) { /* 不猜终态 */ }
+    throw contextPocWorkspaceOperationError(
+      'ERR_OPERATION_OUTCOME_UNKNOWN', '本地拍摄窗已可能开始创建'
+    );
+  }
 }
 
 function writeShootingOutputs(root, plan, rootIdentity) {
@@ -6540,16 +6711,12 @@ function writeShootingOutputs(root, plan, rootIdentity) {
       created.push(file);
     }
   } catch (error) {
-    for (const file of created) {
-      try {
-        assertVideoCasRootIdentity(root, rootIdentity);
-        const target = videoCockpit.resolveWorkspaceFile(root, file.relativePath);
-        const existing = fs.readFileSync(target);
-        if (videoShooting.sameOwnedOutput(existing, file.content)) {
-          assertVideoCasRootIdentity(root, rootIdentity);
-          fs.unlinkSync(target);
-        }
-      } catch (_cleanupError) { /* 只清理可证明是本次的输出 */ }
+    if (created.length) {
+      // 不在 read→unlink 窗口里猜测路径仍指向本次 inode。保留已创建证据，
+      // 让调用方显式核对 partial；绝不把可能部分成功说成可安全重试。
+      throw contextPocWorkspaceOperationError(
+        'ERR_OPERATION_OUTCOME_UNKNOWN', '拍摄收工已可能部分写入，请在工作区核对'
+      );
     }
     throw error;
   }
@@ -6583,6 +6750,9 @@ function registerShootingIpc() {
   }));
   ipcMain.handle('shooting:finish', trusted(async () => {
     if (!shootingSession) return { ok: false, message: '拍摄 session 已结束。' };
+    if (shootingRuntimeContext && shootingRuntimeContext.writeLocked) {
+      return { ok: false, message: '收工写回结果未知；为避免重复写入，请先在工作区核对。' };
+    }
     if (shootingSession.status === 'finished'
         || !shootingRuntimeContext || shootingRuntimeContext.finished) {
       return { ok: false, message: '本次收工已经写回，不会重复创建文件。' };
@@ -6622,9 +6792,18 @@ function registerShootingIpc() {
     }
     const finished = videoShooting.reduceSession(shootingSession, { type: 'finish-confirm' });
     const plan = videoShooting.planWriteback(videoShooting.buildSummary(finished));
-    const files = writeShootingOutputs(
-      shootingRuntimeContext.root, plan, activeRuntime.rootIdentity
-    );
+    let files;
+    try {
+      files = writeShootingOutputs(
+        shootingRuntimeContext.root, plan, activeRuntime.rootIdentity
+      );
+    } catch (error) {
+      if (error && error.code === 'ERR_OPERATION_OUTCOME_UNKNOWN') {
+        shootingRuntimeContext.writeLocked = true;
+        pushShootingState();
+      }
+      throw error;
+    }
     shootingSession = finished;
     shootingRuntimeContext.finished = true;
     refreshVideoWorkspaceSnapshot();
@@ -6656,6 +6835,7 @@ const CONTEXT_POC_WORKSPACE_FILE_OPERATIONS = new Set([
   'proposal.read', 'proposal.decide', 'proposal.undo',
   'publish.read', 'publish.create', 'publish.update',
   'review.tactics.read', 'review.solidify',
+  'shoot.open', 'shoot.history.read',
   'project.action.prepare', 'project.action.submit',
   'receipts.read', 'receipts.ack', 'receipts.open'
 ]);
@@ -6970,6 +7150,39 @@ function contextPocWorkspaceFileTacticsInput(value) {
         String(value.collectionToken || '')
       ))) {
     throw new Error('打法库分页身份无效');
+  }
+  return Object.freeze({ ...value });
+}
+
+function contextPocWorkspaceFileShootIdentityInput(value) {
+  if (!contextPocExact(value, ['contentRef', 'projectToken'])
+      || typeof value.contentRef !== 'string'
+      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
+      || typeof value.projectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)) {
+    throw new Error('拍摄页内容身份无效');
+  }
+  return Object.freeze({
+    contentRef: value.contentRef,
+    projectToken: value.projectToken
+  });
+}
+
+function contextPocWorkspaceFileShootHistoryInput(value) {
+  if (!contextPocExact(value, [
+    'contentRef', 'projectToken', 'cursor', 'limit', 'collectionToken'
+  ])) throw new Error('拍摄历史分页请求无效');
+  contextPocWorkspaceFileShootIdentityInput({
+    contentRef: value.contentRef,
+    projectToken: value.projectToken
+  });
+  if (!Number.isSafeInteger(value.cursor) || value.cursor < 0 || value.cursor > 512
+      || !Number.isSafeInteger(value.limit) || value.limit < 1 || value.limit > 4
+      || (value.cursor === 0 && value.collectionToken !== null)
+      || (value.cursor > 0 && !/^collection-[a-f0-9]{24}$/.test(
+        String(value.collectionToken || '')
+      ))) {
+    throw new Error('拍摄历史分页身份无效');
   }
   return Object.freeze({ ...value });
 }
@@ -7693,6 +7906,95 @@ function contextPocWorkspaceReviewSolidifyResult(value) {
   return result;
 }
 
+function contextPocWorkspaceShootOpenResult(value) {
+  if (!contextPocExact(value, [
+    'kind', 'contentRef', 'projectToken', 'state', 'message'
+  ]) || value.kind !== 'shoot-open'
+      || typeof value.contentRef !== 'string'
+      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
+      || typeof value.projectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
+      || !['opened', 'focused', 'busy', 'unavailable'].includes(value.state)
+      || value.message !== shootingOpenMessage(value.state)
+      || Buffer.byteLength(value.message, 'utf8') > 240
+      || /[\u0000-\u001f\u007f]/.test(value.message)) {
+    throw new Error('拍摄现场打开结果无效');
+  }
+  const result = Object.freeze({ ...value });
+  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 5600) {
+    throw new Error('拍摄现场打开结果超过安全上限');
+  }
+  return result;
+}
+
+function contextPocWorkspaceShootHistoryRecord(value) {
+  if (!contextPocExact(value, [
+    'recordRef', 'title', 'confirmedCount', 'totalShots',
+    'missingCount', 'retakeCount', 'allConfirmed'
+  ]) || typeof value.recordRef !== 'string'
+      || !/^[a-f0-9]{24}$/.test(value.recordRef)
+      || typeof value.title !== 'string' || !value.title
+      || Buffer.byteLength(value.title, 'utf8') > 120
+      || /[\u0000-\u001f\u007f]/.test(value.title)
+      || !Number.isSafeInteger(value.confirmedCount)
+      || !Number.isSafeInteger(value.totalShots)
+      || !Number.isSafeInteger(value.missingCount)
+      || !Number.isSafeInteger(value.retakeCount)
+      || value.totalShots < 1 || value.totalShots > videoShooting.LIMITS.shots
+      || value.confirmedCount < 0 || value.confirmedCount > value.totalShots
+      || value.missingCount < 0 || value.missingCount > value.totalShots
+      || value.confirmedCount + value.missingCount !== value.totalShots
+      || value.retakeCount < 0 || value.retakeCount > 1_000_000_000
+      || typeof value.allConfirmed !== 'boolean'
+      || value.allConfirmed !== (value.missingCount === 0)) {
+    throw new Error('拍摄历史记录投影无效');
+  }
+  return Object.freeze({ ...value });
+}
+
+function contextPocWorkspaceShootHistoryResult(value) {
+  if (!contextPocExact(value, [
+    'kind', 'contentRef', 'projectToken', 'collectionToken', 'itemCount',
+    'complete', 'cursor', 'nextCursor', 'records'
+  ]) || value.kind !== 'shoot-history'
+      || typeof value.contentRef !== 'string'
+      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
+      || typeof value.projectToken !== 'string'
+      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
+      || typeof value.collectionToken !== 'string'
+      || !/^collection-[a-f0-9]{24}$/.test(value.collectionToken)
+      || !Number.isSafeInteger(value.itemCount)
+      || value.itemCount < 0 || value.itemCount > 512
+      || typeof value.complete !== 'boolean'
+      || !Number.isSafeInteger(value.cursor)
+      || value.cursor < 0 || value.cursor > value.itemCount
+      || !Array.isArray(value.records) || value.records.length > 4) {
+    throw new Error('拍摄历史分页投影无效');
+  }
+  const records = value.records.map(contextPocWorkspaceShootHistoryRecord);
+  const next = value.cursor + records.length;
+  const expectedNextCursor = next < value.itemCount ? next : null;
+  if (value.nextCursor !== expectedNextCursor
+      || (expectedNextCursor !== null && records.length === 0)
+      || new Set(records.map((record) => record.recordRef)).size !== records.length) {
+    throw new Error('拍摄历史分页边界无效');
+  }
+  const result = Object.freeze({
+    kind: 'shoot-history', contentRef: value.contentRef,
+    projectToken: value.projectToken,
+    collectionToken: value.collectionToken,
+    itemCount: value.itemCount,
+    complete: value.complete,
+    cursor: value.cursor,
+    nextCursor: value.nextCursor,
+    records: Object.freeze(records)
+  });
+  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 5600) {
+    throw new Error('拍摄历史分页投影超过安全上限');
+  }
+  return result;
+}
+
 function contextPocWorkspaceReceipt(value) {
   if (!isPlainObject(value) || !deliveryToken(value.receiptId)
       || typeof value.targetLabel !== 'string'
@@ -7943,6 +8245,13 @@ function contextPocWorkspaceFileOperations(options = {}) {
   const tacticSurface = options.tacticSurface || ((tacticIdentity, sourceIdentity) => (
     videoTacticWorkspaceSurface(tacticIdentity, sourceIdentity)
   ));
+  const shootSource = options.shootSource || readVideoDocumentByToken;
+  const shootOpenAction = options.shootOpenAction || ((input) => (
+    openShootingWindowForProject({ projectToken: input.projectToken })
+  ));
+  const shootHistoryCollection = options.shootHistoryCollection || (() => (
+    videoShootingHistoryCollection(currentVideoRuntime())
+  ));
   const verifyProject = options.verifyProject || readVideoDocumentByToken;
   const receiptSnapshot = options.receiptSnapshot || (() => (
     deliveryReceiptService.snapshot({ owner: VIDEO_DELIVERY_OWNER })
@@ -7980,6 +8289,43 @@ function contextPocWorkspaceFileOperations(options = {}) {
       throw new Error('只能在复盘项目中读取或固化打法');
     }
     return identity;
+  };
+  const shootIdentity = (snapshot, selector) => {
+    const identity = contextPocWorkspaceProjectIdentity(snapshot, selector);
+    const projects = Array.isArray(snapshot && snapshot.projects) ? snapshot.projects : [];
+    const card = projects.find((project) => isPlainObject(project)
+      && project.contentRef === identity.contentRef
+      && project.projectToken === identity.projectToken);
+    if (!card || card.stage !== 'shoot') {
+      throw new Error('只能从真实口播稿打开拍摄现场或历史');
+    }
+    return identity;
+  };
+  const readBoundShootSource = async (identity) => {
+    const current = await shootSource(identity.projectToken);
+    const runtime = current && current.runtime;
+    const record = current && current.record;
+    const documentValue = current && current.document;
+    if (!runtime || !Number.isSafeInteger(runtime.epoch) || runtime.epoch < 0
+        || !record || !documentValue
+        || typeof record.relativePath !== 'string'
+        || typeof record.hash !== 'string'
+        || typeof documentValue.relativePath !== 'string'
+        || typeof documentValue.hash !== 'string'
+        || record.relativePath !== documentValue.relativePath
+        || record.hash !== documentValue.hash
+        || videoContentRef(runtime.epoch, record.relativePath) !== identity.contentRef
+        || videoProjectToken(runtime.epoch, record.relativePath, record.hash)
+          !== identity.projectToken) {
+      throw contextPocWorkspaceOperationError(
+        'ERR_CONTEXT_PROJECT_STALE', '拍摄来源身份已变化'
+      );
+    }
+    if (record.stage !== 'shoot' || documentValue.stage !== 'shoot'
+        || !record.relativePath.startsWith('03_口播稿/')) {
+      throw new Error('拍摄现场只接受 03_口播稿 中的真实口播稿');
+    }
+    return current;
   };
   return Object.freeze({
     'catalog.read': Object.freeze({
@@ -8712,6 +9058,124 @@ function contextPocWorkspaceFileOperations(options = {}) {
         };
       },
       redact: contextPocWorkspaceReviewSolidifyResult,
+      errorCode: contextPocWorkspaceOperationErrorCode
+    }),
+    'shoot.open': Object.freeze({
+      validate: contextPocWorkspaceFileShootIdentityInput,
+      async handle({ input, context }) {
+        contextPocAssertWorkspaceOperationCurrent(context);
+        const identity = shootIdentity(catalog(), {
+          contentRef: input.contentRef,
+          projectToken: input.projectToken
+        });
+        await readBoundShootSource(identity);
+        let disposition;
+        try {
+          disposition = await shootOpenAction(identity);
+        } catch (error) {
+          if (error && ['ERR_CONTEXT_PROJECT_STALE', 'ERR_VIDEO_RUNTIME_STALE',
+            'ERR_VIDEO_ROOT_CHANGED', 'ERR_ROOT_CHANGED', 'ERR_ROOT_INVALID',
+            'ERR_ROOT_UNREADABLE', 'ERR_PATH_CHANGED', 'ERR_PATH_NOT_FOUND',
+            'ERR_PATH_SYMLINK', 'ERR_PATH_OUTSIDE', 'ERR_PATH_NOT_FILE',
+            'ERR_OPERATION_OUTCOME_UNKNOWN'].includes(error.code)) throw error;
+          throw contextPocWorkspaceOperationError(
+            'ERR_OPERATION_OUTCOME_UNKNOWN', '本地拍摄窗已可能收到打开请求'
+          );
+        }
+        if (!contextPocExact(disposition, ['kind', 'state'])
+            || disposition.kind !== 'shoot-open'
+            || !['opened', 'focused', 'busy', 'unavailable'].includes(disposition.state)) {
+          throw contextPocWorkspaceOperationError(
+            'ERR_OPERATION_OUTCOME_UNKNOWN', '本地拍摄窗打开结果无法确认'
+          );
+        }
+        let latest;
+        try {
+          await readBoundShootSource(identity);
+          latest = shootIdentity(catalog(), {
+            contentRef: identity.contentRef,
+            projectToken: identity.projectToken
+          });
+        } catch (error) {
+          if (disposition.state === 'unavailable') throw error;
+          throw contextPocWorkspaceOperationError(
+            'ERR_OPERATION_OUTCOME_UNKNOWN', '打开请求后口播稿身份无法确认'
+          );
+        }
+        return {
+          kind: 'shoot-open', ...latest,
+          state: disposition.state,
+          message: shootingOpenMessage(disposition.state)
+        };
+      },
+      redact: contextPocWorkspaceShootOpenResult,
+      errorCode: contextPocWorkspaceOperationErrorCode
+    }),
+    'shoot.history.read': Object.freeze({
+      validate: contextPocWorkspaceFileShootHistoryInput,
+      async handle({ input, context }) {
+        contextPocAssertWorkspaceOperationCurrent(context);
+        const identity = shootIdentity(catalog(), {
+          contentRef: input.contentRef,
+          projectToken: input.projectToken
+        });
+        await readBoundShootSource(identity);
+        const rawCollection = await shootHistoryCollection();
+        if (!contextPocExact(rawCollection, [
+          'collectionToken', 'complete', 'records'
+        ]) || typeof rawCollection.collectionToken !== 'string'
+            || !/^collection-[a-f0-9]{24}$/.test(rawCollection.collectionToken)
+            || typeof rawCollection.complete !== 'boolean'
+            || !Array.isArray(rawCollection.records)
+            || rawCollection.records.length > 512) {
+          throw new Error('拍摄历史目录结果无效');
+        }
+        const records = rawCollection.records.map(contextPocWorkspaceShootHistoryRecord);
+        if (new Set(records.map((record) => record.recordRef)).size !== records.length) {
+          throw new Error('拍摄历史跨页身份重复');
+        }
+        if (input.cursor > records.length
+            || (input.cursor > 0
+              && input.collectionToken !== rawCollection.collectionToken)) {
+          throw contextPocWorkspaceOperationError(
+            'ERR_CONTEXT_PROJECT_STALE', '拍摄历史分页期间已变化'
+          );
+        }
+        const page = [];
+        for (let cursor = input.cursor;
+          cursor < records.length && page.length < input.limit; cursor += 1) {
+          const candidate = [...page, records[cursor]];
+          const next = input.cursor + candidate.length;
+          const projected = {
+            kind: 'shoot-history', ...identity,
+            collectionToken: rawCollection.collectionToken,
+            itemCount: records.length,
+            complete: rawCollection.complete,
+            cursor: input.cursor,
+            nextCursor: next < records.length ? next : null,
+            records: candidate
+          };
+          if (Buffer.byteLength(JSON.stringify(projected), 'utf8') > 5600
+              && page.length) break;
+          page.push(records[cursor]);
+        }
+        await readBoundShootSource(identity);
+        const latest = shootIdentity(catalog(), {
+          contentRef: identity.contentRef,
+          projectToken: identity.projectToken
+        });
+        const next = input.cursor + page.length;
+        return {
+          kind: 'shoot-history', ...latest,
+          collectionToken: rawCollection.collectionToken,
+          itemCount: records.length,
+          complete: rawCollection.complete,
+          cursor: input.cursor,
+          nextCursor: next < records.length ? next : null,
+          records: page
+        };
+      },
+      redact: contextPocWorkspaceShootHistoryResult,
       errorCode: contextPocWorkspaceOperationErrorCode
     }),
     'project.action.prepare': Object.freeze({
@@ -12404,9 +12868,14 @@ function registerShellIpc() {
     undoVideoProposal(value)
   )));
 
-  ipcMain.handle('shell:video:shoot', trustedVideoShellHandler(async (value) => (
-    openShootingWindowForProject(value)
-  )));
+  ipcMain.handle('shell:video:shoot', trustedVideoShellHandler(async (value) => {
+    const disposition = openShootingWindowForProject(value);
+    return {
+      kind: ['opened', 'focused'].includes(disposition.state) ? 'ok' : 'error',
+      disposition: disposition.state,
+      text: shootingOpenMessage(disposition.state)
+    };
+  }));
 
   ipcMain.handle('shell:video:scene-action', trustedVideoShellHandler(async (value) => (
     runVideoSceneAction(value)
@@ -13946,6 +14415,13 @@ if (MAIN_HELPER_TEST) {
     recoverVideoCasJournal,
     recoverVideoCasWorkspace,
     assertVideoRuntimeIdentity,
+    videoShootingRecordRef,
+    videoShootingHistoryCollection,
+    shootingRuntimeBindingMatches,
+    shootingOpenDisposition,
+    shootingOpenMessage,
+    openShootingWindowForProject,
+    writeShootingOutputs,
     shootingSurface,
     shootingRendererCommand,
     reduceShootingRendererCommand,
