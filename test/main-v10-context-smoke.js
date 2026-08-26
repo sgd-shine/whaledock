@@ -112,7 +112,7 @@ async function run() {
 
   await check('v0.10+ 产品身份默认开启，但显式 0 仍是紧急关闭门', async () => {
     assert.equal(main.contextPocDefaultEnabled('0.9.1'), false);
-    assert.equal(main.contextPocDefaultEnabled('0.10.0-alpha.1'), true);
+    assert.equal(main.contextPocDefaultEnabled('0.10.0-alpha.2'), true);
     assert.equal(main.contextPocDefaultEnabled('0.10.0'), true);
     assert.equal(main.contextPocDefaultEnabled('1.0.0'), true);
     assert.equal(main.contextPocDefaultEnabled('0.10'), false);

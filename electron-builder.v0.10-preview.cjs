@@ -6,7 +6,7 @@ const packageJson = require('./package.json');
 const contextPocManifest = require('./scripts/context-poc-manifest');
 const macosBuildVisibility = require('./scripts/macos-build-visibility');
 
-const PREVIEW_VERSION = '0.10.0-alpha.1';
+const PREVIEW_VERSION = '0.10.0-alpha.2';
 
 function isContextPocResource(entry) {
   return Boolean(entry)

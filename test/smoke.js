@@ -288,7 +288,7 @@ async function main() {
     pkg.scripts['dist:win']
   ];
   check('packaging: v0.10 alpha 预览身份、独立输出与 context-poc 携带合同',
-    pkg.version === '0.10.0-alpha.1'
+    pkg.version === '0.10.0-alpha.2'
       && previewBuild.directories.output === 'release-preview'
       && sourceContextResources.length === 1
       && previewContextResources.length === 1
