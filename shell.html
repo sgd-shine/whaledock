@@ -65,6 +65,14 @@
       overflow-wrap:anywhere; max-height:180px; overflow-y:auto;
     }
     #action-note:empty { display:none; }
+    .context-bridge-banner {
+      border:1px solid #fb718577; border-radius:9px;
+      background:color-mix(in srgb,#fb7185 10%,var(--bg)); color:var(--text);
+      padding:7px 8px; font-size:10px; line-height:1.45; overflow-wrap:anywhere;
+    }
+    .context-bridge-banner strong { display:block; color:#fda4af; font-size:10px; }
+    .context-bridge-banner[hidden] { display:none !important; }
+    #cockpit-context-bridge-banner { display:none; }
 
     /* 弹层统一在左栏右侧展开，不遮住 dsh 的主要内容区。 */
     .layer { position:fixed; inset:0; display:none; z-index:20; }
@@ -147,6 +155,11 @@
     body.cockpit-active.chat-open #toast {
       top:98px; bottom:auto; height:30px; padding:5px 10px;
       white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    body.cockpit-active #cockpit-context-bridge-banner:not([hidden]) {
+      display:block; position:fixed; z-index:19; left:18px; right:18px; top:100px;
+      height:30px; padding:5px 10px; white-space:nowrap; overflow:hidden;
+      text-overflow:ellipsis;
     }
     body.chat-open #cockpit-scene { visibility:hidden; pointer-events:none; }
     #enter-cockpit { display:none; }
@@ -450,6 +463,7 @@
       <span class="ship">🚢</span><span class="name" id="switcher-name">默认工作台</span><span class="caret">▾</span>
     </button>
     <button id="rail-workspace" class="workspace-button" type="button">工作区：当前工作区</button>
+    <div id="context-bridge-banner" class="context-bridge-banner" role="status" aria-live="polite" hidden></div>
     <div id="actions"></div>
     <div id="action-note"></div>
     <div id="rail-foot">
@@ -498,6 +512,8 @@
     </main>
 
   </section>
+
+  <div id="cockpit-context-bridge-banner" class="context-bridge-banner" role="status" aria-live="polite" hidden></div>
 
   <div class="layer" id="switcher-layer">
     <div class="scrim" data-close="switcher"></div>

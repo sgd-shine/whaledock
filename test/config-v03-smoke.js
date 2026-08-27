@@ -162,6 +162,36 @@ try {
     }
   });
 
+  test('config/settings: v0.10 只公开内容视图枚举，提示记忆保持内部', () => {
+    const dir = path.join(tmp, 'v10-content-preferences');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ port: 4316 }));
+    const defaults = config.init(dir);
+    assert.strictEqual(defaults.contentViewMode, 'content');
+    assert.strictEqual(defaults.contentViewHintSeen, false);
+    assert(config.SETTINGS_FIELDS.has('contentViewMode'));
+    assert(!config.SETTINGS_FIELDS.has('contentViewHintSeen'));
+    assert.deepStrictEqual(config.validateSettingsPatch({
+      contentViewMode: 'sessions'
+    }), { contentViewMode: 'sessions' });
+    for (const value of ['', 'session', 'CONTENT', true, null]) {
+      assertThrowsField(() => config.validateSettingsPatch({ contentViewMode: value }), 'contentViewMode');
+    }
+    assertThrowsField(() => config.validateSettingsPatch({
+      contentViewHintSeen: true
+    }), 'contentViewHintSeen');
+    config.set({ contentViewHintSeen: true });
+    assert.strictEqual(config.get('contentViewHintSeen'), true);
+
+    const html = read('settings.html');
+    assert(html.includes('id="contentViewMode"'));
+    assert(html.includes('<option value="content">内容</option>'));
+    assert(html.includes('<option value="sessions">会话</option>'));
+    assert(!html.includes('id="contentViewHintSeen"'));
+    assert(html.includes("source.contentViewMode === 'sessions' ? 'sessions' : 'content'"));
+    assert(html.includes("querySelectorAll('input, button, select')"));
+  });
+
   test('config: 设置白名单包含六个 v0.3 字段', () => {
     const fields = [
       'taskNotifications', 'budgetEnabled', 'dailyTokenBudget',

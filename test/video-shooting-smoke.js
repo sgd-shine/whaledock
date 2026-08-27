@@ -1,8 +1,12 @@
 'use strict';
 
-// 拍摄现场纯 Node smoke：不启动 Electron，不读写磁盘，也不发网络请求。
+// 拍摄现场纯 Node smoke：不启动 Electron、不发网络请求；扫描测试只使用独立临时目录。
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const shooting = require('../lib/video-shooting');
+const videoCockpit = require('../lib/video-cockpit');
 
 const {
   LIMITS,
@@ -16,6 +20,7 @@ const {
   progress,
   buildSummary,
   planWriteback,
+  parseOwnedRecord,
   sameOwnedOutput
 } = shooting;
 
@@ -46,6 +51,12 @@ function test(name, fn) {
 
 function throwsCode(fn, code) {
   assert.throws(fn, (error) => Boolean(error && error.code === code));
+}
+
+function withTempWorkspace(fn) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-shooting-history-'));
+  try { return fn(root); }
+  finally { fs.rmSync(root, { recursive: true, force: true }); }
 }
 
 function sessionFor(text = STRUCTURED_SCRIPT, sourceRelativePath = '03_口播稿/鲸坞实测.md') {
@@ -265,6 +276,157 @@ test('写回只规划两个安全、确定性、wx 相对文件', () => {
     assert(output.content.endsWith('\n'));
   }
   assert(first.record.content.includes('原口播稿未修改'));
+  const overflowShot = summary.missing[0];
+  assert(overflowShot);
+  throwsCode(() => planWriteback({
+    ...summary,
+    retakes: [{ ...overflowShot, retakes: 1_000_000_001, count: 1_000_000_001 }]
+  }), 'ERR_SHOOTING_SUMMARY');
+});
+
+test('鲸坞自有拍摄记录可严格回读且只投影本地摘要事实', () => {
+  let state = createShootingSession({
+    text: STRUCTURED_SCRIPT,
+    title: '栏目 | \\ 现场'
+  }, {
+    sessionId: 'take_20260821_001',
+    sourceRelativePath: '03_口播稿/鲸坞实测.md',
+    sourceHash: hashText(STRUCTURED_SCRIPT)
+  });
+  state = reduceSession(state, { type: 'confirm', shotId: 'shot-001' });
+  state = reduceSession(state, { type: 'retake', shotId: 'shot-002' });
+  state = reduceSession(state, { type: 'finish-preview' });
+  state = reduceSession(state, { type: 'finish-confirm' });
+  const content = planWriteback(buildSummary(state)).record.content;
+  const parsed = parseOwnedRecord(content);
+  assert.deepStrictEqual(parsed, {
+    schemaVersion: 1,
+    sessionId: 'take_20260821_001',
+    sourceRelativePath: '03_口播稿/鲸坞实测.md',
+    sourceHash: hashText(STRUCTURED_SCRIPT),
+    title: '栏目 | \\ 现场',
+    confirmedCount: 1,
+    totalShots: 2,
+    missingCount: 1,
+    retakeCount: 1,
+    allConfirmed: false
+  });
+  assert.deepStrictEqual(parseOwnedRecord(content.replace(/\n/g, '\r\n')), parsed);
+});
+
+test('拍摄记录所有权、身份、结构与计数任一歧义都 fail-closed', () => {
+  let state = sessionFor();
+  state = reduceSession(state, { type: 'finish-preview' });
+  state = reduceSession(state, { type: 'finish-confirm' });
+  const content = planWriteback(buildSummary(state)).record.content;
+  const invalid = [
+    content.replace('<!-- whaledock-owned: video-shooting/v1 -->', '<!-- copied -->'),
+    content.replace('kind: shooting-session', 'kind: material-gaps'),
+    content.replace('kind: shooting-session', 'kind: shooting-session\nextra: value'),
+    content.replace('session-id: "take_20260821_001"', 'session-id: "../escape"'),
+    content.replace('source: "03_口播稿/鲸坞实测.md"', 'source: "04_素材清单/鲸坞实测.md"'),
+    content.replace(`source-sha256: "${hashText(STRUCTURED_SCRIPT)}"`,
+      `source-sha256: "${hashText(STRUCTURED_SCRIPT).toUpperCase()}"`),
+    content.replace('- 已确认：0/2', '- 已确认：2/2'),
+    content.replace('- 重来次数：0', '- 重来次数：1000000001'),
+    content.replace('# 拍摄收工记录 · 鲸坞实测', '# 拍摄收工记录 · 坏\\q标题'),
+    content.replace('# 拍摄收工记录 · 鲸坞实测', '# 拍摄收工记录 · 坏|标题'),
+    content.replace('# 拍摄收工记录 · 鲸坞实测', '# 拍摄收工记录 ·  首尾空格 '),
+    content.replace('# 拍摄收工记录 · 鲸坞实测', '# 拍摄收工记录 · 坏\t标题')
+  ];
+  for (const value of invalid) throwsCode(() => parseOwnedRecord(value), 'ERR_SHOOTING_RECORD');
+  throwsCode(() => parseOwnedRecord(`${content}\u0000`), 'ERR_SHOOTING_RECORD');
+});
+
+test('拍摄历史使用独立受控目录扫描，不混入内容库目录', () => {
+  withTempWorkspace((root) => {
+    fs.mkdirSync(path.join(root, '05_拍摄记录'), { recursive: true });
+    fs.mkdirSync(path.join(root, '03_口播稿'), { recursive: true });
+    let state = sessionFor();
+    state = reduceSession(state, { type: 'finish-preview' });
+    state = reduceSession(state, { type: 'finish-confirm' });
+    const content = planWriteback(buildSummary(state)).record.content;
+    fs.writeFileSync(path.join(root, '05_拍摄记录', '有效.md'), content, 'utf8');
+    fs.writeFileSync(path.join(root, '05_拍摄记录', '坏编码.md'), Buffer.from([0xff]));
+    fs.writeFileSync(path.join(root, '03_口播稿', '不应扫描.md'), '不应进入历史', 'utf8');
+    const checkpoints = [];
+    const rootStat = fs.lstatSync(root, { bigint: true });
+    const scanned = videoCockpit.scanShootingRecords(root, {
+      expectedRootIdentity: { dev: String(rootStat.dev), ino: String(rootStat.ino) },
+      onScanCheckpoint(value) { checkpoints.push(`${value.stage}:${value.relativePath || ''}`); }
+    });
+    assert.strictEqual(scanned.truncated, false);
+    assert.deepStrictEqual(scanned.items.map((item) => item.relativePath), ['05_拍摄记录/有效.md']);
+    assert.strictEqual(scanned.items[0].text, content);
+    assert.strictEqual(scanned.items[0].hash, hashText(content));
+    assert(scanned.issues.some((issue) => issue.relativePath === '05_拍摄记录/坏编码.md'
+      && issue.reason === 'ERR_FILE_ENCODING'));
+    assert(checkpoints.includes('start:'));
+    assert(checkpoints.includes('before-directory-read:05_拍摄记录'));
+    assert(checkpoints.includes('after-file-read:05_拍摄记录/有效.md'));
+    assert(checkpoints.includes('before-return:'));
+    throwsCode(() => videoCockpit.scanShootingRecords(root, {
+      expectedRootIdentity: { dev: '-1', ino: '-1' }
+    }), 'ERR_ROOT_CHANGED');
+  });
+});
+
+test('拍摄历史扫描拒绝目录项软链并保留明确 issue', () => {
+  withTempWorkspace((root) => {
+    fs.mkdirSync(path.join(root, '05_拍摄记录'), { recursive: true });
+    const fsImpl = Object.create(fs);
+    fsImpl.readdirSync = (value, options) => {
+      if (path.basename(value) === '05_拍摄记录') {
+        return [{
+          name: 'linked.md',
+          isSymbolicLink: () => true,
+          isDirectory: () => false,
+          isFile: () => false
+        }];
+      }
+      return fs.readdirSync(value, options);
+    };
+    const scanned = videoCockpit.scanShootingRecords(root, { fsImpl });
+    assert.deepStrictEqual(scanned.items, []);
+    assert.deepStrictEqual(scanned.issues, [{
+      relativePath: '05_拍摄记录/linked.md', reason: 'path-symlink'
+    }]);
+  });
+});
+
+test('拍摄历史根位置存在但不是目录时不得冒充完整空历史', () => {
+  withTempWorkspace((root) => {
+    fs.writeFileSync(path.join(root, '05_拍摄记录'), '用户文件', 'utf8');
+    const scanned = videoCockpit.scanShootingRecords(root);
+    assert.deepStrictEqual(scanned.items, []);
+    assert.deepStrictEqual(scanned.issues, [{
+      relativePath: '05_拍摄记录', reason: 'not-directory'
+    }]);
+    assert.strictEqual(scanned.truncated, false);
+  });
+});
+
+test('拍摄历史扫描使用独立 512 项上限并在截断时显式留痕', () => {
+  withTempWorkspace((root) => {
+    fs.mkdirSync(path.join(root, '05_拍摄记录'), { recursive: true });
+    const fsImpl = Object.create(fs);
+    fsImpl.readdirSync = (value, options) => {
+      if (path.basename(value) === '05_拍摄记录') {
+        return Array.from({ length: videoCockpit.LIMITS.maxScanItems + 1 }, (_, index) => ({
+          name: `record-${String(index).padStart(3, '0')}.md`,
+          isSymbolicLink: () => false,
+          isDirectory: () => false,
+          isFile: () => true
+        }));
+      }
+      return fs.readdirSync(value, options);
+    };
+    const scanned = videoCockpit.scanShootingRecords(root, { fsImpl });
+    assert.strictEqual(scanned.truncated, true);
+    assert(scanned.issues.some((issue) => issue.relativePath === null
+      && issue.reason === 'scan-limit-reached'));
+    assert(scanned.issues.length <= videoCockpit.LIMITS.maxScanItems + 1);
+  });
 });
 
 test('收工必须先预览，预览后编辑会回到 active', () => {

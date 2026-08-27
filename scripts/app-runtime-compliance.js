@@ -7,6 +7,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const contextPocManifest = require('./context-poc-manifest');
+const reforkDshUi = require('./refork-dsh-ui');
 
 const DEFAULT_ROOT = path.resolve(__dirname, '..');
 const SDK_NAME = '@larksuiteoapi/node-sdk';
@@ -14,9 +16,16 @@ const SDK_VERSION = '1.73.0';
 const COMPLIANCE_RELATIVE = 'compliance/app-runtime';
 const INVENTORY_NAME = 'inventory.json';
 const NOTICE_NAME = 'THIRD_PARTY_NOTICES.md';
+const SOURCES_JSON_NAME = 'SOURCES.json';
+const SOURCES_MD_NAME = 'SOURCES.md';
 const OVERRIDES_NAME = 'package-license-overrides.json';
 const INSTALL_ALLOWLIST_NAME = 'install-script-allowlist.json';
 const LICENSE_PREFIX = 'licenses/package-texts';
+const REDISTRIBUTED_LICENSE_NAME = 'licenses/redistributed-forks/DeepSeek-MIT.txt';
+const REDISTRIBUTION_VERSION = '0.1.1-rc.2';
+const UPSTREAM_LOCK_RELATIVE = 'refork/dsh-ui/upstream-lock.json';
+const FORK_NOTICE_RELATIVE = 'context-poc/FORK-NOTICE.md';
+const REDISTRIBUTED_COPYRIGHT = 'Copyright (c) 2026 DeepSeek';
 const ALLOWED_LICENSES = new Set(['MIT', 'BSD-3-Clause', 'Apache-2.0']);
 const REQUIRED_OVERRIDE_KEYS = new Set([
   'agent-base@6.0.2',
@@ -440,6 +449,432 @@ function validateInstallScripts(context, pkg, lockEntry, manifest) {
   return records;
 }
 
+function exactObjectKeys(value, expected, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...expected].sort())) {
+    throw appError('FORK_PROVENANCE', `${label} 字段集不精确`);
+  }
+  return value;
+}
+
+function readRegularBytes(filePath, label) {
+  let before;
+  try { before = fs.lstatSync(filePath); }
+  catch (_error) { throw appError('FORK_PROVENANCE', `${label} 不存在`); }
+  if (!before.isFile() || before.isSymbolicLink()) {
+    throw appError('FORK_PROVENANCE', `${label} 必须是普通文件`);
+  }
+  const bytes = fs.readFileSync(filePath);
+  const after = fs.lstatSync(filePath);
+  if (!after.isFile() || after.isSymbolicLink() || bytes.length !== before.size
+      || after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
+    throw appError('FORK_PROVENANCE', `${label} 读取期间发生变化`);
+  }
+  return bytes;
+}
+
+function buildForkNotice(versionPlan) {
+  const lines = [
+    '# WhaleDock dsh UI Fork Notice',
+    '',
+    `WhaleDock 再分发两个从 DeepSeek dsh \`${versionPlan.version}\` 精确来源修改的 UI fork。两者均保持 MIT 许可与 DeepSeek 归属，并明确标记 \`modified=true\`。`,
+    '',
+    '这两个 fork 不计入根 App npm 生产依赖闭包的包数，也不计入 `vendor/dsh-runtime` 的独立 inventory。',
+    '',
+    '## 精确来源与修改记录',
+    '',
+    '| 组件 | 精确 npm tarball | tarball SHA-256 | npm integrity | patch | patch SHA-256 | 最终文件树 SHA-256 |',
+    '| --- | --- | --- | --- | --- | --- | --- |'
+  ];
+  for (const component of versionPlan.packages) {
+    lines.push(`| \`${component.name}@${component.version}\` | [tarball](${component.url}) | \`${component.tarballSha256}\` | \`${component.integrity}\` | \`${component.patch.path}\` | \`${component.patch.sha256}\` | \`${component.finalTreeSha256}\` |`);
+  }
+  lines.push(
+    '',
+    '## 逐文件改动清单',
+    '',
+    '本副本已被修改。再分发 allowlist 精确为 `package.json`、`LICENSE`、`lib/index.js`、`lib/invariant.js`、`lib/client.js` 五个文件；不再分发上游包内其他文件。',
+    '',
+    '### `@deepseek-ai/dsh-client-ui-layout`',
+    '',
+    '- `package.json`：新增 `whaledockFork` 来源字段，记录同屏创作布局 seam 用途与上游 client SHA-256。',
+    '- `lib/client.js`：新增版本化 `whaledock.content-shell/v1` 视觉组装 seam；保留上游根注册、尺寸、拖拽与 slot 权限，扩展缺失或合同不匹配时回退上游视图。',
+    '- `LICENSE`、`lib/index.js`、`lib/invariant.js`：与精确上游 tarball 字节完全相同，未修改。',
+    '',
+    '### `@deepseek-ai/dsh-client-ui-conversation`',
+    '',
+    '- `package.json`：新增 `whaledockFork` 来源字段，记录发送前上下文闸门 seam 用途与上游 client SHA-256。',
+    '- `lib/client.js`：在真实 `sink` 发送路径接入 `whaledockContextGate.beforeSend`；受管页面闸门缺失或未就绪时 fail-closed，非受管上游页面保持原始直接发送路径。',
+    '- `LICENSE`、`lib/index.js`、`lib/invariant.js`：与精确上游 tarball 字节完全相同，未修改。',
+    '',
+    '## 许可与归属',
+    '',
+    `- 许可证：MIT`,
+    `- 原始归属：${REDISTRIBUTED_COPYRIGHT}`,
+    `- 成品许可原文：\`compliance/app-runtime/${REDISTRIBUTED_LICENSE_NAME}\``,
+    '- 机器可读来源与最终文件摘要：`compliance/app-runtime/SOURCES.json`',
+    ''
+  );
+  return Buffer.from(lines.join('\n'), 'utf8');
+}
+
+function buildRedistributedSourcesMarkdown(sources) {
+  const lines = [
+    '# WhaleDock 再分发 dsh UI Fork 来源',
+    '',
+    `本文件对应 \`SOURCES.json\` schema ${sources.schemaVersion}，上游版本为 \`${sources.version}\`。`,
+    '',
+    '- 根 App inventory：`inventory.json` 在 `redistributedComponents` 独立登记下列 fork，但它们不计入 npm `packageCount`',
+    '- 内置 dsh runtime：`../SOURCES.json`（独立合规链，不包含下列 fork）',
+    `- fork 信任源：\`${sources.upstreamLock.path}\` SHA-256 \`${sources.upstreamLock.sha256}\``,
+    `- context-poc 固定信任根：\`${sources.contextPocBaseline.path}\` digest \`${sources.contextPocBaseline.digest}\``,
+    `- MIT 原文：\`${sources.license.materialPath}\` SHA-256 \`${sources.license.sha256}\``,
+    '',
+    '## 组件',
+    '',
+    '| 组件 | modified | 精确 tarball | tarball SHA-256 | integrity | patch SHA-256 | 最终树 SHA-256 |',
+    '| --- | --- | --- | --- | --- | --- | --- |'
+  ];
+  for (const component of sources.components) {
+    lines.push(`| \`${component.name}@${component.version}\` | \`${component.modified}\` | [tarball](${component.upstream.url}) | \`${component.upstream.tarballSha256}\` | \`${component.upstream.integrity}\` | \`${component.patch.sha256}\` | \`${component.treeSha256}\` |`);
+  }
+  lines.push('', `归属：${sources.license.attribution}。两个 fork 均为已修改的 MIT 再分发组件。`, '');
+  return Buffer.from(lines.join('\n'), 'utf8');
+}
+
+function validateRedistributedSources(value) {
+  exactObjectKeys(value, [
+    'schemaVersion', 'scope', 'version', 'separation', 'upstreamLock',
+    'forkNotice', 'license', 'contextPocBaseline', 'components'
+  ], 'SOURCES.json');
+  if (value.schemaVersion !== 1 || value.scope !== 'modified-redistributed-dsh-ui-forks'
+      || value.version !== REDISTRIBUTION_VERSION) {
+    throw appError('FORK_PROVENANCE', 'SOURCES.json 根身份无效');
+  }
+  exactObjectKeys(value.separation, [
+    'rootAppRuntimeInventory', 'bundledDshRuntimeSources',
+    'includedInRootNpmPackageCount', 'includedInBundledDshRuntimeInventory'
+  ], 'SOURCES.json.separation');
+  if (value.separation.rootAppRuntimeInventory !== 'inventory.json'
+      || value.separation.bundledDshRuntimeSources !== '../SOURCES.json'
+      || value.separation.includedInRootNpmPackageCount !== false
+      || value.separation.includedInBundledDshRuntimeInventory !== false) {
+    throw appError('FORK_PROVENANCE', 'SOURCES.json 合规链分离声明无效');
+  }
+  exactObjectKeys(value.upstreamLock, ['path', 'schemaVersion', 'sha256'], 'SOURCES.json.upstreamLock');
+  if (value.upstreamLock.path !== UPSTREAM_LOCK_RELATIVE
+      || value.upstreamLock.schemaVersion !== 1
+      || !/^[a-f0-9]{64}$/.test(value.upstreamLock.sha256 || '')) {
+    throw appError('FORK_PROVENANCE', 'SOURCES.json upstream lock 身份无效');
+  }
+  exactObjectKeys(value.forkNotice, ['path', 'sha256'], 'SOURCES.json.forkNotice');
+  if (value.forkNotice.path !== FORK_NOTICE_RELATIVE
+      || !/^[a-f0-9]{64}$/.test(value.forkNotice.sha256 || '')) {
+    throw appError('FORK_PROVENANCE', 'SOURCES.json fork notice 身份无效');
+  }
+  exactObjectKeys(value.license, [
+    'expression', 'attribution', 'materialPath', 'sha256'
+  ], 'SOURCES.json.license');
+  if (value.license.expression !== 'MIT' || value.license.attribution !== REDISTRIBUTED_COPYRIGHT
+      || value.license.materialPath !== REDISTRIBUTED_LICENSE_NAME
+      || !/^[a-f0-9]{64}$/.test(value.license.sha256 || '')) {
+    throw appError('FORK_PROVENANCE', 'SOURCES.json MIT 许可身份无效');
+  }
+  exactObjectKeys(value.contextPocBaseline, [
+    'path', 'schema', 'package', 'fileOrder', 'fileCount', 'totalBytes',
+    'digest', 'canonicalSha256'
+  ], 'SOURCES.json.contextPocBaseline');
+  const baseline = value.contextPocBaseline;
+  if (baseline.path !== 'lib/context-poc-baseline.json' || baseline.schema !== 1
+      || baseline.package !== '@whaledock/context-bridge-poc'
+      || !Array.isArray(baseline.fileOrder)
+      || JSON.stringify(baseline.fileOrder) !== JSON.stringify(contextPocManifest.SOURCE_FILES)
+      || baseline.fileCount !== baseline.fileOrder.length
+      || new Set(baseline.fileOrder).size !== baseline.fileOrder.length
+      || !Number.isSafeInteger(baseline.totalBytes) || baseline.totalBytes < 1
+      || baseline.totalBytes > contextPocManifest.MAX_TOTAL_BYTES
+      || !/^[a-f0-9]{64}$/.test(baseline.digest || '')
+      || !/^[a-f0-9]{64}$/.test(baseline.canonicalSha256 || '')) {
+    throw appError('FORK_PROVENANCE', 'SOURCES.json context-poc baseline 无效');
+  }
+  for (const relative of baseline.fileOrder) safeRelative(relative, 'context-poc baseline');
+  if (!Array.isArray(value.components) || value.components.length !== 2) {
+    throw appError('FORK_PROVENANCE', 'SOURCES.json 必须精确含两个 UI fork');
+  }
+  const seen = new Set();
+  for (const component of value.components) {
+    exactObjectKeys(component, [
+      'key', 'name', 'version', 'upstream', 'license', 'attribution', 'modified',
+      'forkPath', 'modifiedFiles', 'patch', 'files', 'treeSha256'
+    ], 'SOURCES.json.components[]');
+    const spec = reforkDshUi.PACKAGE_SPECS[component.key];
+    if (!spec || seen.has(component.key) || component.name !== spec.name
+        || component.version !== REDISTRIBUTION_VERSION || component.forkPath !== spec.forkPath
+        || component.license !== 'MIT' || component.attribution !== REDISTRIBUTED_COPYRIGHT
+        || component.modified !== true
+        || JSON.stringify(component.modifiedFiles) !== JSON.stringify(['package.json', 'lib/client.js'])) {
+      throw appError('FORK_PROVENANCE', `SOURCES.json fork 身份无效：${String(component.key)}`);
+    }
+    seen.add(component.key);
+    exactObjectKeys(component.upstream, [
+      'url', 'tarballBytes', 'tarballSha256', 'integrity'
+    ], `${component.key}.upstream`);
+    if (component.upstream.url !== reforkDshUi.expectedTarballUrl(component.name, component.version)
+        || !Number.isSafeInteger(component.upstream.tarballBytes) || component.upstream.tarballBytes < 1
+        || !/^[a-f0-9]{64}$/.test(component.upstream.tarballSha256 || '')
+        || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(component.upstream.integrity || '')) {
+      throw appError('FORK_PROVENANCE', `${component.key} 精确 tarball 身份无效`);
+    }
+    exactObjectKeys(component.patch, ['path', 'sha256'], `${component.key}.patch`);
+    if (component.patch.path !== `refork/dsh-ui/${component.key}.patch`
+        || !/^[a-f0-9]{64}$/.test(component.patch.sha256 || '')) {
+      throw appError('FORK_PROVENANCE', `${component.key} patch 身份无效`);
+    }
+    exactObjectKeys(component.files, reforkDshUi.REDISTRIBUTION_FILES, `${component.key}.files`);
+    const rows = [];
+    for (const relative of reforkDshUi.REDISTRIBUTION_FILES) {
+      const file = component.files[relative];
+      exactObjectKeys(file, ['size', 'sha256'], `${component.key}.files.${relative}`);
+      if (!Number.isSafeInteger(file.size) || file.size < 1
+          || file.size > contextPocManifest.MAX_FILE_BYTES
+          || !/^[a-f0-9]{64}$/.test(file.sha256 || '')) {
+        throw appError('FORK_PROVENANCE', `${component.key}/${relative} 最终文件身份无效`);
+      }
+      rows.push({ path: relative, size: file.size, sha256: file.sha256 });
+    }
+    if (component.files.LICENSE.sha256 !== value.license.sha256
+        || !/^[a-f0-9]{64}$/.test(component.treeSha256 || '')
+        || reforkDshUi.treeSha256(rows) !== component.treeSha256) {
+      throw appError('FORK_PROVENANCE', `${component.key} 最终文件树无效`);
+    }
+  }
+  return value;
+}
+
+function buildRedistributedInventory(sourcesValue) {
+  const sources = validateRedistributedSources(sourcesValue);
+  return {
+    schemaVersion: 1,
+    componentCount: sources.components.length,
+    includedInRootNpmPackageCount: false,
+    includedInBundledDshRuntimeInventory: false,
+    sourcesPath: SOURCES_JSON_NAME,
+    components: sources.components.map((component) => ({
+      key: component.key,
+      name: component.name,
+      version: component.version,
+      modified: component.modified,
+      source: {
+        url: component.upstream.url,
+        tarballSha256: component.upstream.tarballSha256,
+        integrity: component.upstream.integrity
+      },
+      treeSha256: component.treeSha256,
+      license: {
+        expression: component.license,
+        attribution: component.attribution,
+        materialPath: sources.license.materialPath,
+        sha256: sources.license.sha256
+      }
+    }))
+  };
+}
+
+function validateRedistributedInventory(value, sources) {
+  const expected = buildRedistributedInventory(sources);
+  if (JSON.stringify(value) !== JSON.stringify(expected)) {
+    throw appError('FORK_PROVENANCE',
+      'inventory.redistributedComponents 与 SOURCES.json 不一致');
+  }
+  return value;
+}
+
+function baselineAuthority(root, versionPlan) {
+  const baselinePath = path.join(root, 'lib', 'context-poc-baseline.json');
+  const bytes = readRegularBytes(baselinePath, 'context-poc baseline');
+  let baseline;
+  try { baseline = contextPocManifest.readBaseline(baselinePath); }
+  catch (error) { throw appError('FORK_PROVENANCE', error.message); }
+  const actual = {
+    path: 'lib/context-poc-baseline.json',
+    schema: baseline.schema,
+    package: baseline.package,
+    fileOrder: baseline.files.map((file) => file.path),
+    fileCount: baseline.files.length,
+    totalBytes: baseline.totalBytes,
+    digest: baseline.digest,
+    canonicalSha256: sha256(bytes)
+  };
+  const staticAuthority = {
+    path: actual.path,
+    schema: actual.schema,
+    package: actual.package,
+    fileOrder: actual.fileOrder
+  };
+  if (JSON.stringify(staticAuthority) !== JSON.stringify(versionPlan.contextPocBaseline)) {
+    throw appError('FORK_PROVENANCE', 'upstream lock 与 context-poc baseline 不一致');
+  }
+  let observed;
+  try {
+    observed = contextPocManifest.createManifest(path.join(root, 'context-poc'));
+    contextPocManifest.assertManifestMatches(baseline, observed);
+  } catch (error) {
+    throw appError('FORK_PROVENANCE', `context-poc 源树与 baseline 不一致：${error.message}`);
+  }
+  return Object.freeze({ baseline, authority: actual });
+}
+
+function buildRedistributedCompliance(options = {}) {
+  const root = path.resolve(options.root || DEFAULT_ROOT);
+  assertRealDirectory(root, '仓库根');
+  const lockPath = path.join(root, ...UPSTREAM_LOCK_RELATIVE.split('/'));
+  const lockBytes = readRegularBytes(lockPath, 'dsh UI upstream lock');
+  let lock;
+  try { lock = JSON.parse(lockBytes.toString('utf8')); }
+  catch (error) { throw appError('FORK_PROVENANCE', `upstream lock 无法读取：${error.message}`); }
+  let versionPlan;
+  try { versionPlan = reforkDshUi.validateVersionLock(lock, REDISTRIBUTION_VERSION); }
+  catch (error) { throw appError('FORK_PROVENANCE', error.message); }
+  const baseline = baselineAuthority(root, versionPlan);
+  const components = [];
+  let licenseBytes = null;
+  for (const component of versionPlan.packages) {
+    const patchBytes = readRegularBytes(
+      path.join(root, ...component.patch.path.split('/')),
+      `${component.key} patch`
+    );
+    if (sha256(patchBytes) !== component.patch.sha256) {
+      throw appError('FORK_PROVENANCE', `${component.key} patch SHA-256 漂移`);
+    }
+    const forkDir = path.join(root, ...component.forkPath.split('/'));
+    assertRealDirectory(forkDir, `${component.key} fork`);
+    const actualFiles = actualRegularFiles(forkDir);
+    const names = [...actualFiles.keys()].sort();
+    const expectedNames = [...reforkDshUi.REDISTRIBUTION_FILES].sort();
+    if (JSON.stringify(names) !== JSON.stringify(expectedNames)) {
+      throw appError('FORK_PROVENANCE', `${component.key} fork 文件集不精确`);
+    }
+    const rows = [];
+    for (const relative of component.unchangedFiles) {
+      if (JSON.stringify(component.finalFiles[relative])
+          !== JSON.stringify(component.upstreamFiles[relative])) {
+        throw appError('FORK_PROVENANCE', `${component.key}/${relative} 未保持上游字节`);
+      }
+    }
+    for (const relative of component.modifiedFiles) {
+      if (JSON.stringify(component.finalFiles[relative])
+          === JSON.stringify(component.upstreamFiles[relative])) {
+        throw appError('FORK_PROVENANCE', `${component.key}/${relative} 未产生登记修改`);
+      }
+    }
+    for (const relative of reforkDshUi.REDISTRIBUTION_FILES) {
+      const bytes = actualFiles.get(relative);
+      const actual = { size: bytes.length, sha256: sha256(bytes) };
+      if (JSON.stringify(actual) !== JSON.stringify(component.finalFiles[relative])) {
+        throw appError('FORK_PROVENANCE', `${component.key}/${relative} 最终字节漂移`);
+      }
+      rows.push({ path: relative, ...actual });
+    }
+    if (reforkDshUi.treeSha256(rows) !== component.finalTreeSha256) {
+      throw appError('FORK_PROVENANCE', `${component.key} 最终树 SHA-256 漂移`);
+    }
+    let manifest;
+    try { manifest = JSON.parse(actualFiles.get('package.json').toString('utf8')); }
+    catch (error) { throw appError('FORK_PROVENANCE', `${component.key} package.json 无效：${error.message}`); }
+    if (manifest.name !== component.name || manifest.version !== component.version) {
+      throw appError('FORK_PROVENANCE', `${component.key} fork 包身份漂移`);
+    }
+    const currentLicense = actualFiles.get('LICENSE');
+    if (licenseBytes === null) licenseBytes = currentLicense;
+    else if (!licenseBytes.equals(currentLicense)) {
+      throw appError('FORK_PROVENANCE', '两个 fork 的 MIT 许可原文不一致');
+    }
+    components.push({
+      key: component.key,
+      name: component.name,
+      version: component.version,
+      upstream: {
+        url: component.url,
+        tarballBytes: component.tarballBytes,
+        tarballSha256: component.tarballSha256,
+        integrity: component.integrity
+      },
+      license: 'MIT',
+      attribution: REDISTRIBUTED_COPYRIGHT,
+      modified: true,
+      forkPath: component.forkPath,
+      modifiedFiles: [...component.modifiedFiles],
+      patch: { path: component.patch.path, sha256: component.patch.sha256 },
+      files: component.finalFiles,
+      treeSha256: component.finalTreeSha256
+    });
+  }
+  if (!licenseBytes || !licenseBytes.toString('utf8').startsWith('MIT License\n')
+      || !licenseBytes.toString('utf8').includes(REDISTRIBUTED_COPYRIGHT)) {
+    throw appError('FORK_PROVENANCE', 'fork MIT 许可原文或 DeepSeek 归属无效');
+  }
+  const notice = buildForkNotice(versionPlan);
+  const actualNotice = readRegularBytes(
+    path.join(root, ...FORK_NOTICE_RELATIVE.split('/')),
+    'context-poc fork notice'
+  );
+  if (!notice.equals(actualNotice)) {
+    throw appError('FORK_PROVENANCE', 'context-poc/FORK-NOTICE.md 与 upstream lock 不一致');
+  }
+  const sources = validateRedistributedSources({
+    schemaVersion: 1,
+    scope: 'modified-redistributed-dsh-ui-forks',
+    version: REDISTRIBUTION_VERSION,
+    separation: {
+      rootAppRuntimeInventory: 'inventory.json',
+      bundledDshRuntimeSources: '../SOURCES.json',
+      includedInRootNpmPackageCount: false,
+      includedInBundledDshRuntimeInventory: false
+    },
+    upstreamLock: {
+      path: UPSTREAM_LOCK_RELATIVE,
+      schemaVersion: lock.schemaVersion,
+      sha256: sha256(lockBytes)
+    },
+    forkNotice: { path: FORK_NOTICE_RELATIVE, sha256: sha256(notice) },
+    license: {
+      expression: 'MIT',
+      attribution: REDISTRIBUTED_COPYRIGHT,
+      materialPath: REDISTRIBUTED_LICENSE_NAME,
+      sha256: sha256(licenseBytes)
+    },
+    contextPocBaseline: baseline.authority,
+    components
+  });
+  return Object.freeze({
+    versionPlan,
+    sources,
+    notice,
+    licenseBytes,
+    files: new Map([
+      [SOURCES_JSON_NAME, jsonBytes(sources)],
+      [SOURCES_MD_NAME, buildRedistributedSourcesMarkdown(sources)],
+      [REDISTRIBUTED_LICENSE_NAME, licenseBytes]
+    ])
+  });
+}
+
+function verifyRedistributedSources(options = {}) {
+  const root = path.resolve(options.root || DEFAULT_ROOT);
+  const plan = buildRedistributedCompliance({ root });
+  const complianceDir = path.join(root, COMPLIANCE_RELATIVE);
+  for (const [relative, expected] of plan.files) {
+    const actual = readRegularBytes(
+      path.join(complianceDir, ...relative.split('/')),
+      `app-runtime ${relative}`
+    );
+    if (!expected.equals(actual)) {
+      throw appError('FORK_PROVENANCE', `app-runtime ${relative} 字节漂移`);
+    }
+  }
+  return plan;
+}
+
 function buildNotice(inventory) {
   const lines = [
     '# WhaleDock 根 App 运行时第三方组件通知',
@@ -447,6 +882,18 @@ function buildNotice(inventory) {
     '本文件只披露 WhaleDock 根 `dependencies` 的生产可达闭包；`vendor/dsh-runtime` 拥有独立 inventory、NOTICE、SOURCES 与许可材料，两者不混合。',
     '',
     `本次根运行时精确锁定 \`${SDK_NAME}@${SDK_VERSION}\`，生产可达包 ${inventory.packageCount} 个。本文件不是法律意见。`,
+    '',
+    '## Modified redistributed forks',
+    '',
+    '下列已修改 UI fork 在 `inventory.json` 的 `redistributedComponents` 中独立登记，但不计入上述根 npm `packageCount`，也不计入内置 dsh runtime inventory。精确 patch 与逐文件摘要见 [`SOURCES.json`](./SOURCES.json)。',
+    '',
+    '| 组件 | 版本 | 许可 | modified | 归属 | 最终树 SHA-256 |',
+    '| --- | --- | --- | --- | --- | --- |'
+  ];
+  for (const component of inventory.redistributedComponents.components) {
+    lines.push(`| ${component.name} | ${component.version} | ${component.license.expression} | \`${component.modified}\` | ${component.license.attribution} | \`${component.treeSha256}\` |`);
+  }
+  lines.push(
     '',
     '## 闭包快照',
     '',
@@ -462,7 +909,7 @@ function buildNotice(inventory) {
     '',
     '| 许可证 | 包数 |',
     '| --- | ---: |'
-  ];
+  );
   for (const [license, count] of Object.entries(inventory.licenseCounts)) {
     lines.push(`| ${license} | ${count} |`);
   }
@@ -499,6 +946,7 @@ function buildCompliance(options = {}) {
   const lockPath = path.join(root, 'package-lock.json');
   const complianceDir = path.join(root, COMPLIANCE_RELATIVE);
   assertRealDirectory(complianceDir, 'app-runtime 合规目录');
+  const redistributed = buildRedistributedCompliance({ root });
   const rootPackage = readJson(packagePath, 'package.json');
   const lockContent = fs.readFileSync(lockPath);
   const lock = readJson(lockPath, 'package-lock.json');
@@ -628,6 +1076,7 @@ function buildCompliance(options = {}) {
     licenseCounts: sortedObject(licenseCounts),
     closureSha256: sha256(closureMaterial),
     installScripts,
+    redistributedComponents: buildRedistributedInventory(redistributed.sources),
     packages
   };
   const files = new Map([
@@ -636,10 +1085,12 @@ function buildCompliance(options = {}) {
   ]);
   for (const [relative, content] of [...context.materials.entries()].sort(([left], [right]) =>
     left.localeCompare(right))) files.set(relative, content);
+  for (const [relative, content] of redistributed.files) files.set(relative, content);
   return {
     root,
     complianceDir,
     inventory,
+    redistributed,
     files,
     inputs: new Map([
       [OVERRIDES_NAME, fs.readFileSync(overrideInput.filePath)],
@@ -696,6 +1147,8 @@ function generateCompliance(options = {}) {
     const generatedTargets = [
       path.join(plan.complianceDir, INVENTORY_NAME),
       path.join(plan.complianceDir, NOTICE_NAME),
+      path.join(plan.complianceDir, SOURCES_JSON_NAME),
+      path.join(plan.complianceDir, SOURCES_MD_NAME),
       path.join(plan.complianceDir, 'licenses')
     ];
     for (const target of generatedTargets) {
@@ -737,6 +1190,11 @@ function main(argv = process.argv.slice(2)) {
 module.exports = Object.freeze({
   SDK_NAME,
   SDK_VERSION,
+  REDISTRIBUTION_VERSION,
+  UPSTREAM_LOCK_RELATIVE,
+  FORK_NOTICE_RELATIVE,
+  REDISTRIBUTED_LICENSE_NAME,
+  REDISTRIBUTED_COPYRIGHT,
   resolveDependencyPath,
   reachableLockPaths,
   packageFiles,
@@ -746,6 +1204,13 @@ module.exports = Object.freeze({
   isPackagedRuntimeFile,
   expectedPackagedFiles,
   packagedClosureRows,
+  buildForkNotice,
+  buildRedistributedSourcesMarkdown,
+  validateRedistributedSources,
+  buildRedistributedInventory,
+  validateRedistributedInventory,
+  buildRedistributedCompliance,
+  verifyRedistributedSources,
   buildCompliance,
   generateCompliance,
   verifyCompliance,

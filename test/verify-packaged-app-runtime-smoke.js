@@ -5,6 +5,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const appRuntimeCompliance = require('../scripts/app-runtime-compliance');
+const contextPocManifest = require('../scripts/context-poc-manifest');
 
 const MODULE_PATH = path.join(__dirname, '..', 'scripts', 'verify-packaged-app-runtime.js');
 let passed = 0;
@@ -24,6 +26,119 @@ function write(filePath, value) {
 
 function writeJson(filePath, value) {
   write(filePath, JSON.stringify(value, null, 2) + '\n');
+}
+
+const FORK_FILES = [
+  'package.json', 'LICENSE', 'lib/index.js', 'lib/invariant.js', 'lib/client.js'
+];
+const FIXTURE_MIT = 'MIT License\n\nCopyright (c) 2026 DeepSeek\n\nFixture permission text.\n';
+
+function forkFileManifest(root, forkPath) {
+  return Object.fromEntries(FORK_FILES.map((relative) => {
+    const bytes = fs.readFileSync(path.join(root, forkPath, ...relative.split('/')));
+    return [relative, { size: bytes.length, sha256: sha256(bytes) }];
+  }));
+}
+
+function forkTreeSha256(files) {
+  return sha256(FORK_FILES.map((relative) => (
+    `${relative}\0${files[relative].size}\0${files[relative].sha256}`
+  )).join('\n'));
+}
+
+function addRedistributedForks(value) {
+  const specs = [
+    ['ui-layout', '@deepseek-ai/dsh-client-ui-layout', 300],
+    ['ui-conversation', '@deepseek-ai/dsh-client-ui-conversation', 50]
+  ];
+  for (const [key, name] of specs) {
+    const forkPath = `context-poc/forks/${key}`;
+    writeJson(path.join(value.root, forkPath, 'package.json'), {
+      name, version: '0.1.1-rc.2', license: 'MIT', main: 'lib/index.js'
+    });
+    write(path.join(value.root, forkPath, 'LICENSE'), FIXTURE_MIT);
+    write(path.join(value.root, forkPath, 'lib/index.js'), `module.exports='${key}';\n`);
+    write(path.join(value.root, forkPath, 'lib/invariant.js'), `'use strict'; // ${key}\n`);
+    write(path.join(value.root, forkPath, 'lib/client.js'), `'use strict'; // modified ${key}\n`);
+    write(path.join(value.root, 'refork', 'dsh-ui', `${key}.patch`), `fixture patch ${key}\n`);
+  }
+  const packages = specs.map(([key, name, budget], index) => {
+    const forkPath = `context-poc/forks/${key}`;
+    const finalFiles = forkFileManifest(value.root, forkPath);
+    const upstreamFiles = JSON.parse(JSON.stringify(finalFiles));
+    for (const relative of ['package.json', 'lib/client.js']) {
+      upstreamFiles[relative].sha256 = sha256(`upstream-${key}-${relative}`);
+    }
+    const patch = fs.readFileSync(path.join(value.root, 'refork', 'dsh-ui', `${key}.patch`));
+    return {
+      key,
+      name,
+      version: '0.1.1-rc.2',
+      url: `https://registry.npmjs.org/${name}/-/${name.split('/').at(-1)}-0.1.1-rc.2.tgz`,
+      tarballBytes: 1000 + index,
+      tarballSha256: sha256(`tarball-${key}`),
+      integrity: 'sha512-Zml4dHVyZQ==',
+      archiveBytes: 4096,
+      archiveEntries: 8,
+      archiveTreeSha256: sha256(`archive-${key}`),
+      forkPath,
+      budgetTotalChangedLines: budget,
+      upstreamFiles,
+      unchangedFiles: ['LICENSE', 'lib/index.js', 'lib/invariant.js'],
+      modifiedFiles: ['package.json', 'lib/client.js'],
+      patch: {
+        format: 'unified-v1',
+        path: `refork/dsh-ui/${key}.patch`,
+        sha256: sha256(patch)
+      },
+      finalFiles,
+      finalTreeSha256: forkTreeSha256(finalFiles)
+    };
+  });
+  write(path.join(value.root, 'context-poc', 'context-bridge.patch.yml'), 'fixture: true\n');
+  writeJson(path.join(value.root, 'context-poc', 'plugin', 'package.json'), {
+    name: '@whaledock/context-bridge-poc', version: '1.0.0'
+  });
+  write(path.join(value.root, 'context-poc', 'plugin', 'lib/index.js'), 'module.exports={};\n');
+  write(path.join(value.root, 'context-poc', 'plugin', 'lib/client.js'), 'module.exports={client:true};\n');
+  write(path.join(value.root, 'context-poc', 'FORK-NOTICE.md'),
+    appRuntimeCompliance.buildForkNotice({ version: '0.1.1-rc.2', packages }));
+  const baseline = contextPocManifest.createManifest(path.join(value.root, 'context-poc'));
+  const baselineBytes = contextPocManifest.canonicalBytes(baseline);
+  write(path.join(value.root, 'lib', 'context-poc-baseline.json'), baselineBytes);
+  writeJson(path.join(value.root, 'refork', 'dsh-ui', 'upstream-lock.json'), {
+    schemaVersion: 1,
+    redistributionFiles: FORK_FILES,
+    versions: {
+      '0.1.1-rc.2': {
+        ready: true,
+        contextPocBaseline: {
+          path: 'lib/context-poc-baseline.json',
+          schema: baseline.schema,
+          package: baseline.package,
+          fileOrder: baseline.files.map((file) => file.path)
+        },
+        packages
+      }
+    }
+  });
+  const redistributed = appRuntimeCompliance.buildRedistributedCompliance({ root: value.root });
+  value.inventory.redistributedComponents = appRuntimeCompliance.buildRedistributedInventory(
+    redistributed.sources
+  );
+  writeJson(path.join(value.sourceCompliance, 'inventory.json'), value.inventory);
+  for (const [relative, bytes] of redistributed.files) {
+    write(path.join(value.sourceCompliance, ...relative.split('/')), bytes);
+  }
+  const packagedCompliance = path.join(value.resources, 'compliance', 'app-runtime');
+  fs.rmSync(packagedCompliance, { recursive: true, force: true });
+  fs.cpSync(value.sourceCompliance, packagedCompliance, { recursive: true });
+  fs.cpSync(path.join(value.root, 'context-poc'), path.join(value.resources, 'context-poc'), {
+    recursive: true
+  });
+  const asarView = path.join(value.root, 'asar-view');
+  write(path.join(asarView, 'lib', 'context-poc-baseline.json'), baselineBytes);
+  return { ...value, redistributed, baseline, asarView };
 }
 
 function fixture(platform = 'win32') {
@@ -167,6 +282,94 @@ test('成品必须携带与仓库逐字节相同的独立 app-runtime 树', () =
       root: value.root,
       resources: value.resources
     }), /PACKAGED_APP_RUNTIME_MISMATCH/);
+  } finally {
+    fs.rmSync(value.root, { recursive: true, force: true });
+  }
+});
+
+test('成品 SOURCES/MIT 材料必须绑定 app.asar baseline 与 Resources 内两个 fork', () => {
+  const value = addRedistributedForks(fixture());
+  try {
+    const receipt = verifier.verifyPackagedContextPoc({
+      asar: value.asarView,
+      resources: value.resources,
+      inventory: value.inventory
+    });
+    assert.equal(receipt.contextPocBaselineVerified, true);
+    assert.equal(receipt.redistributedForksVerified, true);
+    assert.equal(receipt.redistributedForkCount, 2);
+    assert.equal(receipt.redistributedLicenseSha256, value.redistributed.sources.license.sha256);
+    assert.equal(receipt.redistributedSourcesSha256,
+      sha256(fs.readFileSync(path.join(value.sourceCompliance, 'SOURCES.json'))));
+  } finally {
+    fs.rmSync(value.root, { recursive: true, force: true });
+  }
+});
+
+test('成品伪 SOURCES 或缺失 MIT 材料不能借 baseline 通过', () => {
+  for (const mutate of [
+    (value) => {
+      const sourcesPath = path.join(
+        value.resources, 'compliance', 'app-runtime', 'SOURCES.json'
+      );
+      const sources = JSON.parse(fs.readFileSync(sourcesPath));
+      sources.components[0].files['lib/client.js'].sha256 = 'f'.repeat(64);
+      sources.components[0].treeSha256 = forkTreeSha256(sources.components[0].files);
+      writeJson(sourcesPath, sources);
+    },
+    (value) => fs.rmSync(path.join(
+      value.resources, 'compliance', 'app-runtime',
+      ...appRuntimeCompliance.REDISTRIBUTED_LICENSE_NAME.split('/')
+    )),
+    (value) => {
+      value.inventory.redistributedComponents.components[0].modified = false;
+    }
+  ]) {
+    const value = addRedistributedForks(fixture());
+    try {
+      mutate(value);
+      assert.throws(() => verifier.verifyPackagedContextPoc({
+        asar: value.asarView,
+        resources: value.resources,
+        inventory: value.inventory
+      }), /PACKAGED_APP_RUNTIME_(?:PROBE|MISSING)/);
+    } finally {
+      fs.rmSync(value.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('含 context-poc 的外层 verifier 必须回读再分发 receipt', () => {
+  const value = addRedistributedForks(fixture());
+  try {
+    const contextReceipt = verifier.verifyPackagedContextPoc({
+      asar: value.asarView,
+      resources: value.resources,
+      inventory: value.inventory
+    });
+    const report = {
+      status: 'PASS', electronVersion: '43.4.0', appVersion: '1.0.0', sdkVersion: '1.73.0',
+      packageCount: 1, lazyLoadVerified: true,
+      sdkExportsVerified: ['EventDispatcher', 'WSClient'],
+      fileCount: value.inventory.packagedFileCount,
+      treeSha256: value.inventory.packagedTreeSha256,
+      ...contextReceipt
+    };
+    const result = verifier.verifyApp({
+      root: value.root,
+      appRoot: value.appRoot,
+      spawnSync: () => ({ status: 0, stdout: JSON.stringify(report) + '\n', stderr: '' })
+    });
+    assert.equal(result.redistributedForksVerified, true);
+    assert.throws(() => verifier.verifyApp({
+      root: value.root,
+      appRoot: value.appRoot,
+      spawnSync: () => ({
+        status: 0,
+        stdout: JSON.stringify({ ...report, redistributedForksVerified: false }) + '\n',
+        stderr: ''
+      })
+    }), /PACKAGED_APP_RUNTIME_PROBE/);
   } finally {
     fs.rmSync(value.root, { recursive: true, force: true });
   }

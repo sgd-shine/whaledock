@@ -54,13 +54,12 @@ window.__ModuleLoader__.load({
 		//#endregion
 		//#region \0dsh-css:/home/runner/work/deepseek-harness/deepseek-harness/packages/client/ui-layout/src/client/AppFrame.module.css.mjs
 		const css = ".pI_x6G_frame{background:var(--dsw-alias-bg-base);height:100%;transition:grid-template-columns var(--ds-transition-duration-slow) var(--ds-ease-in-out);grid-template-rows:100%;display:grid;position:relative;overflow:hidden}.pI_x6G_frame[data-dragging]{transition:none}@media (prefers-reduced-motion:reduce){.pI_x6G_frame{transition:none}}.pI_x6G_sidebarCol{background:var(--dsw-specific-sidebar-fill);border-right:1px solid var(--dsw-alias-border-l1);min-width:0;overflow:hidden}.pI_x6G_centerCol{flex-direction:column;min-width:0;display:flex;overflow:hidden}.pI_x6G_detailsCol{border-left:1px solid var(--dsw-alias-border-l2);min-width:0;overflow:hidden}.pI_x6G_frame[data-details-collapsed] .pI_x6G_detailsCol{border-left:none}.pI_x6G_handle{cursor:col-resize;z-index:2;touch-action:none;width:8px;transition:left var(--ds-transition-duration-slow) var(--ds-ease-in-out);margin-left:-4px;position:absolute;top:0;bottom:0}.pI_x6G_frame[data-dragging] .pI_x6G_handle{transition:none}@media (prefers-reduced-motion:reduce){.pI_x6G_handle{transition:none}}.pI_x6G_handle[data-side=details]:after{content:\"\";box-sizing:border-box;background:var(--dsw-alias-button-floating-fill);border:1px solid var(--dsw-alias-border-l2-darkmode-thin);opacity:0;width:12px;height:32px;transition:opacity var(--ds-transition-duration-slow) var(--ds-ease-in-out), background var(--ds-transition-duration-slow) var(--ds-ease-in-out);border-radius:10px;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}.pI_x6G_detailsCol:hover~.pI_x6G_handle[data-side=details]:after,.pI_x6G_handle[data-side=details]:hover:after,.pI_x6G_handle[data-side=details][data-dragging=true]:after{opacity:1}.pI_x6G_handle[data-side=details]:hover:after,.pI_x6G_handle[data-side=details][data-dragging=true]:after{background:var(--dsw-alias-button-floating-hover);border-color:var(--dsw-alias-border-l3)}.pI_x6G_overlayLayer{z-index:20;pointer-events:none;position:absolute;inset:0}.pI_x6G_overlayLayer>*{pointer-events:auto}";
-		const whaledockCss = `.wd10-left{background:var(--dsw-specific-sidebar-fill);border-right:1px solid var(--dsw-alias-border-l1);min-width:0;height:100%;display:flex;flex-direction:column;overflow:hidden}.wd10-switch{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:12px;padding:4px;border-radius:10px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1)}.wd10-switch button{border:0;border-radius:7px;padding:7px 10px;color:var(--dsw-alias-fg-secondary);background:transparent;font:inherit;font-size:13px;cursor:pointer}.wd10-switch button[aria-selected=true]{background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);box-shadow:0 1px 3px rgba(0,0,0,.08)}.wd10-library{min-height:0;overflow:auto;padding:0 10px 18px}.wd10-libraryHead{padding:8px 6px 10px}.wd10-eyebrow{font-size:11px;letter-spacing:.08em;color:var(--dsw-alias-fg-tertiary);text-transform:uppercase}.wd10-libraryHead h2{font-size:17px;line-height:1.35;margin:4px 0;color:var(--dsw-alias-fg-primary)}.wd10-libraryHead p{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-project{width:100%;text-align:left;border:1px solid transparent;border-radius:10px;padding:10px;margin:2px 0 6px;background:transparent;color:inherit;cursor:pointer}.wd10-project:hover{background:var(--dsw-alias-bg-layer-1)}.wd10-project[aria-current=true]{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l2)}.wd10-projectTitle{display:block;font-size:13px;font-weight:600;color:var(--dsw-alias-fg-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wd10-projectMeta{display:flex;align-items:center;gap:7px;margin-top:5px;font-size:11px;color:var(--dsw-alias-fg-tertiary)}.wd10-dot{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-fg-tertiary)}.wd10-dot[data-running=true]{background:#22a06b}.wd10-detail{min-width:0;height:100%;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base);border-right:1px solid var(--dsw-alias-border-l2);overflow:hidden}.wd10-detailHead{padding:26px 24px 14px}.wd10-detailHead h1{font-size:22px;line-height:1.25;margin:5px 0 7px;color:var(--dsw-alias-fg-primary)}.wd10-detailHead p{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-tabs{display:flex;gap:3px;padding:0 20px;border-bottom:1px solid var(--dsw-alias-border-l1);overflow:auto}.wd10-tabs button{border:0;border-bottom:2px solid transparent;padding:10px 8px 9px;background:transparent;color:var(--dsw-alias-fg-secondary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}.wd10-tabs button[aria-selected=true]{border-bottom-color:var(--dsw-alias-fg-primary);color:var(--dsw-alias-fg-primary)}.wd10-panel{min-height:0;overflow:auto;padding:20px 24px 28px}.wd10-card{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:16px;background:var(--dsw-alias-bg-layer-1);margin-bottom:12px}.wd10-card h3{font-size:14px;margin:0 0 7px;color:var(--dsw-alias-fg-primary)}.wd10-card p{font-size:12px;line-height:1.65;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:13px}.wd10-stat{padding:10px;border-radius:9px;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1)}.wd10-stat strong{display:block;font-size:18px;color:var(--dsw-alias-fg-primary)}.wd10-stat span{font-size:11px;color:var(--dsw-alias-fg-tertiary)}.wd10-action{width:100%;border:1px solid var(--dsw-alias-interactive-bg-hover);border-radius:9px;padding:10px 12px;margin-top:9px;background:var(--dsw-alias-state-business-tertiary);color:var(--dsw-alias-state-business-primary);font:inherit;font-size:12px;text-align:left;cursor:pointer}.wd10-action:hover{background:var(--dsw-alias-interactive-bg-hover)}.wd10-action small{display:block;margin-top:3px;color:var(--dsw-alias-fg-secondary)}.wd10-feedback{font-size:12px;line-height:1.5;margin:12px 1px 0;color:var(--dsw-alias-fg-secondary)}.wd10-chat{min-width:0;height:100%;display:flex;overflow:hidden}.wd10-chatMain{min-width:0;flex:1;display:flex;flex-direction:column;overflow:hidden}.wd10-empty{padding:24px;color:var(--dsw-alias-fg-secondary);font-size:13px;line-height:1.6}@media(max-width:1120px){.wd10-detailHead{padding:20px 18px 12px}.wd10-panel{padding:16px 18px}.wd10-detailHead h1{font-size:19px}.wd10-tabs{padding:0 14px}}`;
 		const tagId = "@deepseek-ai/dsh-client-ui-layout/AppFrame.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
 			tag.dataset.plugin = "@deepseek-ai/dsh-client-ui-layout";
 			tag.dataset.pluginCss = tagId;
-			tag.textContent = css + whaledockCss;
+			tag.textContent = css;
 			document.head.appendChild(tag);
 		}
 		var AppFrame_module_css_default = {
@@ -95,7 +94,8 @@ window.__ModuleLoader__.load({
 		/** Details column grid item; width 0 keeps the subtree mounted (never unmount on close). */
 		function DetailsColumn(props) {
 			return (0, react_jsx_runtime.jsx)("div", {
-				className: AppFrame_module_css_default.detailsCol,
+				...props,
+				className: props.className ? `${AppFrame_module_css_default.detailsCol} ${props.className}` : AppFrame_module_css_default.detailsCol,
 				children: props.children
 			});
 		}
@@ -155,149 +155,14 @@ window.__ModuleLoader__.load({
 				onPointerUp
 			});
 		}
-		const CREATOR_TABS = [
-			["overview", "概览"], ["script", "脚本"], ["shoot", "拍摄"],
-			["publish", "发布"], ["review", "复盘"]
-		];
-		function projectTitle(cwd, fallback) {
-			if (typeof cwd !== "string" || cwd === "") return fallback;
-			const parts = cwd.replaceAll("\\", "/").split("/").filter(Boolean);
-			return parts.at(-1) || fallback;
-		}
-		function creatorProjects(state, workspaces) {
-			const groups = /* @__PURE__ */ new Map();
-			const claimed = /* @__PURE__ */ new Set();
-			for (const workspace of workspaces.items) {
-				const project = {
-					key: `workspace:${String(workspace.workspaceId)}`,
-					workspaceId: workspace.workspaceId,
-					title: workspace.title || "未命名项目",
-					sessions: [],
-					sessionIds: [],
-					running: false,
-					updatedAt: 0,
-					representativeId: void 0
-				};
-				for (const id of workspace.sessionIds) {
-					const session = state.byId[id];
-					if (session === void 0 || session.origin === "subagent") continue;
-					claimed.add(id);
-					project.sessions.push(session);
-					project.sessionIds.push(id);
-					project.running ||= session.running === true;
-					if (state.current === id || session.updatedAt >= project.updatedAt) {
-						project.representativeId = id;
-						project.updatedAt = session.updatedAt;
-					}
-				}
-				groups.set(project.key, project);
-			}
-			for (const id of state.ids) {
-				const session = state.byId[id];
-				if (session === void 0 || session.origin === "subagent" || claimed.has(id)) continue;
-				const sourceKey = session.cwd || `session:${String(id)}`;
-				const key = `cwd:${sourceKey}`;
-				let project = groups.get(key);
-				if (project === void 0) {
-					project = {
-						key,
-						title: projectTitle(session.cwd, session.displayTitle),
-						sessions: [],
-						sessionIds: [],
-						running: false,
-						updatedAt: 0,
-						representativeId: id
-					};
-					groups.set(key, project);
-				}
-				project.sessions.push(session);
-				project.sessionIds.push(id);
-				project.running ||= session.running === true;
-				if (state.current === id || session.updatedAt >= project.updatedAt) {
-					project.representativeId = id;
-					project.updatedAt = session.updatedAt;
-				}
-			}
-			return [...groups.values()].sort((a, b) => b.updatedAt - a.updatedAt);
-		}
-		function CreatorSidebar({ projects, activeKey, onSelect }) {
-			return (0, react_jsx_runtime.jsxs)("div", {
-				className: "wd10-library",
-				children: [(0, react_jsx_runtime.jsxs)("div", {
-					className: "wd10-libraryHead",
-					children: [(0, react_jsx_runtime.jsx)("div", { className: "wd10-eyebrow", children: "WhaleDock" }), (0, react_jsx_runtime.jsx)("h2", { children: "内容库" }), (0, react_jsx_runtime.jsx)("p", { children: projects.length === 0 ? "建立或打开一个会话后，项目会出现在这里。" : `已聚合 ${projects.length} 个项目，可以跨项目切换。` })]
-				}), ...projects.map((project) => (0, react_jsx_runtime.jsxs)("button", {
-					className: "wd10-project",
-					type: "button",
-					"aria-current": project.key === activeKey,
-					onClick: () => onSelect(project.key),
-					children: [(0, react_jsx_runtime.jsx)("span", { className: "wd10-projectTitle", children: project.title }), (0, react_jsx_runtime.jsxs)("span", {
-						className: "wd10-projectMeta",
-						children: [(0, react_jsx_runtime.jsx)("span", { className: "wd10-dot", "data-running": project.running || void 0 }), (0, react_jsx_runtime.jsx)("span", { children: `${project.sessions.length} 个会话` }), project.running && (0, react_jsx_runtime.jsx)("span", { children: "进行中" })]
-					})]
-				}, project.key))]
-			});
-		}
-		function stageCopy(tab, title) {
-			const prompts = {
-				overview: `请帮我梳理「${title}」当前进展，只列出下一个最值得推进的决策。`,
-				script: `请继续打磨「${title}」的脚本，先核对当前稿件，再给出可直接拍摄的改稿建议。`,
-				shoot: `请为「${title}」生成本次拍摄的最小清单：镜头、口播、素材和收工检查。`,
-				publish: `请检查「${title}」发布前还缺什么，区分本地准备、平台操作和人工确认。`,
-				review: `请带我复盘「${title}」，先问我一个最关键的结果问题，等我回答后再继续。`
-			};
-			return prompts[tab] || prompts.overview;
-		}
-		function CreatorDetail({ project, tab, onTab, projectActions }) {
-			const [feedback, setFeedback] = (0, react.useState)("");
-			(0, react.useEffect)(() => setFeedback(""), [project?.key, tab]);
-			if (project === void 0) return (0, react_jsx_runtime.jsx)("div", { className: "wd10-detail", children: (0, react_jsx_runtime.jsx)("div", { className: "wd10-empty", children: "还没有可展示的项目。先在右侧建立一个会话，鲸坞会自动把它归入内容库。" }) });
-			const fillDraft = async () => {
-				setFeedback("正在对账项目与右侧会话…");
-				const result = await projectActions.fillDraft(project.representativeId, stageCopy(tab, project.title), project.workspaceId);
-				setFeedback(result?.ok === true ? "已填入右侧输入框；确认后直接发送。" : result?.code === "draft-not-empty" ? "右侧已有未发送内容，为避免覆盖，本次没有填入。" : "暂时无法对账这个会话，请稍后重试。");
-			};
-			return (0, react_jsx_runtime.jsxs)("div", {
-				className: "wd10-detail",
-				children: [(0, react_jsx_runtime.jsxs)("header", {
-					className: "wd10-detailHead",
-					children: [(0, react_jsx_runtime.jsx)("div", { className: "wd10-eyebrow", children: "当前项目" }), (0, react_jsx_runtime.jsx)("h1", { children: project.title }), (0, react_jsx_runtime.jsx)("p", { children: `${project.sessions.length} 个会话已聚合 · ${project.running ? "有任务正在进行" : "可继续推进"}` })]
-				}), (0, react_jsx_runtime.jsx)("nav", {
-					className: "wd10-tabs",
-					"aria-label": "项目阶段",
-					children: CREATOR_TABS.map(([id, label]) => (0, react_jsx_runtime.jsx)("button", { type: "button", "aria-selected": tab === id, onClick: () => onTab(id), children: label }, id))
-				}), (0, react_jsx_runtime.jsxs)("main", {
-					className: "wd10-panel",
-					children: [(0, react_jsx_runtime.jsxs)("section", {
-						className: "wd10-card",
-						children: [(0, react_jsx_runtime.jsx)("h3", { children: CREATOR_TABS.find(([id]) => id === tab)?.[1] || "概览" }), (0, react_jsx_runtime.jsx)("p", { children: "工作台和原生对话同屏。点击下方操作会先对账项目会话，再把任务放入右侧草稿，不覆盖已有草稿。" }), (0, react_jsx_runtime.jsxs)("div", { className: "wd10-stats", children: [(0, react_jsx_runtime.jsxs)("div", { className: "wd10-stat", children: [(0, react_jsx_runtime.jsx)("strong", { children: project.sessions.length }), (0, react_jsx_runtime.jsx)("span", { children: "项目会话" })] }), (0, react_jsx_runtime.jsxs)("div", { className: "wd10-stat", children: [(0, react_jsx_runtime.jsx)("strong", { children: project.running ? "1" : "0" }), (0, react_jsx_runtime.jsx)("span", { children: "进行中" })] })] })]
-					}), (0, react_jsx_runtime.jsxs)("section", {
-						className: "wd10-card",
-						children: [(0, react_jsx_runtime.jsx)("h3", { children: "与 AI 继续" }), (0, react_jsx_runtime.jsxs)("button", { className: "wd10-action", type: "button", onClick: fillDraft, children: ["填入右侧草稿", (0, react_jsx_runtime.jsx)("small", { children: "你确认后才会发送，不会自动投递" })] }), feedback && (0, react_jsx_runtime.jsx)("p", { className: "wd10-feedback", role: "status", children: feedback })]
-					})]
-				})]
-			});
-		}
-		/** The three-column frame (see module doc). */
-		function AppFrame({ useStore, useSessions, useWorkspaces, actions, renderSlot, projectActions }) {
+		const WHALEDOCK_SHELL_CONTRACT = "whaledock.content-shell/v1";
+		/**
+		* WhaleDock may replace only the visual assembly through this versioned mount
+		* object. Layout keeps the official root registration, sizing, handles and
+		* child-slot authority; a missing or mismatched plugin falls back upstream.
+		*/
+		function AppFrame({ useStore, useSessions, useWorkspaces, actions, renderSlot, getWhaleDockShell }) {
 			const panels = useStore((s) => s);
-			const sessionState = useSessions((s) => s);
-			const workspaceState = useWorkspaces((s) => s);
-			const projects = (0, react.useMemo)(() => creatorProjects(sessionState, workspaceState), [sessionState, workspaceState]);
-			const [mode, setMode] = (0, react.useState)(() => {
-				try { return globalThis.sessionStorage.getItem("whaledock.v010.nav") === "sessions" ? "sessions" : "content"; } catch (_error) { return "content"; }
-			});
-			const [activeProjectKey, setActiveProjectKey] = (0, react.useState)(null);
-			const [creatorTab, setCreatorTab] = (0, react.useState)("overview");
-			const currentProjectKey = sessionState.current === void 0 ? null : projects.find((project) => project.sessionIds.includes(sessionState.current))?.key || null;
-			(0, react.useEffect)(() => {
-				if (projects.some((project) => project.key === activeProjectKey)) return;
-				setActiveProjectKey(projects.find((project) => project.key === currentProjectKey)?.key || projects[0]?.key || null);
-			}, [projects, activeProjectKey, currentProjectKey]);
-			const selectMode = (next) => {
-				setMode(next);
-				try { globalThis.sessionStorage.setItem("whaledock.v010.nav", next); } catch (_error) {}
-			};
 			const detailsSession = useSessions((s) => {
 				const current = s.current;
 				return current !== void 0 && s.byId[current]?.blank === false ? current : void 0;
@@ -356,35 +221,51 @@ window.__ModuleLoader__.load({
 			const onDetailsDrag = (0, react.useCallback)((dx) => {
 				actions.setDetails(detailsBase.current - dx);
 			}, [actions]);
-			const modeSwitch = (0, react_jsx_runtime.jsxs)("div", { className: "wd10-switch", role: "tablist", "aria-label": "左侧视图", children: [(0, react_jsx_runtime.jsx)("button", { type: "button", role: "tab", "aria-selected": mode === "sessions", onClick: () => selectMode("sessions"), children: "会话" }), (0, react_jsx_runtime.jsx)("button", { type: "button", role: "tab", "aria-selected": mode === "content", onClick: () => selectMode("content"), children: "内容" })] });
-			if (mode === "content") {
-				const left = viewport < 1120 ? 232 : 272;
-				const detail = clampWidth(viewport * .31, viewport < 1120 ? 300 : 340, 440);
-				const activeProject = projects.find((project) => project.key === activeProjectKey) || projects[0];
-				return (0, react_jsx_runtime.jsxs)("div", {
-					ref: frameRef,
-					className: AppFrame_module_css_default.frame,
-					style: { gridTemplateColumns: `${left}px ${detail}px minmax(0, 1fr)` },
-					"data-whaledock-layout": "v0.10-p1",
-					"data-whaledock-mode": "content",
-					children: [(0, react_jsx_runtime.jsxs)("aside", { className: "wd10-left", children: [modeSwitch, (0, react_jsx_runtime.jsx)(CreatorSidebar, { projects, activeKey: activeProject?.key, onSelect: setActiveProjectKey })] }), (0, react_jsx_runtime.jsx)(CreatorDetail, { project: activeProject, tab: creatorTab, onTab: setCreatorTab, projectActions }), (0, react_jsx_runtime.jsxs)("section", { className: "wd10-chat", "aria-label": "原生对话", children: [(0, react_jsx_runtime.jsx)("div", { className: "wd10-chatMain", children: renderSlot("conversation", {}) }), cols.details > 0 && (0, react_jsx_runtime.jsx)(DetailsColumn, { children: renderSlot("details", {}) })] }), (0, react_jsx_runtime.jsx)("div", { className: AppFrame_module_css_default.overlayLayer, "data-shell-overlay": true, children: renderSlot("shell.overlay", {}) })]
+			const extension = typeof getWhaleDockShell === "function" ? getWhaleDockShell() : void 0;
+			if (extension?.contract === WHALEDOCK_SHELL_CONTRACT && typeof extension.Component === "function") {
+				const mount = Object.freeze({
+					frameRef,
+					frameClassName: AppFrame_module_css_default.frame,
+					viewport,
+					columns: cols,
+					sidebarCollapsed,
+					dragging,
+					renderSidebar(width = cols.sidebar) {
+						return renderSlot("sidebar", { collapsed: sidebarCollapsed, width });
+					},
+					renderConversation(bare = false) {
+						const content = renderSlot("conversation", {});
+						return bare ? content : (0, react_jsx_runtime.jsx)(CenterColumn, { children: content });
+					},
+					renderDetails(props = {}) {
+						return (0, react_jsx_runtime.jsx)(DetailsColumn, { ...props, children: renderSlot("details", {}) });
+					},
+					renderOverlay() {
+						return (0, react_jsx_runtime.jsx)("div", { className: AppFrame_module_css_default.overlayLayer, "data-shell-overlay": true, children: renderSlot("shell.overlay", {}) });
+					},
+					renderSidebarHandle() {
+						return !sidebarCollapsed && (0, react_jsx_runtime.jsx)(DragHandle, { side: "sidebar", left: cols.sidebar, onStart: onSidebarStart, onDrag: onSidebarDrag, onEnd: onDragEnd });
+					},
+					renderDetailsHandle() {
+						return cols.details > 0 && (0, react_jsx_runtime.jsx)(DragHandle, { side: "details", left: viewport - cols.details, onStart: onDetailsStart, onDrag: onDetailsDrag, onEnd: onDragEnd });
+					}
 				});
+				return (0, react_jsx_runtime.jsx)(extension.Component, { useSessions, useWorkspaces, mount, integration: extension });
 			}
 			return (0, react_jsx_runtime.jsxs)("div", {
 				ref: frameRef,
 				className: AppFrame_module_css_default.frame,
 				style: { gridTemplateColumns: `${cols.sidebar}px minmax(0, 1fr) ${cols.details}px` },
-				"data-whaledock-layout": "v0.10-p1",
 				"data-sidebar-collapsed": sidebarCollapsed || void 0,
 				"data-details-collapsed": cols.details === 0 || void 0,
 				"data-dragging": dragging || void 0,
 				children: [
-					(0, react_jsx_runtime.jsxs)("div", {
-						className: "wd10-left",
-						children: [modeSwitch, renderSlot("sidebar", {
+					(0, react_jsx_runtime.jsx)("div", {
+						className: AppFrame_module_css_default.sidebarCol,
+						children: renderSlot("sidebar", {
 							collapsed: sidebarCollapsed,
 							width: cols.sidebar
-						})]
+						})
 					}),
 					(0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)(CenterColumn, { children: renderSlot("conversation", {}) }), (0, react_jsx_runtime.jsx)(DetailsColumn, { children: renderSlot("details", {}) })] }),
 					(0, react_jsx_runtime.jsx)("div", {
@@ -581,33 +462,7 @@ window.__ModuleLoader__.load({
 					store: createLayoutStore,
 					inject: (actions) => {
 						layout.attachPanels(actions);
-						return { projectActions: {
-							open(sessionId) {
-								const sessions = ctx.get("sessions");
-								if (sessions === void 0) return false;
-								sessions.open(sessionId);
-								return true;
-							},
-							async fillDraft(sessionId, text, workspaceId) {
-								const sessions = ctx.get("sessions");
-								if (sessions === void 0) return { ok: false, code: "session-unavailable" };
-								let targetId = sessionId;
-								if (targetId === void 0 && workspaceId !== void 0) {
-									const workspaces = ctx.get("workspaces");
-									if (workspaces === void 0) return { ok: false, code: "workspace-unavailable" };
-									targetId = await workspaces.connectWorkspace(workspaceId);
-								}
-								if (targetId === void 0) return { ok: false, code: "session-unavailable" };
-								sessions.open(targetId);
-								await Promise.resolve();
-								const actx = sessions.scope(targetId);
-								const input = actx === void 0 ? void 0 : ctx.get("conversation")?.input.for(actx);
-								if (input === void 0) return { ok: false, code: "session-unavailable" };
-								if (String(input.state.getSnapshot().draft || "").trim() !== "") return { ok: false, code: "draft-not-empty" };
-								input.setDraft(text);
-								return { ok: true };
-							}
-						} };
+						return { getWhaleDockShell: () => ctx.get("whaledockContentShell") };
 					}
 				}, AppFrame);
 				return () => {

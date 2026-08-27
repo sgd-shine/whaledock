@@ -3,3 +3,8 @@ licenses/** -text -whitespace
 compliance/** -text -whitespace
 THIRD_PARTY_NOTICES.md -text -whitespace
 package-lock.json -text -whitespace
+# v0.10 的 fork patch、再分发源文件与固定 baseline 都按原始字节验 SHA；
+# Windows core.autocrlf 不得把 LF/EOF 语义改写成 CRLF。
+refork/dsh-ui/** -text -whitespace
+context-poc/** -text -whitespace
+lib/context-poc-baseline.json -text -whitespace

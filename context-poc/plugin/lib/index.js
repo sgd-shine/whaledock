@@ -14,7 +14,9 @@ const CAPABILITIES = Object.freeze([
   'delivery-proof',
   'selection-authority',
   'controller-conflict-fence',
-  'ordered-events'
+  'ordered-events',
+  'ui-preferences-v1',
+  'workspace-files-v1'
 ]);
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 const SESSION_REF_RE = /^session-[a-f0-9]{64}$/;
@@ -23,13 +25,74 @@ const PROJECT_REVISION_RE = /^[a-f0-9]{64}$/;
 const WORKBENCH_ID_RE = /^(?:builtin|user):[A-Za-z0-9][A-Za-z0-9._-]{0,87}$/;
 const TOKEN_RE = /^[a-f0-9]{64}$/;
 const NONCE_RE = /^[a-f0-9]{64}$/;
+const REGISTER_NONCE_RE = /^[a-f0-9]{32}$/;
 const CONTROL_RE = /[\u0000-\u001f\u007f]/;
+const WORKSPACE_TEXT_CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 const LEASE_MS = 15000;
+const REGISTER_NONCE_TTL_MS = 10000;
+const REGISTER_CLOCK_SKEW_MS = 1000;
 const MAX_EVENTS = 512;
 const MAX_EVENT_BYTES = 2048;
 const MAX_CONTROLLERS = 128;
 const MAX_RECORDS = 256;
 const MAX_RPC_SESSIONS = 4;
+const MAX_REGISTER_NONCES = 4096;
+const MAX_PREFERENCE_REVISION = 1_000_000_000;
+const MAX_PENDING_PREFERENCES = 64;
+const MAX_PREFERENCE_READ_BATCH = 16;
+const PREFERENCE_PENDING_MS = 3000;
+const WORKSPACE_FILE_OPERATIONS = new Set([
+  'catalog.read', 'overview.read', 'document.read', 'topic.choose',
+  'project.action.prepare', 'project.action.submit',
+  'block.action.prepare', 'block.action.submit',
+  'proposal.read', 'proposal.decide', 'proposal.undo',
+  'publish.read', 'publish.create', 'publish.update',
+  'review.tactics.read', 'review.solidify',
+  'shoot.open', 'shoot.history.read',
+  'receipts.read', 'receipts.ack', 'receipts.open'
+]);
+const WORKSPACE_FILE_STATES = new Set([
+  'queued', 'running', 'fulfilled', 'rejected', 'cancelled', 'expired'
+]);
+const WORKSPACE_FILE_REJECT_CODES = new Set([
+  'workspace-unavailable', 'workspace-mismatch', 'operation-invalid',
+  'operation-timeout', 'operation-failed', 'operation-stale', 'outcome-unknown', 'busy'
+]);
+const WORKSPACE_FILE_FORBIDDEN_KEYS = new Set([
+  'absolutepath', 'relativepath', 'effectivepath', 'workspacekey', 'cwd',
+  'filepath', 'root', 'rootpath', 'frontmatter', 'patch',
+  'sessionref', 'currentsessionid', 'rawsession', 'context', 'envelope',
+  'authtoken', 'selectiontoken', 'controllerproof', 'claimtoken', 'requestseq',
+  'hash', 'dev', 'ino'
+]);
+const MAX_WORKSPACE_FILE_INPUT_BYTES = 4 * 1024;
+const MAX_WORKSPACE_FILE_RESULT_BYTES = 6 * 1024;
+const MAX_WORKSPACE_FILE_JOBS = 64;
+const MAX_WORKSPACE_FILE_QUEUED = 32;
+const MAX_WORKSPACE_FILE_PER_CONTROLLER = 4;
+const MAX_WORKSPACE_FILE_READ_BATCH = 4;
+const WORKSPACE_FILE_PENDING_MS = 10000;
+const WORKSPACE_FILE_RUNNING_MS = 10000;
+const WORKSPACE_FILE_RETAIN_MS = 30000;
+const ENDPOINT_RATES = Object.freeze({
+  handshake: 16,
+  'selection/register': 256,
+  'selection/resolve': 32,
+  'context/stage': 64,
+  'context/preflight': 128,
+  'events/read': 64,
+  'ui/preferences/get': 64,
+  'ui/preferences/write': 16,
+  'ui/preferences/read': 64,
+  'ui/preferences/sync': 32,
+  'ui/preferences/settle': 32,
+  'workspace/files/request': 16,
+  'workspace/files/status': 64,
+  'workspace/files/cancel': 16,
+  'workspace/files/read': 64,
+  'workspace/files/claim': 32,
+  'workspace/files/settle': 32
+});
 
 function plain(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -95,6 +158,91 @@ function validRawSession(value) {
     && value.length <= 256 && !CONTROL_RE.test(value));
 }
 
+function validPreferenceRevision(value, allowZero = false) {
+  return Number.isSafeInteger(value) && value >= (allowZero ? 0 : 1)
+    && value <= MAX_PREFERENCE_REVISION;
+}
+
+function preferencePatch(value) {
+  if (!plain(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.length < 1 || keys.length > 2
+      || keys.some((key) => key !== 'contentViewMode' && key !== 'contentViewHintSeen')
+      || (Object.prototype.hasOwnProperty.call(value, 'contentViewMode')
+        && value.contentViewMode !== 'content' && value.contentViewMode !== 'sessions')
+      || (Object.prototype.hasOwnProperty.call(value, 'contentViewHintSeen')
+        && typeof value.contentViewHintSeen !== 'boolean')) return null;
+  return Object.freeze({ ...value });
+}
+
+function preferenceSnapshot(value, allowZero = false) {
+  if (!exact(value, ['revision', 'contentViewMode', 'contentViewHintSeen'])
+      || !validPreferenceRevision(value.revision, allowZero)
+      || (value.contentViewMode !== 'content' && value.contentViewMode !== 'sessions')
+      || typeof value.contentViewHintSeen !== 'boolean') return null;
+  return Object.freeze({
+    revision: value.revision,
+    contentViewMode: value.contentViewMode,
+    contentViewHintSeen: value.contentViewHintSeen
+  });
+}
+
+function samePreferenceSnapshot(left, right) {
+  return Boolean(left && right && left.revision === right.revision
+    && left.contentViewMode === right.contentViewMode
+    && left.contentViewHintSeen === right.contentViewHintSeen);
+}
+
+function safeWorkspaceValue(value, maximumBytes) {
+  const canonicalKey = (key) => key.toLowerCase().replace(/[-_]/g, '');
+  const visit = (item, depth) => {
+    if (depth > 5) return null;
+    if (item === null || typeof item === 'boolean') return item;
+    if (Number.isSafeInteger(item) && Math.abs(item) <= 1_000_000_000_000) return item;
+    if (typeof item === 'string') {
+      return Buffer.byteLength(item, 'utf8') <= 2048 && !WORKSPACE_TEXT_CONTROL_RE.test(item)
+        ? item : null;
+    }
+    if (Array.isArray(item)) {
+      if (item.length > 64) return null;
+      const result = [];
+      for (const child of item) {
+        const clean = visit(child, depth + 1);
+        if (clean === null && child !== null) return null;
+        result.push(clean);
+      }
+      return result;
+    }
+    if (!plain(item) || Object.keys(item).length > 64) return null;
+    const result = {};
+    for (const [key, child] of Object.entries(item)) {
+      if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(key)
+          || WORKSPACE_FILE_FORBIDDEN_KEYS.has(canonicalKey(key))) return null;
+      const clean = visit(child, depth + 1);
+      if (clean === null && child !== null) return null;
+      result[key] = clean;
+    }
+    return result;
+  };
+  const clean = visit(value, 0);
+  if (!plain(clean)) return null;
+  return Buffer.byteLength(JSON.stringify(clean), 'utf8') <= maximumBytes
+    ? Object.freeze(clean) : null;
+}
+
+function sessionProjectId(session) {
+  const cwd = session && session.header && session.header.cwd;
+  if (typeof cwd !== 'string' || !cwd || CONTROL_RE.test(cwd)
+      || Buffer.byteLength(cwd, 'utf8') > 4096) return null;
+  let normalized = cwd.replace(/\\/g, '/');
+  if (!(normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized)
+      || normalized.startsWith('//'))) return null;
+  while (normalized.length > 1 && normalized.endsWith('/')
+      && !/^[A-Za-z]:\/$/.test(normalized)) normalized = normalized.slice(0, -1);
+  const digest = sha256(`whaledock-project/v1\0${normalized}\0.`);
+  return `wdp1_${digest.slice(0, 32)}`;
+}
+
 function validRelativePath(value) {
   if (value === '.') return true;
   if (typeof value !== 'string' || !value || Buffer.byteLength(value, 'utf8') > 2048
@@ -154,17 +302,29 @@ export function apply(ctx) {
   const recordsByRaw = new Map();
   const rpcSessions = [];
   const journal = [];
+  const registerNonces = new Map();
+  const endpointBuckets = new Map();
+  const pendingPreferences = new Map();
+  const workspaceFileJobs = new Map();
+  let workspaceFileRequestSeq = 0;
+  let preferences = Object.freeze({
+    revision: 0,
+    contentViewMode: 'content',
+    contentViewHintSeen: false
+  });
   let eventSeq = 0;
 
   const emit = (type, fields) => {
+    const nextEventSeq = eventSeq + 1;
     const event = Object.freeze({
       contract: CONTRACT,
       hostInstanceId,
-      eventSeq: ++eventSeq,
+      eventSeq: nextEventSeq,
       type,
       ...fields
     });
     if (Buffer.byteLength(JSON.stringify(event), 'utf8') > MAX_EVENT_BYTES) return null;
+    eventSeq = nextEventSeq;
     journal.push(event);
     while (journal.length > MAX_EVENTS) journal.shift();
     return event;
@@ -173,6 +333,32 @@ export function apply(ctx) {
   const mintSessionRef = (raw) => (
     `session-${sha256(`${hostInstanceId}\0${raw}\0${randomUUID()}`)}`
   );
+
+  const takeEndpointBudget = (endpoint, now = Date.now()) => {
+    const limit = ENDPOINT_RATES[endpoint];
+    if (!Number.isSafeInteger(limit)) return false;
+    const windowId = Math.floor(now / 1000);
+    const bucket = endpointBuckets.get(endpoint);
+    if (!bucket || bucket.windowId !== windowId) {
+      endpointBuckets.set(endpoint, { windowId, count: 1 });
+      return true;
+    }
+    if (bucket.count >= limit) return false;
+    bucket.count += 1;
+    return true;
+  };
+
+  const acceptRegisterNonce = (nonce, issuedAtMs, now = Date.now()) => {
+    for (const [key, expiresAt] of registerNonces) {
+      if (expiresAt < now) registerNonces.delete(key);
+    }
+    if (!REGISTER_NONCE_RE.test(nonce) || !Number.isSafeInteger(issuedAtMs)
+        || issuedAtMs < now - REGISTER_NONCE_TTL_MS
+        || issuedAtMs > now + REGISTER_CLOCK_SKEW_MS
+        || registerNonces.has(nonce) || registerNonces.size >= MAX_REGISTER_NONCES) return false;
+    registerNonces.set(nonce, issuedAtMs + REGISTER_NONCE_TTL_MS);
+    return true;
+  };
 
   const sweep = (now = Date.now()) => {
     for (const [controllerId, selection] of controllers) {
@@ -198,6 +384,7 @@ export function apply(ctx) {
       if (candidates.length) recordsByRaw.set(raw, candidates[0]);
       else recordsByRaw.delete(raw);
     }
+    sweepWorkspaceFileJobs(now);
   };
 
   const activeSelectionsFor = (raw, now = Date.now()) => [...controllers.values()]
@@ -232,16 +419,22 @@ export function apply(ctx) {
   const registerSelection = (payload) => {
     if (!exact(payload, [
       'contract', 'controllerId', 'pageInstanceId', 'selectionRevision',
-      'currentSessionId', 'managed', 'selectionToken'
+      'currentSessionId', 'managed', 'selectionToken', 'registerNonce',
+      'issuedAtMs', 'controllerProof'
     ]) || payload.contract !== CONTRACT || !validId(payload.controllerId)
         || !validId(payload.pageInstanceId)
         || !Number.isSafeInteger(payload.selectionRevision) || payload.selectionRevision < 1
         || !validRawSession(payload.currentSessionId)
         || !tokenMatches(payload.selectionToken, selectionToken)
+        || !TOKEN_RE.test(payload.controllerProof)
         || typeof payload.managed !== 'boolean') return bad();
 
-    sweep();
+    const now = Date.now();
+    if (!takeEndpointBudget('selection/register', now)) return bad();
+    sweep(now);
     const previous = controllers.get(payload.controllerId);
+    if (previous && !tokenMatches(payload.controllerProof, previous.controllerProof)) return bad();
+    if (!acceptRegisterNonce(payload.registerNonce, payload.issuedAtMs, now)) return bad();
     if (previous && previous.pageInstanceId !== payload.pageInstanceId
         && payload.selectionRevision <= previous.selectionRevision) {
       return ok({
@@ -269,7 +462,8 @@ export function apply(ctx) {
       previous.seenAt = Date.now();
       const current = resolveSelectionState(previous);
       return ok({
-        ...current,
+        state: current.state,
+        code: current.code,
         controllerId: previous.controllerId,
         pageInstanceId: previous.pageInstanceId,
         selectionRevision: previous.selectionRevision
@@ -290,6 +484,7 @@ export function apply(ctx) {
       selectionRevision: payload.selectionRevision,
       raw,
       managed: payload.managed,
+      controllerProof: payload.controllerProof,
       sessionRef: raw === null ? null : mintSessionRef(raw),
       seenAt: Date.now()
     };
@@ -316,7 +511,8 @@ export function apply(ctx) {
     sweep();
     const current = resolveSelectionState(selection);
     return ok({
-      ...current,
+      state: current.state,
+      code: current.code,
       controllerId: selection.controllerId,
       pageInstanceId: selection.pageInstanceId,
       selectionRevision: selection.selectionRevision
@@ -324,11 +520,479 @@ export function apply(ctx) {
   };
 
   const withAuth = (payload, required, optional = []) => {
-    if (!exact(payload, [...required, 'authToken'], optional)
-        || !rpcSessions.includes(payload.authToken)) return null;
+    const shapeValid = exact(payload, [...required, 'authToken'], optional);
+    const actualValid = shapeValid && typeof payload.authToken === 'string'
+      && TOKEN_RE.test(payload.authToken);
+    const actual = Buffer.from(actualValid ? payload.authToken : '00'.repeat(32), 'hex');
+    let matched = 0;
+    for (let index = 0; index < MAX_RPC_SESSIONS; index += 1) {
+      const expected = rpcSessions[index] || '00'.repeat(32);
+      const equal = timingSafeEqual(actual, Buffer.from(expected, 'hex'));
+      if (index < rpcSessions.length && equal) matched |= 1;
+    }
+    if (!actualValid || matched !== 1) return null;
     const { authToken: _secret, ...value } = payload;
     return value;
   };
+
+  const preferencePageSelection = (payload, extra) => {
+    if (!exact(payload, [
+      'contract', 'controllerId', 'pageInstanceId', 'selectionRevision',
+      'selectionToken', 'controllerProof', ...extra
+    ]) || payload.contract !== CONTRACT || !validId(payload.controllerId)
+        || !validId(payload.pageInstanceId)
+        || !validPreferenceRevision(payload.selectionRevision)
+        || !tokenMatches(payload.selectionToken, selectionToken)
+        || !TOKEN_RE.test(payload.controllerProof)) return null;
+    sweep();
+    const selection = controllers.get(payload.controllerId);
+    if (!selection || selection.managed !== true
+        || selection.pageInstanceId !== payload.pageInstanceId
+        || selection.selectionRevision !== payload.selectionRevision
+        || !tokenMatches(payload.controllerProof, selection.controllerProof)) return null;
+    return selection;
+  };
+
+  const syncPreferences = (payload) => {
+    const value = withAuth(payload, ['contract', 'snapshot']);
+    const snapshot = value && preferenceSnapshot(value.snapshot);
+    if (!value || value.contract !== CONTRACT || !snapshot) return bad();
+    if (!takeEndpointBudget('ui/preferences/sync')) return bad();
+    sweep();
+    if (snapshot.revision < preferences.revision) {
+      return ok({ accepted: false, code: 'preferences-stale', snapshot: preferences });
+    }
+    if (snapshot.revision === preferences.revision
+        && !samePreferenceSnapshot(snapshot, preferences)) {
+      return ok({ accepted: false, code: 'preferences-conflict', snapshot: preferences });
+    }
+    preferences = snapshot;
+    return ok({ accepted: true, code: null, snapshot: preferences });
+  };
+
+  const expirePendingPreference = (requestToken, pending, now = Date.now()) => {
+    if (pendingPreferences.get(requestToken) !== pending || now < pending.deadlineMs) {
+      return false;
+    }
+    pendingPreferences.delete(requestToken);
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.resolve(ok({
+      accepted: false,
+      code: 'preferences-timeout',
+      snapshot: preferences
+    }));
+    return true;
+  };
+
+  const expirePendingPreferences = (now = Date.now()) => {
+    for (const [requestToken, pending] of pendingPreferences) {
+      expirePendingPreference(requestToken, pending, now);
+    }
+  };
+
+  const readPreferences = (payload) => {
+    const value = withAuth(payload, ['contract', 'hostInstanceId']);
+    if (!value || value.contract !== CONTRACT || value.hostInstanceId !== hostInstanceId) {
+      return bad();
+    }
+    if (!takeEndpointBudget('ui/preferences/read')) return bad();
+    expirePendingPreferences();
+    return ok({
+      contract: CONTRACT,
+      hostInstanceId,
+      requests: [...pendingPreferences.values()]
+        .slice(0, MAX_PREFERENCE_READ_BATCH)
+        .map((pending) => pending.request)
+    });
+  };
+
+  const settlePreferences = (payload) => {
+    const value = withAuth(payload, [
+      'contract', 'requestToken', 'status', 'code', 'snapshot'
+    ]);
+    const snapshot = value && preferenceSnapshot(value.snapshot);
+    const rejectedCodes = new Set([
+      'preferences-invalid', 'preferences-stale',
+      'preferences-unavailable', 'preferences-write-failed', 'preferences-timeout'
+    ]);
+    if (!value || value.contract !== CONTRACT || !TOKEN_RE.test(value.requestToken)
+        || !snapshot || !['applied', 'rejected'].includes(value.status)
+        || (value.status === 'applied' ? value.code !== null : !rejectedCodes.has(value.code))) {
+      return bad();
+    }
+    if (!takeEndpointBudget('ui/preferences/settle')) return bad();
+    sweep();
+    expirePendingPreferences();
+    const pending = pendingPreferences.get(value.requestToken);
+    if (!pending) return bad();
+    if (value.status === 'applied') {
+      const expected = {
+        ...preferences,
+        ...pending.patch,
+        revision: pending.baseRevision + 1
+      };
+      if (preferences.revision !== pending.baseRevision
+          || snapshot.revision !== expected.revision
+          || !samePreferenceSnapshot(snapshot, expected)) return bad();
+    } else if (snapshot.revision < preferences.revision
+        || (snapshot.revision === preferences.revision
+          && !samePreferenceSnapshot(snapshot, preferences))) return bad();
+
+    pendingPreferences.delete(value.requestToken);
+    if (pending.timer) clearTimeout(pending.timer);
+    preferences = snapshot;
+    pending.resolve(ok({
+      accepted: value.status === 'applied',
+      code: value.code,
+      snapshot: preferences
+    }));
+    return ok({ settled: true });
+  };
+
+  const getPreferences = (payload) => {
+    if (!preferencePageSelection(payload, [])) return bad();
+    if (!takeEndpointBudget('ui/preferences/get')) return bad();
+    return ok({ snapshot: preferences });
+  };
+
+  const writePreferences = (payload) => {
+    if (!preferencePageSelection(payload, ['baseRevision', 'patch'])
+        || !validPreferenceRevision(payload.baseRevision)) return bad();
+    const patch = preferencePatch(payload.patch);
+    if (!patch) return bad();
+    if (!takeEndpointBudget('ui/preferences/write')) return bad();
+    expirePendingPreferences();
+    if (preferences.revision < 1) {
+      return ok({ accepted: false, code: 'preferences-unavailable', snapshot: preferences });
+    }
+    if (payload.baseRevision !== preferences.revision) {
+      return ok({ accepted: false, code: 'preferences-stale', snapshot: preferences });
+    }
+    if (pendingPreferences.size >= MAX_PENDING_PREFERENCES) {
+      return ok({ accepted: false, code: 'preferences-busy', snapshot: preferences });
+    }
+    const issuedAtMs = Date.now();
+    const deadlineMs = issuedAtMs + PREFERENCE_PENDING_MS;
+    if (!Number.isSafeInteger(issuedAtMs) || issuedAtMs < 0
+        || !Number.isSafeInteger(deadlineMs)) return internal();
+    const requestToken = sha256(
+      `preferences\0${randomUUID()}\0${issuedAtMs}\0${pendingPreferences.size}`
+    );
+    const request = Object.freeze({
+      controllerId: payload.controllerId,
+      pageInstanceId: payload.pageInstanceId,
+      selectionRevision: payload.selectionRevision,
+      requestToken,
+      baseRevision: payload.baseRevision,
+      issuedAtMs,
+      deadlineMs,
+      patch
+    });
+    return new Promise((resolve) => {
+      const pending = {
+        baseRevision: payload.baseRevision,
+        deadlineMs,
+        patch,
+        request,
+        resolve,
+        timer: null
+      };
+      pendingPreferences.set(requestToken, pending);
+      const remainingMs = Math.max(0, Math.min(
+        PREFERENCE_PENDING_MS, deadlineMs - Date.now()
+      ));
+      pending.timer = setTimeout(() => {
+        expirePendingPreference(requestToken, pending);
+      }, remainingMs);
+      if (pending.timer && typeof pending.timer.unref === 'function') pending.timer.unref();
+    });
+  };
+
+  const workspaceFileTerminal = (state) => (
+    state === 'fulfilled' || state === 'rejected'
+      || state === 'cancelled' || state === 'expired'
+  );
+
+  const workspaceFileSnapshot = (job) => Object.freeze({
+    requestToken: job.requestToken,
+    state: job.state,
+    code: job.code,
+    result: job.state === 'fulfilled' ? job.result : null
+  });
+
+  const workspaceFileContextCurrent = (job) => {
+    const selection = job && controllers.get(job.controllerId);
+    const record = job && recordsByRef.get(job.sessionRef);
+    const envelope = record && record.effective;
+    let session = null;
+    try {
+      session = record && ctx.sessions && typeof ctx.sessions.get === 'function'
+        ? ctx.sessions.get(record.raw) : null;
+    } catch (_error) { session = null; }
+    return Boolean(selection && selection.managed === true
+      && selection.pageInstanceId === job.pageInstanceId
+      && selection.selectionRevision === job.selectionRevision
+      && selection.sessionRef === job.sessionRef
+      && record && record.revoked !== true && envelope
+      && envelope.revision === job.contextRevision
+      && envelope.project.projectId === job.projectId
+      && envelope.project.projectRevision === job.projectRevision
+      && sessionProjectId(session) === job.projectId);
+  };
+
+  const sweepWorkspaceFileJobs = (now = Date.now()) => {
+    for (const [requestToken, job] of workspaceFileJobs) {
+      if (job.state === 'queued' && now >= job.deadlineMs) {
+        job.state = 'expired';
+        job.code = 'operation-timeout';
+        job.finishedAtMs = now;
+      } else if (job.state === 'running' && now >= job.runningDeadlineMs) {
+        job.state = 'rejected';
+        // claim 后 main 可能已完成副作用但 settle 回包丢失；这里不能伪称未执行。
+        job.code = 'outcome-unknown';
+        job.result = null;
+        job.claimToken = null;
+        job.finishedAtMs = now;
+      } else if (job.state === 'queued' && !workspaceFileContextCurrent(job)) {
+        job.state = 'rejected';
+        job.code = 'workspace-unavailable';
+        job.finishedAtMs = now;
+      } else if (job.state === 'running' && !workspaceFileContextCurrent(job)) {
+        // claim 已发出后 selection 变化，副作用是否发生不可确认。
+        job.state = 'rejected';
+        job.code = 'outcome-unknown';
+        job.result = null;
+        job.claimToken = null;
+        job.finishedAtMs = now;
+      }
+      if (workspaceFileTerminal(job.state)
+          && Number.isSafeInteger(job.finishedAtMs)
+          && now - job.finishedAtMs >= WORKSPACE_FILE_RETAIN_MS) {
+        workspaceFileJobs.delete(requestToken);
+      }
+    }
+  };
+
+  const workspaceFileOwner = (payload, job) => {
+    if (!exact(payload, [
+      'contract', 'controllerId', 'pageInstanceId', 'selectionRevision',
+      'selectionToken', 'controllerProof', 'requestToken'
+    ]) || payload.contract !== CONTRACT || !validId(payload.controllerId)
+        || !validId(payload.pageInstanceId)
+        || !validPreferenceRevision(payload.selectionRevision)
+        || !tokenMatches(payload.selectionToken, selectionToken)
+        || !TOKEN_RE.test(payload.controllerProof) || !TOKEN_RE.test(payload.requestToken)
+        || !job || job.controllerId !== payload.controllerId
+        || job.pageInstanceId !== payload.pageInstanceId
+        || payload.selectionRevision !== job.selectionRevision) return null;
+    const selection = controllers.get(payload.controllerId);
+    if (!selection || selection.managed !== true
+        || selection.pageInstanceId !== payload.pageInstanceId
+        || selection.selectionRevision !== payload.selectionRevision
+        || selection.sessionRef !== job.sessionRef
+        || !workspaceFileContextCurrent(job)
+        || !tokenMatches(payload.controllerProof, selection.controllerProof)) return null;
+    return selection;
+  };
+
+  const requestWorkspaceFile = (payload) => {
+    const selection = preferencePageSelection(payload, ['operation', 'input']);
+    const input = selection && safeWorkspaceValue(
+      payload.input, MAX_WORKSPACE_FILE_INPUT_BYTES
+    );
+    if (!selection || typeof payload.operation !== 'string'
+        || !WORKSPACE_FILE_OPERATIONS.has(payload.operation) || !input) return bad();
+    if (!takeEndpointBudget('workspace/files/request')) return bad();
+    sweep();
+    const resolved = resolveSelectionState(selection);
+    const record = resolved.state === 'selected'
+      ? recordsByRef.get(selection.sessionRef) : null;
+    const envelope = record && record.effective;
+    if (!record || record.revoked || !envelope) {
+      return ok({
+        accepted: false, requestToken: null, state: 'rejected',
+        code: 'workspace-unavailable', deadlineMs: null
+      });
+    }
+    let session = null;
+    try {
+      session = ctx.sessions && typeof ctx.sessions.get === 'function'
+        ? ctx.sessions.get(record.raw) : null;
+    } catch (_error) { session = null; }
+    const selectedProjectId = sessionProjectId(session);
+    if (!selectedProjectId || selectedProjectId !== envelope.project.projectId) {
+      return ok({
+        accepted: false, requestToken: null, state: 'rejected',
+        code: 'workspace-mismatch', deadlineMs: null
+      });
+    }
+    const activeForController = [...workspaceFileJobs.values()].filter((job) => (
+      job.controllerId === selection.controllerId && !workspaceFileTerminal(job.state)
+    )).length;
+    const queued = [...workspaceFileJobs.values()].filter((job) => job.state === 'queued').length;
+    if (workspaceFileJobs.size >= MAX_WORKSPACE_FILE_JOBS
+        || queued >= MAX_WORKSPACE_FILE_QUEUED
+        || activeForController >= MAX_WORKSPACE_FILE_PER_CONTROLLER) {
+      return ok({
+        accepted: false, requestToken: null, state: 'rejected',
+        code: 'busy', deadlineMs: null
+      });
+    }
+    const issuedAtMs = Date.now();
+    const deadlineMs = issuedAtMs + WORKSPACE_FILE_PENDING_MS;
+    if (!Number.isSafeInteger(issuedAtMs) || issuedAtMs < 0
+        || !Number.isSafeInteger(deadlineMs)
+        || workspaceFileRequestSeq >= Number.MAX_SAFE_INTEGER) return internal();
+    const requestSeq = ++workspaceFileRequestSeq;
+    const requestToken = sha256(
+      `workspace-file\0${randomUUID()}\0${issuedAtMs}\0${requestSeq}`
+    );
+    const job = {
+      requestToken,
+      requestSeq,
+      controllerId: selection.controllerId,
+      pageInstanceId: selection.pageInstanceId,
+      selectionRevision: selection.selectionRevision,
+      sessionRef: selection.sessionRef,
+      projectId: envelope.project.projectId,
+      projectRevision: envelope.project.projectRevision,
+      contextRevision: envelope.revision,
+      operation: payload.operation,
+      input,
+      issuedAtMs,
+      deadlineMs,
+      runningDeadlineMs: null,
+      state: 'queued',
+      code: null,
+      result: null,
+      claimToken: null,
+      finishedAtMs: null
+    };
+    workspaceFileJobs.set(requestToken, job);
+    return ok({
+      accepted: true,
+      requestToken,
+      state: 'queued',
+      code: null,
+      deadlineMs
+    });
+  };
+
+  const statusWorkspaceFile = (payload) => {
+    sweep();
+    const job = workspaceFileJobs.get(payload && payload.requestToken);
+    if (!workspaceFileOwner(payload, job)) return bad();
+    if (!takeEndpointBudget('workspace/files/status')) return bad();
+    return ok(workspaceFileSnapshot(job));
+  };
+
+  const cancelWorkspaceFile = (payload) => {
+    sweep();
+    const job = workspaceFileJobs.get(payload && payload.requestToken);
+    if (!workspaceFileOwner(payload, job)) return bad();
+    if (!takeEndpointBudget('workspace/files/cancel')) return bad();
+    if (job.state === 'queued') {
+      job.state = 'cancelled';
+      job.code = 'cancelled';
+      job.finishedAtMs = Date.now();
+      return ok({ cancelled: true, code: 'cancelled', snapshot: workspaceFileSnapshot(job) });
+    }
+    return ok({
+      cancelled: false,
+      code: job.state === 'running' ? 'already-running' : 'already-settled',
+      snapshot: workspaceFileSnapshot(job)
+    });
+  };
+
+  const readWorkspaceFiles = (payload) => {
+    const value = withAuth(payload, ['contract', 'hostInstanceId', 'limit']);
+    if (!value || value.contract !== CONTRACT || value.hostInstanceId !== hostInstanceId
+        || !Number.isSafeInteger(value.limit) || value.limit < 1
+        || value.limit > MAX_WORKSPACE_FILE_READ_BATCH) return bad();
+    if (!takeEndpointBudget('workspace/files/read')) return bad();
+    sweep();
+    const requests = [...workspaceFileJobs.values()]
+      .filter((job) => job.state === 'queued')
+      .sort((left, right) => left.requestSeq - right.requestSeq)
+      .slice(0, value.limit)
+      .map((job) => Object.freeze({
+        requestToken: job.requestToken,
+        requestSeq: job.requestSeq,
+        controllerId: job.controllerId,
+        pageInstanceId: job.pageInstanceId,
+        selectionRevision: job.selectionRevision,
+        projectId: job.projectId,
+        projectRevision: job.projectRevision,
+        contextRevision: job.contextRevision,
+        operation: job.operation,
+        input: job.input,
+        issuedAtMs: job.issuedAtMs,
+        deadlineMs: job.deadlineMs
+      }));
+    return ok({ contract: CONTRACT, hostInstanceId, requests });
+  };
+
+  const claimWorkspaceFile = (payload) => {
+    const value = withAuth(payload, [
+      'contract', 'hostInstanceId', 'requestToken', 'requestSeq'
+    ]);
+    if (!value || value.contract !== CONTRACT || value.hostInstanceId !== hostInstanceId
+        || !TOKEN_RE.test(value.requestToken)
+        || !Number.isSafeInteger(value.requestSeq) || value.requestSeq < 1) return bad();
+    if (!takeEndpointBudget('workspace/files/claim')) return bad();
+    sweep();
+    const job = workspaceFileJobs.get(value.requestToken);
+    if (!job || job.requestSeq !== value.requestSeq || job.state !== 'queued'
+        || !workspaceFileContextCurrent(job)) {
+      return ok({ claimed: false, code: 'operation-stale' });
+    }
+    const now = Date.now();
+    job.state = 'running';
+    job.runningDeadlineMs = Math.min(job.deadlineMs, now + WORKSPACE_FILE_RUNNING_MS);
+    job.claimToken = sha256(
+      `workspace-claim\0${randomUUID()}\0${value.requestToken}\0${value.requestSeq}`
+    );
+    return ok({
+      claimed: true,
+      code: null,
+      claimToken: job.claimToken,
+      runningDeadlineMs: job.runningDeadlineMs
+    });
+  };
+
+  const settleWorkspaceFile = (payload) => {
+    const value = withAuth(payload, [
+      'contract', 'hostInstanceId', 'requestToken', 'requestSeq',
+      'claimToken', 'status', 'code', 'result'
+    ]);
+    if (!value || value.contract !== CONTRACT || value.hostInstanceId !== hostInstanceId
+        || !TOKEN_RE.test(value.requestToken) || !TOKEN_RE.test(value.claimToken)
+        || !Number.isSafeInteger(value.requestSeq) || value.requestSeq < 1
+        || !['fulfilled', 'rejected'].includes(value.status)) return bad();
+    const result = value.status === 'fulfilled'
+      ? safeWorkspaceValue(value.result, MAX_WORKSPACE_FILE_RESULT_BYTES) : null;
+    if ((value.status === 'fulfilled' && (value.code !== null || !result))
+        || (value.status === 'rejected'
+          && (!WORKSPACE_FILE_REJECT_CODES.has(value.code) || value.result !== null))) return bad();
+    if (!takeEndpointBudget('workspace/files/settle')) return bad();
+    sweep();
+    const job = workspaceFileJobs.get(value.requestToken);
+    if (!job || job.requestSeq !== value.requestSeq || job.state !== 'running'
+        || !tokenMatches(value.claimToken, job.claimToken)) {
+      return ok({ settled: false, code: 'operation-stale' });
+    }
+    job.state = value.status;
+    job.code = value.code;
+    job.result = result;
+    job.claimToken = null;
+    job.finishedAtMs = Date.now();
+    return ok({ settled: true, code: null });
+  };
+
+  const validPreflightAuth = (payload) => exact(payload, [
+    'contract', 'controllerId', 'pageInstanceId', 'selectionRevision',
+    'currentSessionId', 'mode', 'managed', 'selectionToken'
+  ]) && tokenMatches(payload.selectionToken, selectionToken);
 
   const stageContext = (payload) => {
     const value = withAuth(payload, [
@@ -431,7 +1095,6 @@ export function apply(ctx) {
 
   const handler = async (endpoint, payload) => {
     try {
-      sweep();
       if (endpoint === 'selection/register') return registerSelection(payload);
       if (endpoint === 'handshake') {
         if (!exact(payload, ['type', 'protocol', 'clientNonce', 'requestProof'])
@@ -440,6 +1103,8 @@ export function apply(ctx) {
             || !tokenMatches(payload.requestProof, bridgeHmac(
               authToken, 'handshake-request', payload.clientNonce, ''
             ))) return bad();
+        if (!takeEndpointBudget(endpoint)) return bad();
+        sweep();
         const proof = bridgeHmac(
           authToken, 'handshake-proof', payload.clientNonce, hostInstanceId
         );
@@ -462,6 +1127,8 @@ export function apply(ctx) {
       if (endpoint === 'selection/resolve') {
         const value = withAuth(payload, ['contract', 'controllerId']);
         if (!value || value.contract !== CONTRACT || !validId(value.controllerId)) return bad();
+        if (!takeEndpointBudget(endpoint)) return bad();
+        sweep();
         const selection = controllers.get(value.controllerId);
         if (!selection || selection.managed !== true) {
           return ok({ state: 'none', hostInstanceId, sessionRef: null, code: null });
@@ -475,12 +1142,37 @@ export function apply(ctx) {
           selectionRevision: selection.selectionRevision
         });
       }
-      if (endpoint === 'context/stage') return stageContext(payload);
-      if (endpoint === 'context/preflight') return preflightContext(payload);
+      if (endpoint === 'context/stage') {
+        if (!withAuth(payload, [
+          'controllerId', 'pageInstanceId', 'selectionRevision', 'envelope'
+        ])) return bad();
+        if (!takeEndpointBudget(endpoint)) return bad();
+        sweep();
+        return stageContext(payload);
+      }
+      if (endpoint === 'context/preflight') {
+        if (!validPreflightAuth(payload)) return bad();
+        if (!takeEndpointBudget(endpoint)) return bad();
+        sweep();
+        return preflightContext(payload);
+      }
+      if (endpoint === 'ui/preferences/get') return getPreferences(payload);
+      if (endpoint === 'ui/preferences/write') return writePreferences(payload);
+      if (endpoint === 'ui/preferences/read') return readPreferences(payload);
+      if (endpoint === 'ui/preferences/sync') return syncPreferences(payload);
+      if (endpoint === 'ui/preferences/settle') return settlePreferences(payload);
+      if (endpoint === 'workspace/files/request') return requestWorkspaceFile(payload);
+      if (endpoint === 'workspace/files/status') return statusWorkspaceFile(payload);
+      if (endpoint === 'workspace/files/cancel') return cancelWorkspaceFile(payload);
+      if (endpoint === 'workspace/files/read') return readWorkspaceFiles(payload);
+      if (endpoint === 'workspace/files/claim') return claimWorkspaceFile(payload);
+      if (endpoint === 'workspace/files/settle') return settleWorkspaceFile(payload);
       if (endpoint === 'events/read') {
         const value = withAuth(payload, ['contract', 'hostInstanceId', 'afterEventSeq']);
         if (!value || value.contract !== CONTRACT || value.hostInstanceId !== hostInstanceId
             || !Number.isSafeInteger(value.afterEventSeq) || value.afterEventSeq < 0) return bad();
+        if (!takeEndpointBudget(endpoint)) return bad();
+        sweep();
         const oldestEventSeq = journal[0]?.eventSeq || eventSeq + 1;
         const resyncRequired = value.afterEventSeq < oldestEventSeq - 1
           || value.afterEventSeq > eventSeq;

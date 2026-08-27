@@ -635,6 +635,16 @@
           </div>
           <div class="row">
             <div>
+              <label class="row-label" for="contentViewMode">内容区默认视图</label>
+              <div class="row-note">选择进入工作区时优先显示内容还是会话。v0.10 的受管内容模式使用鲸坞自己的持久会话数据目录；不会读取、迁移或删除 ~/.dsh 中的旧数据，首次使用可能需要重新配置模型。</div>
+            </div>
+            <select id="contentViewMode" aria-label="内容区默认视图">
+              <option value="content">内容</option>
+              <option value="sessions">会话</option>
+            </select>
+          </div>
+          <div class="row">
+            <div>
               <div class="row-label">自动检查新版本</div>
               <div class="row-note">仅访问 GitHub Releases，不携带用户标识</div>
             </div>
@@ -1186,6 +1196,7 @@
   const api = window.whaleSettings;
   const fieldNames = [
     'openAtLogin', 'startMinimized', 'hotkey', 'checkUpdates',
+    'contentViewMode',
     'screenshotHotkeyEnabled', 'screenshotHotkey',
     'port', 'dshVersion', 'preferBundled', 'command',
     'taskNotifications', 'budgetEnabled', 'dailyTokenBudget',
@@ -1258,6 +1269,7 @@
         ? Boolean(source.screenshotHotkeyEnabled) : true,
       screenshotHotkey: String((source && source.screenshotHotkey) || 'CommandOrControl+Shift+S'),
       checkUpdates: source && source.checkUpdates !== undefined ? Boolean(source.checkUpdates) : true,
+      contentViewMode: source && source.contentViewMode === 'sessions' ? 'sessions' : 'content',
       port: Number(source.port),
       dshVersion: String((source && source.dshVersion) || ''),
       preferBundled: Boolean(source && source.preferBundled),
@@ -1335,7 +1347,7 @@
   function setBusy(next, label) {
     busy = next;
     document.body.dataset.loading = next ? 'true' : 'false';
-    for (const element of document.querySelectorAll('input, button')) element.disabled = next;
+    for (const element of document.querySelectorAll('input, button, select')) element.disabled = next;
     if (!next) updateDirtyState();
     if (next && label) setStatus(label, 'loading');
   }

@@ -4,7 +4,7 @@
     "name": "@larksuiteoapi/node-sdk",
     "version": "1.73.0"
   },
-  "packageLockSha256": "2591046207598b0a2eebe85d2eb74094ecdaea1a43521fa01d05d16edc5c1dc3",
+  "packageLockSha256": "91aa6935fb772fa40f9a3d7cbb4511cbb7d1f38f2c56eb3d6f06df328386c5b9",
   "packagingPolicy": {
     "schemaVersion": 1,
     "electronBuilderVersion": "26.15.3",
@@ -42,6 +42,51 @@
       "sha256": "5af8463b97ee8e309b4a2111f9479bacdf0c180de0ca0155527679b1fc6d9e6c"
     }
   ],
+  "redistributedComponents": {
+    "schemaVersion": 1,
+    "componentCount": 2,
+    "includedInRootNpmPackageCount": false,
+    "includedInBundledDshRuntimeInventory": false,
+    "sourcesPath": "SOURCES.json",
+    "components": [
+      {
+        "key": "ui-layout",
+        "name": "@deepseek-ai/dsh-client-ui-layout",
+        "version": "0.1.1-rc.2",
+        "modified": true,
+        "source": {
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-client-ui-layout/-/dsh-client-ui-layout-0.1.1-rc.2.tgz",
+          "tarballSha256": "42145ca99ad1e87ee35585b25697a350a9fad9a474d8c4e205f2b86a33f0a4db",
+          "integrity": "sha512-y7xSQyQYGuahLyJcSXpB+JbH1F5lGEc3L9K8cjLy5vd/L9N6gLFLWyeGdlGxxM4jxRt1+rAHDDZ/zl7b8GC5zQ=="
+        },
+        "treeSha256": "14a4594b08b7620ba5cf411274524982bc92c9cb48aeca5c6a783e1e30e98208",
+        "license": {
+          "expression": "MIT",
+          "attribution": "Copyright (c) 2026 DeepSeek",
+          "materialPath": "licenses/redistributed-forks/DeepSeek-MIT.txt",
+          "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"
+        }
+      },
+      {
+        "key": "ui-conversation",
+        "name": "@deepseek-ai/dsh-client-ui-conversation",
+        "version": "0.1.1-rc.2",
+        "modified": true,
+        "source": {
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-client-ui-conversation/-/dsh-client-ui-conversation-0.1.1-rc.2.tgz",
+          "tarballSha256": "9403b33b02f9d5daf564764f9a615dc5eb31cc1b449384c0a793b0bc5a9354bd",
+          "integrity": "sha512-5PCyHw2Y7nz9geEUT23et3h2XghJm7/3iWDAKa1/4ldIfCnjfxiZ5ZNRdZ9Xxpj32tBmh2lc6yxIJwrtepIyTg=="
+        },
+        "treeSha256": "ba596cc232017d32b15d785618e62066ec580cd274fbdf8cd458dbdcbfb78b72",
+        "license": {
+          "expression": "MIT",
+          "attribution": "Copyright (c) 2026 DeepSeek",
+          "materialPath": "licenses/redistributed-forks/DeepSeek-MIT.txt",
+          "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"
+        }
+      }
+    ]
+  },
   "packages": [
     {
       "lockPath": "node_modules/@larksuiteoapi/node-sdk",

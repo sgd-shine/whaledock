@@ -1,0 +1,60 @@
+diff --git a/package.json b/package.json
+index 311a5dd..56938f6 100644
+--- a/package.json
++++ b/package.json
+@@ -2,6 +2,10 @@
+   "name": "@deepseek-ai/dsh-client-ui-conversation",
+   "description": "Conversation domain: skeleton, ordered chat flow, composer with the Host-backed busy-Enter preference, and details host",
+   "version": "0.1.1-rc.2",
++  "whaledockFork": {
++    "purpose": "v0.10 pre-send context gate seam",
++    "upstreamClientSha256": "fe448ef7e0b1f3e7713dadfc7eff56b9f80d103a2111dfe69c1735ffd0196d61"
++  },
+   "publishConfig": {
+     "access": "public"
+   },
+@@ -113,4 +117,4 @@
+     "bundle": "tsdown",
+     "watch": "tsdown --watch"
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/client.js b/lib/client.js
+index c6be134..50f1f46 100644
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -1574,8 +1574,24 @@ window.__ModuleLoader__.load({
+ 			* exactly one path; a failed first prompt is an ordinary prompt failure
+ 			* (banner via promptError, draft restored only while untouched).
+ 			*/
+-			sink(session, text, imageIds, mode, signal) {
+-				if (text === "" && imageIds.length === 0) return Promise.resolve({ kind: "success" });
++				async sink(session, text, imageIds, mode, signal) {
++					if (text === "" && imageIds.length === 0) return Promise.resolve({ kind: "success" });
++					const gate = this.rootCtx.get("whaledockContextGate");
++					if (gate === void 0) {
++						const raw = globalThis.location?.hash || "", parameters = new URLSearchParams(raw.startsWith("#") ? raw.slice(1) : raw);
++						const fragmentManaged = this.rootCtx.get("connection")?.isLoopback === true && /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/.test(parameters.get("whaledockController") || "") && /^[a-f0-9]{64}$/.test(parameters.get("whaledockSelectionToken") || "");
++						if (globalThis.__WHALEDOCK_CONTEXT_MANAGED__ !== true && !fragmentManaged) return this.conversation().sendSession(session, text, imageIds, mode, signal);
++						this.shell(session.sessionId).notify("error", "这是鲸坞受管页面：上下文闸门没有加载，本次未发送。请刷新页面；仍未恢复时请重启后端");
++						return { kind: "error" };
++					}
++				let ready = false;
++				try {
++					ready = await gate.beforeSend(session.sessionId, mode, signal);
++				} catch (_error) { /* 固定失败面，不把内部身份或路径显示给用户 */ }
++				if (!ready) {
++					this.shell(session.sessionId).notify("error", "这是鲸坞受管会话：工作台上下文未就绪，本次未发送。请等待连接，或刷新页面 / 重启后端");
++					return { kind: "error" };
++				}
+ 				return this.conversation().sendSession(session, text, imageIds, mode, signal);
+ 			}
+ 			/**
+@@ -10249,4 +10265,4 @@ window.__ModuleLoader__.load({
+ 	}
+ });
+ 
+-//# sourceMappingURL=client.js.map
+\ No newline at end of file
++//# sourceMappingURL=client.js.map
