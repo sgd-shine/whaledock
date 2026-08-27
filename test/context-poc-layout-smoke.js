@@ -302,7 +302,7 @@ function session(id, cwd, extra = {}) {
   };
 }
 
-function uiProps(state, integration, slotCalls) {
+function uiProps(state, integration, slotCalls, slotRenderers = {}) {
   return {
     useStore: (selector) => selector(state.panels),
     useSessions: (selector) => selector(state.sessions),
@@ -312,6 +312,7 @@ function uiProps(state, integration, slotCalls) {
     },
     renderSlot(name, props) {
       slotCalls.push({ name, props });
+      if (typeof slotRenderers[name] === 'function') return slotRenderers[name](props);
       return { $$element: true, type: 'slot', props: { name, ...props } };
     },
     getWhaleDockShell: () => integration
@@ -674,7 +675,7 @@ async function main() {
     assert.equal(state.sessions.current, 'c');
   });
 
-  await test('内容态保留完整 sidebar，左视图常驻且 details 只收起不卸载', async () => {
+  await test('受管壳层只有内容库｜会话一组入口，原生 New Session 与 details 都常驻可用', async () => {
     const pref = preference({ contentViewMode: 'content', contentViewHintSeen: false });
     const state = {
       panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
@@ -683,23 +684,58 @@ async function main() {
     };
     const harness = loadBundle({ whaledockShellPreferences: pref, sessions: { open() {} } });
     const slots = [];
-    const props = uiProps(state, harness.integration, slots);
+    let newSessions = 0;
+    const props = uiProps(state, harness.integration, slots, {
+      sidebar: () => ({ $$element: true, type: 'div', props: { children: [
+        { $$element: true, type: 'button', props: {
+          onClick: () => {
+            newSessions += 1;
+            state.sessions = { ids: ['new-session', ...state.sessions.ids],
+              current: 'new-session', byId: { ...state.sessions.byId,
+                'new-session': session('new-session', '/projects/alpha') } };
+          }, children: 'New Session'
+        } },
+        { $$element: true, type: 'span', props: { children: 'Workspaces' } },
+        { $$element: true, type: 'button', props: { 'aria-label': '设置', children: '设置' } }
+      ] } })
+    });
     let tree = harness.renderer.render(harness.AppFrame, props);
     assert(slots.some((call) => call.name === 'sidebar'));
     assert(slots.some((call) => call.name === 'details'));
+    const leftColumn = classNode(tree, 'wd10-left');
+    assert.equal(findAll(leftColumn, (node) => node.props?.role === 'tablist').length, 1);
+    assert.deepEqual(findAll(leftColumn, (node) => node.props?.role === 'tab').map(textOf),
+      ['内容库', '会话']);
     assert.equal(classNode(tree, 'wd10-leftView').props.hidden, false);
     assert.equal(classNode(tree, 'wd10-nativeSidebar').props.hidden, true);
-    assert.match(textOf(tree), /这里是内容库/u);
+    let frame = findAll(tree, (node) => node.props?.['data-whaledock-layout'] === 'v0.10-p1')[0];
+    assert.equal(frame.props['data-whaledock-mode'], 'content');
+    assert.equal(frame.props['data-whaledock-left'], 'library');
+    assert.equal(frame.props['data-whaledock-panel'], 'expanded');
+    assert.match(textOf(tree), /左边「会话」是原生会话与设置；「收起工作台」能让对话占满。/u);
+    const creatorDetailFiber = harness.renderer.fiberIds('CreatorDetail')[0];
+    const receiptFiber = harness.renderer.fiberIds('TaskReceiptStrip')[0];
     button(tree, '知道了').props.onClick();
     await Promise.resolve();
     assert(pref.writes.some((patch) => patch.contentViewHintSeen === true));
-    button(tree, '会话与设置').props.onClick();
+    button(tree, '会话').props.onClick();
     harness.renderer.unmounts.length = 0;
     tree = harness.renderer.render(harness.AppFrame, props);
     assert.equal(classNode(tree, 'wd10-leftView').props.hidden, true);
     assert.equal(classNode(tree, 'wd10-nativeSidebar').props.hidden, false);
+    frame = findAll(tree, (node) => node.props?.['data-whaledock-layout'] === 'v0.10-p1')[0];
+    assert.equal(frame.props['data-whaledock-left'], 'sessions');
     assert(findAll(tree, (node) => node.type === 'button' && node.props.className === 'wd10-workspaceChoice').length > 0);
     assert.equal(harness.renderer.unmounts.includes('CreatorSidebar'), false);
+    assert.equal(harness.renderer.fiberIds('CreatorDetail')[0], creatorDetailFiber);
+    assert.equal(harness.renderer.fiberIds('TaskReceiptStrip')[0], receiptFiber);
+    assert.equal(harness.renderer.unmounts.includes('CreatorDetail'), false);
+    assert.equal(harness.renderer.unmounts.includes('TaskReceiptStrip'), false);
+    button(tree, 'New Session').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.equal(newSessions, 1);
+    assert.equal(state.sessions.current, 'new-session');
+    assert(pref.writes.some((patch) => patch.contentViewMode === 'sessions'));
     const closed = classNode(tree, 'wd10-contentDetails');
     assert.equal(closed.props['aria-hidden'], true);
     assert(findAll(closed, (node) => node.type === 'slot' && node.props.name === 'details').length === 1);
@@ -711,20 +747,25 @@ async function main() {
     assert.equal(harness.renderer.unmounts.includes('DetailsColumn'), false);
     assert.equal(classNode(tree, 'wd10-contentDetails').props['aria-hidden'], false);
     slots.length = 0;
-    button(tree, '会话').props.onClick();
+    button(tree, '内容库').props.onClick();
     tree = harness.renderer.render(harness.AppFrame, props);
     await Promise.resolve();
     assert(slots.some((call) => call.name === 'sidebar'));
-    assert(pref.writes.some((patch) => patch.contentViewMode === 'sessions'));
+    assert(pref.writes.some((patch) => patch.contentViewMode === 'content'));
+    assert(pref.writes.every((patch) => Object.keys(patch).every((key) => (
+      key === 'contentViewMode' || key === 'contentViewHintSeen'
+    ))));
 
     const noPreference = loadBundle({ sessions: { open() {} } });
     const defaultTree = noPreference.renderer.render(
       noPreference.AppFrame,
       uiProps(state, noPreference.integration, [])
     );
-    const frame = findAll(defaultTree, (node) => node.props?.['data-whaledock-layout'] === 'v0.10-p1')[0];
-    assert(frame);
-    assert.equal(frame.props['data-whaledock-mode'], undefined);
+    const defaultFrame = findAll(defaultTree,
+      (node) => node.props?.['data-whaledock-layout'] === 'v0.10-p1')[0];
+    assert(defaultFrame);
+    assert.equal(defaultFrame.props['data-whaledock-mode'], 'content');
+    assert.equal(defaultFrame.props['data-whaledock-left'], 'library');
   });
 
   await test('content-shell 缺失时回退 rc.2 官方三栏且 SidebarRoot 仍由原 slot 渲染', async () => {
@@ -799,6 +840,10 @@ async function main() {
     const props = uiProps(state, harness.integration, slots);
     let tree = harness.renderer.render(harness.AppFrame, props);
     assert.match(textOf(tree), /会话页内提词/u);
+    const browserLeft = classNode(tree, 'wd10-left');
+    assert.equal(findAll(browserLeft, (node) => node.props?.role === 'tablist').length, 1);
+    assert.deepEqual(findAll(browserLeft, (node) => node.props?.role === 'tab').map(textOf),
+      ['会话', '页内提词']);
     assert.doesNotMatch(textOf(tree), /手动页内提词|WhaleDock内容库/u);
     assert(slots.some((call) => call.name === 'sidebar'));
     assert(slots.some((call) => call.name === 'conversation'));
@@ -3284,6 +3329,33 @@ async function main() {
     assert.match(textOf(tree), /将发往 目标 A/u);
     assert.match(textOf(tree), /工作区匹配/u);
     assert.match(textOf(tree), /秒后过期/u);
+    const creatorDetailFiber = harness.renderer.fiberIds('CreatorDetail')[0];
+    const receiptFiber = harness.renderer.fiberIds('TaskReceiptStrip')[0];
+    const preferenceWrites = pref.writes.length;
+    harness.renderer.unmounts.length = 0;
+    button(tree, '收起工作台').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    let frame = findAll(tree, (node) => node.props?.['data-whaledock-layout'] === 'v0.10-p1')[0];
+    assert.equal(frame.props['data-whaledock-panel'], 'collapsed');
+    assert.match(frame.props.style.gridTemplateColumns, /^272px 36px /u);
+    assert.equal(classNode(tree, 'wd10-detailFrame').props.hidden, true);
+    assert.equal(classNode(tree, 'wd10-detailRail').props.hidden, false);
+    assert.match(textOf(classNode(tree, 'wd10-detailFrame')), /将发往 目标 A/u);
+    assert.equal(harness.renderer.fiberIds('CreatorDetail')[0], creatorDetailFiber);
+    assert.equal(harness.renderer.fiberIds('TaskReceiptStrip')[0], receiptFiber);
+    assert.equal(harness.renderer.unmounts.includes('CreatorDetail'), false);
+    assert.equal(harness.renderer.unmounts.includes('TaskReceiptStrip'), false);
+    assert.equal(pref.writes.length, preferenceWrites);
+    button(tree, '展开工作台').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    frame = findAll(tree, (node) => node.props?.['data-whaledock-layout'] === 'v0.10-p1')[0];
+    assert.equal(frame.props['data-whaledock-panel'], 'expanded');
+    assert.equal(classNode(tree, 'wd10-detailFrame').props.hidden, false);
+    assert.equal(classNode(tree, 'wd10-detailRail').props.hidden, true);
+    assert.match(textOf(tree), /将发往 目标 A/u);
+    assert.equal(harness.renderer.fiberIds('CreatorDetail')[0], creatorDetailFiber);
+    assert.equal(harness.renderer.fiberIds('TaskReceiptStrip')[0], receiptFiber);
+    assert.equal(pref.writes.length, preferenceWrites);
     button(tree, '确认发送').props.onClick();
     button(tree, '确认发送').props.onClick();
     tree = await settle(harness, props);
