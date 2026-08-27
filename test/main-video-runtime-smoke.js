@@ -838,7 +838,13 @@ async function run() {
       ), outcomeUnknown);
       assert.equal(fs.existsSync(path.join(outside, 'parent-swap.md')), false,
         '父目录 swap 在内容写入前必须被拒绝');
-      assert.equal(fs.statSync(path.join(moved, 'parent-swap.md')).size, 0);
+      const openedTargets = [
+        path.join(moved, 'parent-swap.md'),
+        path.join(controlled, 'parent-swap.md')
+      ].filter((candidate) => fs.existsSync(candidate));
+      assert.equal(openedTargets.length, 1,
+        '无论平台是否允许重命名含打开文件的目录，都只能留下原始空文件');
+      assert.equal(fs.statSync(openedTargets[0]).size, 0);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
       fs.rmSync(outside, { recursive: true, force: true });
