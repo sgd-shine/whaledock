@@ -185,8 +185,9 @@ try {
 
     const html = read('settings.html');
     assert(html.includes('id="contentViewMode"'));
-    assert(html.includes('<option value="content">内容</option>'));
-    assert(html.includes('<option value="sessions">会话</option>'));
+    assert(html.includes('AI 工作台默认页'));
+    assert(html.includes('<option value="content">创作文件</option>'));
+    assert(html.includes('<option value="sessions">对话记录</option>'));
     assert(!html.includes('id="contentViewHintSeen"'));
     assert(html.includes("source.contentViewMode === 'sessions' ? 'sessions' : 'content'"));
     assert(html.includes("querySelectorAll('input, button, select')"));

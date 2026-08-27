@@ -24,8 +24,8 @@
     },
     {
       "path": "plugin/lib/client.js",
-      "size": 246590,
-      "sha256": "14771600d78849681eddc0aaceb98473cbf8e7def01309fb8e4fbccf45ac7fd4"
+      "size": 247797,
+      "sha256": "20c7af40c5c5566954c80b5983091d6e41507ab50c224b769718f59cb5e3d02a"
     },
     {
       "path": "forks/ui-layout/package.json",
@@ -78,6 +78,6 @@
       "sha256": "0190da000df07a64e55566e84dd8f57c8135f2eacd7f7a461bda33cc6c7150c2"
     }
   ],
-  "totalBytes": 786851,
-  "digest": "e2af31daec657adc651f159ad60e76ea4409ec4f15d0a048277d452d61af4365"
+  "totalBytes": 788058,
+  "digest": "0f88c868b9a42911f234508b4d437bdf9c6186c5fdd5ea32f873f86ad6f5f1e4"
 }

@@ -850,7 +850,7 @@ window.__ModuleLoader__.load({
       if (plain(result) && (result.kind === 'action-error' || result.state === 'error')) {
         return boundedUiText(result.message || result.text, fallback, 180);
       }
-      if (snapshot?.code === 'outcome-unknown') return '操作结果未知；请先核对右栏和任务回执，不要重复点击。';
+      if (snapshot?.code === 'outcome-unknown') return '操作结果未知；请先核对右栏和任务状态，不要重复点击。';
       if (snapshot?.code === 'workspace-mismatch' || snapshot?.code === 'operation-stale') {
         return '工作区或内容已变化，本次没有继续执行。';
       }
@@ -877,8 +877,8 @@ window.__ModuleLoader__.load({
         children: [react_jsx_runtime.jsxs('div', {
           className: 'wd10-libraryHead',
           children: [
-            react_jsx_runtime.jsx('div', { className: 'wd10-eyebrow', children: 'WhaleDock' }),
-            react_jsx_runtime.jsx('h2', { children: '内容库' }),
+            react_jsx_runtime.jsx('div', { className: 'wd10-eyebrow', children: '创作文件' }),
+            react_jsx_runtime.jsx('h2', { children: '第1步 选择内容' }),
             workspace && react_jsx_runtime.jsx('p', { children: `当前工作区：${workspace.title}` }),
             react_jsx_runtime.jsx('p', { role: 'status', children: catalog.status === 'stale'
               ? `${copy} 自动刷新失败，以下是上次成功结果。` : copy }),
@@ -998,10 +998,10 @@ window.__ModuleLoader__.load({
         : preflight?.workspaceMatch === 'mismatch' ? '工作区不匹配'
           : '工作区无法确认';
       return react_jsx_runtime.jsxs('section', {
-        className: 'wd10-receipts', 'aria-label': '任务回执', children: [
+        className: 'wd10-receipts', 'aria-label': '任务状态', children: [
           react_jsx_runtime.jsxs('div', { className: 'wd10-receiptTitle', children: [
-            react_jsx_runtime.jsx('strong', { children: '任务回执' }),
-            react_jsx_runtime.jsx('span', { children: '预检、进度与结果都留在这里' })
+            react_jsx_runtime.jsx('strong', { children: '任务状态' }),
+            react_jsx_runtime.jsx('span', { children: '工作台交给右侧 AI 的进度与结果会回到这里' })
           ] }),
           preflight && react_jsx_runtime.jsxs('div', {
             className: 'wd10-receipt wd10-preflight', children: [
@@ -1021,16 +1021,16 @@ window.__ModuleLoader__.load({
             ]
           }),
           receiptState.status === 'loading' && react_jsx_runtime.jsx('p', {
-            className: 'wd10-feedback', children: '正在读取任务回执…'
+            className: 'wd10-feedback', children: '正在读取任务状态…'
           }),
           receiptState.status === 'error' && react_jsx_runtime.jsx('p', {
-            className: 'wd10-feedback', children: '任务回执暂时不可用；没有推断任务状态。'
+            className: 'wd10-feedback', children: '任务状态暂时不可用；没有推断当前进度。'
           }),
           receiptState.status === 'stale' && react_jsx_runtime.jsx('p', {
-            className: 'wd10-feedback', children: '回执刷新失败；以下保留上次成功结果，不代表当前状态。'
+            className: 'wd10-feedback', children: '任务状态刷新失败；以下保留上次成功结果，不代表当前状态。'
           }),
           receiptState.status === 'ready' && receiptState.receipts.length === 0
-            && react_jsx_runtime.jsx('p', { className: 'wd10-feedback', children: '还没有任务回执。' }),
+            && react_jsx_runtime.jsx('p', { className: 'wd10-feedback', children: '还没有任务状态。' }),
           ...receiptState.receipts.map((receipt) => react_jsx_runtime.jsxs('div', {
             className: 'wd10-receipt', 'data-status': receipt.status, children: [
               react_jsx_runtime.jsxs('div', { className: 'wd10-receiptHead', children: [
@@ -3131,11 +3131,11 @@ window.__ModuleLoader__.load({
             return;
           }
           setFeedback(value.message || (value.state === 'accepted'
-            ? `已提交到 ${boundedUiText(value.target, '目标会话', 96)}；任务回执会继续更新。`
+            ? `已提交到 ${boundedUiText(value.target, '目标会话', 96)}；任务状态会继续更新。`
             : value.state === 'rejected'
               ? `目标拒绝投递（${boundedUiText(value.reason, '原因未说明', 64)}）；没有重复发送。`
               : value.state === 'error' ? '提交失败；没有重复发送。'
-                : '提交结果未知；请核对任务回执，不要重复点击。'));
+                : '提交结果未知；请核对任务状态，不要重复点击。'));
           setReceiptRefresh((current) => current + 1);
           if (frozen.scope === 'block' && value.state === 'accepted') {
             setProposalRefresh((current) => current + 1);
@@ -3143,7 +3143,7 @@ window.__ModuleLoader__.load({
         } catch (_error) {
           if (actionAttempt.current === attempt) {
             setPreflight(null);
-            setFeedback('提交结果未知；请核对右栏和任务回执，不要重复点击。');
+            setFeedback('提交结果未知；请核对右栏和任务状态，不要重复点击。');
           }
         } finally {
           if (actionAbort.current === controller) actionAbort.current = null;
@@ -3161,9 +3161,9 @@ window.__ModuleLoader__.load({
             onClick: onAlign, children: alignment.pending ? '正在对齐…' : '一键对齐' })
         ] }),
         react_jsx_runtime.jsxs('header', { className: 'wd10-detailHead', children: [
-          react_jsx_runtime.jsx('div', { className: 'wd10-eyebrow', children: '当前内容' }),
+          react_jsx_runtime.jsx('div', { className: 'wd10-eyebrow', children: '第2步 推进当前内容' }),
           react_jsx_runtime.jsx('button', { ref: panelCollapseRef, type: 'button',
-            className: 'wd10-collapseButton', onClick: onPanelCollapse, children: '收起工作台' }),
+            className: 'wd10-collapseButton', onClick: onPanelCollapse, children: '只看 AI 对话' }),
           react_jsx_runtime.jsx('h1', { children: title }),
           react_jsx_runtime.jsx('p', { children: project
             ? `${project.workflowLabel} · ${project.updated ? `更新 ${project.updated}` : '更新时间未写明'}`
@@ -3502,7 +3502,7 @@ window.__ModuleLoader__.load({
             snapshot = snapshot && typeof snapshot === 'object'
               ? snapshot : preferences.getSnapshot();
           } catch (_error) {
-            setPreferenceError('视图偏好暂时不可用。');
+            setPreferenceError('视图设置暂时读不到；已按默认方式显示。');
             return;
           }
           if (snapshot?.contentViewMode === 'content' || snapshot?.contentViewMode === 'sessions') {
@@ -3517,7 +3517,7 @@ window.__ModuleLoader__.load({
           const unsubscribe = preferences.subscribe(sync);
           return typeof unsubscribe === 'function' ? unsubscribe : undefined;
         } catch (_error) {
-          setPreferenceError('视图偏好暂时不可用。');
+          setPreferenceError('视图设置暂时读不到；已按默认方式显示。');
         }
       }, [preferences]);
       react.useEffect(() => {
@@ -3716,17 +3716,19 @@ window.__ModuleLoader__.load({
 
       const writePreference = async (patch) => {
         if (preferences === undefined || typeof preferences.write !== 'function') {
-          setPreferenceError('当前视图已切换，但偏好未保存。');
+          setPreferenceError('本次切换只在当前窗口生效；不影响继续使用。');
           return;
         }
         try {
           const result = await preferences.write(patch);
-          setPreferenceError(result?.ok === false ? '当前视图已切换，但偏好未保存。' : '');
+          setPreferenceError(result?.ok === false
+            ? '本次切换只在当前窗口生效；不影响继续使用。' : '');
         } catch (_error) {
-          setPreferenceError('当前视图已切换，但偏好未保存。');
+          setPreferenceError('本次切换只在当前窗口生效；不影响继续使用。');
         }
       };
       const selectMode = (next) => {
+        if (next === 'content') setPanelCollapsed(false);
         setMode(next);
         if (!browserOnly) void writePreference({ contentViewMode: next });
       };
@@ -3772,9 +3774,9 @@ window.__ModuleLoader__.load({
         ] : [
           react_jsx_runtime.jsx('button', { type: 'button', role: 'tab',
             'aria-selected': mode === 'content', onClick: () => selectMode('content'),
-            children: '内容库' }),
+            children: '创作文件' }),
           react_jsx_runtime.jsx('button', { type: 'button', role: 'tab',
-            'aria-selected': mode === 'sessions', onClick: () => selectMode('sessions'), children: '会话' })
+            'aria-selected': mode === 'sessions', onClick: () => selectMode('sessions'), children: '对话记录' })
         ]
       });
       if (browserOnly && mode === 'content') {
@@ -3835,8 +3837,9 @@ window.__ModuleLoader__.load({
           ]
         });
       }
-      const left = mode === 'sessions' && mount.sidebarCollapsed
-        ? 56 : mount.viewport < 1120 ? 232 : 272;
+      // 受管工作台的左栏同时承载主路径说明和两个文字入口；不能沿用上游
+      // 原生 sidebar 的 56px 图标轨，否则最小窗口下“创作文件 / 对话记录”不可读。
+      const left = mount.viewport < 1120 ? 232 : 272;
       const detail = Math.min(440, Math.max(mount.viewport < 1120 ? 300 : 340,
         Math.round(mount.viewport * 0.31)));
       const activeProject = activeRoutingProject;
@@ -3847,26 +3850,38 @@ window.__ModuleLoader__.load({
       const selectedContent = visibleCatalog.projects.find((project) => (
         project.projectToken === selectedContentToken
       )) || visibleCatalog.projects[0];
+      const contentPanelHidden = mode === 'sessions' || panelCollapsed;
+      const contentRailHidden = mode === 'sessions' || !panelCollapsed;
       return react_jsx_runtime.jsxs('div', {
         ref: mount.frameRef,
         className: mount.frameClassName,
-        style: { gridTemplateColumns:
-          `${left}px ${panelCollapsed ? 36 : detail}px minmax(0, 1fr)` },
+        style: { gridTemplateColumns: mode === 'sessions'
+          ? `${left}px minmax(0, 1fr)`
+          : `${left}px ${panelCollapsed ? 36 : detail}px minmax(0, 1fr)` },
         'data-whaledock-layout': 'v0.10-p1',
         'data-whaledock-mode': 'content',
         'data-whaledock-left': mode === 'content' ? 'library' : 'sessions',
-        'data-whaledock-panel': panelCollapsed ? 'collapsed' : 'expanded',
+        'data-whaledock-panel': mode === 'sessions'
+          ? 'hidden' : panelCollapsed ? 'collapsed' : 'expanded',
         'data-details-collapsed': mount.columns.details === 0 || undefined,
         children: [
           react_jsx_runtime.jsxs('aside', { className: 'wd10-left', children: [
             modeSwitch,
+            react_jsx_runtime.jsx('p', { style: {
+              margin: '0 14px 8px', color: 'var(--dsw-alias-fg-secondary)',
+              fontSize: 11, lineHeight: 1.45
+            }, children: mode === 'content'
+              ? panelCollapsed
+                ? '左边选内容，点“返回当前内容”继续推进；右边 AI 执行'
+                : '左边选内容，中间推进，右边 AI 执行，结果回到这条内容'
+              : '左边选对话记录，右边继续和 AI 沟通；切回“创作文件”推进内容' }),
             preferenceError && react_jsx_runtime.jsx('p', {
               className: 'wd10-prefStatus', role: 'status', children: preferenceError
             }),
             mode === 'content' && !hintSeen && react_jsx_runtime.jsxs('div', {
               className: 'wd10-hint', role: 'status', children: [
                 react_jsx_runtime.jsx('span', { children:
-                  '左边「会话」是原生会话' + '与设置；「收起工作台」能让对话占满。' }),
+                  '“对话记录”会暂时隐藏中间内容区，切回“创作文件”即可继续推进。' }),
                 react_jsx_runtime.jsx('button', { type: 'button', onClick: () => {
                   setHintSeen(true);
                   void writePreference({ contentViewHintSeen: true });
@@ -3890,7 +3905,7 @@ window.__ModuleLoader__.load({
               hidden: mode !== 'sessions', children: mount.renderSidebar(left) })
           ] }),
           react_jsx_runtime.jsx('div', { className: 'wd10-detailFrame',
-            hidden: panelCollapsed, children: react_jsx_runtime.jsx(CreatorDetail, {
+            hidden: contentPanelHidden, children: react_jsx_runtime.jsx(CreatorDetail, {
               routingProject: activeProject,
               project: selectedContent,
               tab: creatorTab,
@@ -3910,9 +3925,9 @@ window.__ModuleLoader__.load({
               onProjectMutation: applyProjectMutation,
               onPublishCreated: applyPublishCreated
             }) }),
-          react_jsx_runtime.jsx('div', { className: 'wd10-detailRail', hidden: !panelCollapsed,
+          react_jsx_runtime.jsx('div', { className: 'wd10-detailRail', hidden: contentRailHidden,
             children: react_jsx_runtime.jsx('button', { ref: panelExpandButton, type: 'button',
-              onClick: () => setPanelCollapsed(false), children: '展开工作台' }) }),
+              onClick: () => setPanelCollapsed(false), children: '返回当前内容' }) }),
           react_jsx_runtime.jsxs('section', { className: 'wd10-chat',
             'aria-label': '原生对话', children: [
               react_jsx_runtime.jsx('div', { className: 'wd10-chatMain',

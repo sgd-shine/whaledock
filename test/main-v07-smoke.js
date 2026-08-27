@@ -38,13 +38,13 @@ async function run() {
       width: 1280, height: 820, cockpit: 'video', cockpitMode: 'cockpit', chatOpen: true
     }), {
       mode: 'cockpit-chat', visible: true,
-      bounds: { x: 0, y: 136, width: 1280, height: 684 }
+      bounds: { x: 0, y: 96, width: 1280, height: 724 }
     });
     assert.deepEqual(main.mainViewLayout({
       width: 960, height: 620, cockpit: 'video', cockpitMode: 'cockpit', chatOpen: true
     }), {
       mode: 'cockpit-chat', visible: true,
-      bounds: { x: 0, y: 136, width: 960, height: 484 }
+      bounds: { x: 0, y: 96, width: 960, height: 524 }
     });
     assert.deepEqual(main.mainViewLayout({
       width: 1280, height: 820, cockpit: 'video', cockpitMode: 'native'
@@ -52,7 +52,7 @@ async function run() {
       mode: 'classic', visible: true, bounds: { x: 132, y: 0, width: 1148, height: 820 }
     });
     assert.equal(main.mainViewLayout({
-      width: 960, height: 120, cockpit: 'video', cockpitMode: 'cockpit', chatOpen: true
+      width: 960, height: 96, cockpit: 'video', cockpitMode: 'cockpit', chatOpen: true
     }).visible, false, '顶部控件区不能被 child view 覆盖');
   });
 
@@ -117,12 +117,25 @@ async function run() {
     assert.doesNotMatch(html, /id="cockpit-panel"|id="cockpit-chat-placeholder"/);
     assert.doesNotMatch(html, /clamp\(340px,31vw,420px\)/);
     assert.match(html, /#cockpit-route[\s\S]*?height:136px/);
+    assert.match(html, /body\.cockpit-active\.chat-open #cockpit-route[\s\S]*?height:96px/);
+    assert.match(html, /body\.cockpit-active\.chat-open #route-stages[\s\S]*?display:none/);
+    assert.match(html, /body\.cockpit-active\.chat-open #cockpit-task-flow[\s\S]*?display:none/);
+    assert.match(html,
+      /body\.cockpit-active\.chat-open \.cockpit-brand \.eyebrow[\s\S]*?display:none/);
+    assert.match(html,
+      /body\.cockpit-active\.chat-open #cockpit-context-bridge-banner:not\(\[hidden\]\) strong[\s\S]*?display:inline/);
+    assert.match(html,
+      /body\.cockpit-active\.chat-open #cockpit-context-bridge-banner:not\(\[hidden\]\)[\s\S]*?top:50px; left:18px; right:18px; height:38px;[\s\S]*?white-space:normal/);
     assert.match(html, /#cockpit-scene[\s\S]*?top:136px/);
-    assert.match(html, /body\.cockpit-active\.chat-open #toast[\s\S]*?top:98px; bottom:auto; height:30px/);
+    assert.match(html,
+      /body\.cockpit-active\.chat-open #toast[\s\S]*?top:50px; bottom:auto;[\s\S]*?height:38px/);
+    assert.match(html,
+      /id="cockpit-workbench-guide" role="status" aria-live="polite"[\s\S]*创作文件推进内容 · 对话记录继续沟通/);
     assert.match(html, /connect-src 'none'/);
     assert.equal(/innerHTML|insertAdjacentHTML|outerHTML/.test(renderer), false);
     assert.match(renderer, /event\.key\.toLowerCase\(\) === 'k'/);
     assert.match(renderer, /chatOpen/);
+    assert.match(renderer, /chatOpen \? '返回创作流程' : 'AI 工作台 ⌘K'/);
     assert.match(preload, /shell:cockpit-view/);
     assert.match(preload, /shell:cockpit-theme/);
     assert.match(renderer, /api\.setCockpitTheme\(\{ themeId \}\)/);
@@ -130,6 +143,7 @@ async function run() {
     assert.match(mainSource, /active\.theme[\s\S]*不能从顶栏覆盖/);
     assert.doesNotMatch(html, /#22d3ee(?:1c|aa|33|0b|18|88)/);
     assert.match(mainSource, /const COCKPIT_HEADER_HEIGHT = 136/);
+    assert.match(mainSource, /const COCKPIT_CHAT_HEADER_HEIGHT = 96/);
     assert.doesNotMatch(mainSource, /COCKPIT_PANEL_|COCKPIT_DSH_TOP|cockpitChatCollapsed/);
     const viewBlock = mainSource.slice(
       mainSource.indexOf('const view = new WebContentsView'),
@@ -176,8 +190,9 @@ async function run() {
     assert.equal(/executeJavaScript|sendInputEvent|click\(/.test(block), false);
     assert.match(value, /accelerator: 'CommandOrControl\+K'/);
     const nativeToggle = value.slice(
-      value.indexOf("label: cockpitNativeMode ? '返回视频驾驶舱'"),
-      value.indexOf("{ type: 'separator' },", value.indexOf("label: cockpitNativeMode ? '返回视频驾驶舱'"))
+      value.indexOf("label: cockpitNativeMode ? '返回视频创作流程'"),
+      value.indexOf("{ type: 'separator' },",
+        value.indexOf("label: cockpitNativeMode ? '返回视频创作流程'"))
     );
     assert.match(nativeToggle, /dshView\.webContents\.focus\(\)/);
     assert.match(nativeToggle, /mainWindow\.webContents\.focus\(\)/);
