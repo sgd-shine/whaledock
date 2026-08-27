@@ -16,8 +16,8 @@ const shooting = require('../lib/video-shooting');
 const ROOT = path.join(__dirname, '..');
 const source = (name) => fs.readFileSync(path.join(ROOT, name), 'utf8').replace(/\r\n/g, '\n');
 const directoryIdentity = (target) => {
-  const stat = fs.lstatSync(target);
-  return { dev: stat.dev, ino: stat.ino };
+  const stat = fs.lstatSync(target, { bigint: true });
+  return { dev: String(stat.dev), ino: String(stat.ino) };
 };
 const documentBinding = (root, relativePath) => cockpit.readDocument(root, relativePath).binding;
 let passed = 0;
@@ -357,7 +357,7 @@ async function run() {
 
   await test('打法库 collection 只绑定有序 asset 版本，漂移与 A→B→A 可精确识别', async () => {
     const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-tactic-list-')));
-    const rootStat = fs.lstatSync(root);
+    const rootIdentity = directoryIdentity(root);
     const sourceRelativePath = '02_脚本/复盘源.md';
     const sourcePath = path.join(root, sourceRelativePath);
     const assetTexts = new Map([
@@ -371,7 +371,7 @@ async function run() {
       ].join('\n')]
     ]);
     const runtime = {
-      root, epoch: 13, rootIdentity: { dev: rootStat.dev, ino: rootStat.ino },
+      root, epoch: 13, rootIdentity,
       closed: false, projectTokens: new Map(), recoveryIssues: []
     };
     const scan = () => {
@@ -441,9 +441,9 @@ async function run() {
     const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-tactic-dedupe-')));
     const sourceRelativePath = '02_脚本/复盘.md';
     const sourcePath = path.join(root, sourceRelativePath);
-    const rootStat = fs.lstatSync(root);
+    const rootIdentity = directoryIdentity(root);
     const runtime = {
-      root, epoch: 12, rootIdentity: { dev: rootStat.dev, ino: rootStat.ino },
+      root, epoch: 12, rootIdentity,
       closed: false, projectTokens: new Map(), recoveryIssues: []
     };
     try {
@@ -506,9 +506,9 @@ async function run() {
         '---', 'title: 复盘固化', 'stage: review',
         'updated: 2026-08-25T12:30:00.000Z', '---', '', '已验证的打法正文。', ''
       ].join('\n'), 'utf8');
-      const stat = fs.lstatSync(root);
+      const rootIdentity = directoryIdentity(root);
       const runtime = {
-        root, epoch: 21, rootIdentity: { dev: stat.dev, ino: stat.ino },
+        root, epoch: 21, rootIdentity,
         closed: false, projectTokens: new Map(), recoveryIssues: []
       };
       const sourceDocument = cockpit.readDocument(root, sourceRelativePath);
@@ -888,11 +888,11 @@ async function run() {
 
   await test('拍摄历史只投影自有摘要，降序 token、partial 与 A→B→A 精确绑定', async () => {
     const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-history-main-')));
-    const rootStat = fs.lstatSync(root);
+    const rootIdentity = directoryIdentity(root);
     const runtime = {
       root, epoch: 31,
-      rootIdentity: { dev: rootStat.dev, ino: rootStat.ino },
-      rootIdentityKey: `${String(rootStat.dev)}:${String(rootStat.ino)}`,
+      rootIdentity,
+      rootIdentityKey: `${rootIdentity.dev}:${rootIdentity.ino}`,
       generation: 9, closed: false, recoveryIssues: [], projectTokens: new Map()
     };
     const recordText = (title, confirmed, retakes) => {
@@ -1319,10 +1319,10 @@ async function run() {
       const backup = path.join(directory, `.whaledock-recovery-${nonce}.bak`);
       fs.writeFileSync(tmpFile, replacementText);
       fs.writeFileSync(backup, oldText);
-      const rootStat = fs.lstatSync(tmp);
-      const directoryStat = fs.lstatSync(directory);
-      const targetStat = fs.lstatSync(backup);
-      const tmpStat = fs.lstatSync(tmpFile);
+      const rootStat = fs.lstatSync(tmp, { bigint: true });
+      const directoryStat = fs.lstatSync(directory, { bigint: true });
+      const targetStat = fs.lstatSync(backup, { bigint: true });
+      const tmpStat = fs.lstatSync(tmpFile, { bigint: true });
       fs.writeFileSync(journal, `${JSON.stringify({
         schemaVersion: 2,
         targetName: '稿.md',
@@ -1372,12 +1372,15 @@ async function run() {
 
   await test('CAS 绑定 root/父目录 inode，提交窗口换根不移动新工作区文件', async () => {
     const parent = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-cas-root-')));
-    const root = path.join(parent, 'workspace');
-    const oldRoot = path.join(parent, 'old-workspace');
-    fs.mkdirSync(path.join(root, '02_脚本'), { recursive: true });
+    const requestedRoot = path.join(parent, 'workspace');
+    fs.mkdirSync(path.join(requestedRoot, '02_脚本'), { recursive: true });
+    // 测试本身先绑定实际 canonical root，避免前置路径差异掩盖提交窗口的换根断言。
+    const root = fs.realpathSync(requestedRoot);
+    const oldRoot = path.join(path.dirname(root), 'old-workspace');
     const target = path.join(root, '02_脚本', '稿.md');
     fs.writeFileSync(target, '# 原工作区稿\n');
     const rootIdentity = directoryIdentity(root);
+    let rootSwapCompleted = false;
     assert.throws(() => main.atomicReplaceVideoText(
       root, '02_脚本/稿.md', cockpit.hashText('# 原工作区稿\n'), '# 鲸坞新稿\n', {
         rootIdentity,
@@ -1386,19 +1389,23 @@ async function run() {
           fs.renameSync(root, oldRoot);
           fs.mkdirSync(path.join(root, '02_脚本'), { recursive: true });
           fs.writeFileSync(path.join(root, '02_脚本', '稿.md'), '# 第三方新工作区稿\n');
+          rootSwapCompleted = true;
         }
       }
     ), (error) => error && error.code === 'ERR_VIDEO_ROOT_CHANGED');
+    assert.equal(rootSwapCompleted, true, '必须真正进入提交窗口并完成换根');
     assert.equal(fs.readFileSync(path.join(root, '02_脚本', '稿.md'), 'utf8'), '# 第三方新工作区稿\n');
     assert.deepEqual(fs.readdirSync(path.join(root, '02_脚本')), ['稿.md']);
     assert.equal(fs.readFileSync(path.join(oldRoot, '02_脚本', '稿.md'), 'utf8'), '# 原工作区稿\n');
 
-    const raceRoot = path.join(parent, 'race-workspace');
-    const raceOldRoot = path.join(parent, 'race-old-workspace');
-    fs.mkdirSync(path.join(raceRoot, '02_脚本'), { recursive: true });
+    const requestedRaceRoot = path.join(parent, 'race-workspace');
+    fs.mkdirSync(path.join(requestedRaceRoot, '02_脚本'), { recursive: true });
+    const raceRoot = fs.realpathSync(requestedRaceRoot);
+    const raceOldRoot = path.join(path.dirname(raceRoot), 'race-old-workspace');
     const raceTarget = path.join(raceRoot, '02_脚本', '稿.md');
     fs.writeFileSync(raceTarget, '# 竞态前原稿\n');
     const realRenameSync = fs.renameSync;
+    let renameRaceTriggered = false;
     try {
       assert.throws(() => main.atomicReplaceVideoText(
         raceRoot, '02_脚本/稿.md', cockpit.hashText('# 竞态前原稿\n'), '# 鲸坞竞态新稿\n', {
@@ -1408,6 +1415,7 @@ async function run() {
             fs.renameSync = (sourcePath, destinationPath) => {
               fs.renameSync = realRenameSync;
               if (sourcePath === raceTarget) {
+                renameRaceTriggered = true;
                 realRenameSync(raceRoot, raceOldRoot);
                 fs.mkdirSync(path.join(raceRoot, '02_脚本'), { recursive: true });
                 fs.writeFileSync(raceTarget, '# rename 瞬间的第三方稿\n');
@@ -1418,6 +1426,7 @@ async function run() {
         }
       ), (error) => error && error.code === 'ERR_VIDEO_RECOVERY_REQUIRED');
     } finally { fs.renameSync = realRenameSync; }
+    assert.equal(renameRaceTriggered, true, '必须真正进入 rename 瞬间的换根窗口');
     assert.equal(fs.readFileSync(raceTarget, 'utf8'), '# rename 瞬间的第三方稿\n');
     assert.deepEqual(fs.readdirSync(path.dirname(raceTarget)).sort(), ['稿.md']);
     assert.equal(fs.readFileSync(path.join(raceOldRoot, '02_脚本', '稿.md'), 'utf8'), '# 竞态前原稿\n');
@@ -1428,10 +1437,10 @@ async function run() {
     const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-root-id-'));
     const root = path.join(parent, 'workspace');
     fs.mkdirSync(root);
-    const stat = fs.lstatSync(root);
+    const rootIdentity = directoryIdentity(root);
     const runtime = {
       root: fs.realpathSync(root), closed: false,
-      rootIdentity: { dev: stat.dev, ino: stat.ino }
+      rootIdentity
     };
     assert.equal(main.assertVideoRuntimeIdentity(runtime), true);
     fs.renameSync(root, path.join(parent, 'old-workspace'));
