@@ -1193,9 +1193,9 @@ function renderCockpit() {
   document.body.classList.toggle('chat-open', active && cockpit.chatOpen === true);
   cockpitName.textContent = state.current ? state.current.name : '短视频创作台';
   const chatOpen = Boolean(active && cockpit.chatOpen === true);
-  toggleChat.textContent = chatOpen ? '返回现场' : '对话 ⌘K';
+  toggleChat.textContent = chatOpen ? '返回创作流程' : 'AI 工作台 ⌘K';
   toggleChat.setAttribute('aria-pressed', chatOpen ? 'true' : 'false');
-  toggleChat.title = chatOpen ? '返回视频创作现场' : '打开完整 dsh 对话现场';
+  toggleChat.title = chatOpen ? '返回视频创作流程' : '打开内容与 AI 对话同屏的工作台';
   renderCockpitTheme(cockpit && cockpit.theme);
   renderTaskFlow(cockpit && cockpit.taskFlow);
   renderRoute();

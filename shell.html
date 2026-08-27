@@ -150,16 +150,24 @@
       left:18px; width:auto; max-width:min(640px,calc(100vw - 36px));
       max-height:min(280px,calc(100vh - 36px));
     }
-    /* child WebContentsView 会覆盖 y=136 以下的 DOM；对话打开时把瞬时提示压成顶栏内单行，
-       避免现场操作的成功/失败消息在切换后被完整对话视图挡住。 */
+    /* AI 工作台的 child WebContentsView 从 y=96 开始；第二行完整保留安全告警，
+       避免处理方法被完整对话视图挡住。 */
     body.cockpit-active.chat-open #toast {
-      top:98px; bottom:auto; height:30px; padding:5px 10px;
-      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+      top:50px; bottom:auto; left:18px; right:18px; width:auto; max-width:none;
+      height:38px; padding:4px 10px;
+      white-space:normal; overflow:hidden;
     }
     body.cockpit-active #cockpit-context-bridge-banner:not([hidden]) {
       display:block; position:fixed; z-index:19; left:18px; right:18px; top:100px;
       height:30px; padding:5px 10px; white-space:nowrap; overflow:hidden;
       text-overflow:ellipsis;
+    }
+    body.cockpit-active.chat-open #cockpit-context-bridge-banner:not([hidden]) {
+      top:50px; left:18px; right:18px; height:38px; padding:4px 10px;
+      white-space:normal; overflow:visible; text-overflow:clip;
+    }
+    body.cockpit-active.chat-open #cockpit-context-bridge-banner:not([hidden]) strong {
+      display:inline; margin-right:7px;
     }
     body.chat-open #cockpit-scene { visibility:hidden; pointer-events:none; }
     #enter-cockpit { display:none; }
@@ -177,6 +185,32 @@
       display:grid; grid-template-columns:190px minmax(0,1fr) auto; grid-template-rows:82px 42px;
       align-items:center; column-gap:16px; padding:6px 18px 6px; border-bottom:1px solid var(--line);
       background:color-mix(in srgb,var(--panel) 88%,transparent); backdrop-filter:blur(20px);
+    }
+    body.cockpit-active.chat-open #cockpit-route {
+      height:96px; grid-template-columns:minmax(188px,230px) minmax(0,1fr) auto;
+      grid-template-rows:40px 42px; column-gap:14px; padding:7px 18px;
+    }
+    body.cockpit-active.chat-open #route-stages,
+    body.cockpit-active.chat-open #cockpit-task-flow,
+    body.cockpit-active.chat-open .cockpit-theme-picker,
+    body.cockpit-active.chat-open #exit-cockpit { display:none; }
+    body.cockpit-active.chat-open .cockpit-brand {
+      grid-column:1; grid-row:1; align-self:center;
+    }
+    body.cockpit-active.chat-open .cockpit-brand .mark {
+      width:32px; height:32px; border-radius:10px; font-size:15px;
+    }
+    body.cockpit-active.chat-open .cockpit-brand .eyebrow { display:none; }
+    #cockpit-workbench-guide {
+      display:none; margin:0; min-width:0; color:var(--muted); font-size:12px;
+      line-height:1.35; text-align:center; white-space:nowrap; overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    body.cockpit-active.chat-open #cockpit-workbench-guide {
+      display:block; grid-column:2; grid-row:1; align-self:center;
+    }
+    body.cockpit-active.chat-open .cockpit-route-actions {
+      grid-column:3; grid-row:1; align-self:center;
     }
     .cockpit-brand { grid-column:1; grid-row:1; display:flex; align-items:center; gap:10px; min-width:0; }
     .cockpit-brand .mark {
@@ -467,7 +501,7 @@
     <div id="actions"></div>
     <div id="action-note"></div>
     <div id="rail-foot">
-      <button id="enter-cockpit" type="button">◉ 返回视频驾驶舱</button>
+      <button id="enter-cockpit" type="button">◉ 返回视频创作流程</button>
       <button id="open-workspace" type="button">📁 打开工作区</button>
       <button id="open-settings" type="button">⚙ 设置…</button>
     </div>
@@ -480,6 +514,7 @@
         <div><span class="eyebrow">WHALEDOCK COCKPIT</span><strong id="cockpit-name">短视频创作台</strong><button id="cockpit-workspace" class="workspace-button" type="button">工作区：当前工作区</button></div>
       </div>
       <nav id="route-stages" aria-label="一条视频的航道"></nav>
+      <p id="cockpit-workbench-guide" role="status" aria-live="polite" aria-atomic="true">创作文件推进内容 · 对话记录继续沟通</p>
       <div class="cockpit-route-actions">
         <div class="cockpit-theme-picker" id="cockpit-theme-picker" title="鲸坞全局色系；不改变 Harness 对话页">
           <span id="cockpit-theme-swatch" aria-hidden="true"></span>
@@ -487,8 +522,8 @@
           <select id="cockpit-theme-select" aria-label="鲸坞全局色系"></select>
           <button id="open-theme-settings" type="button" aria-label="自定义鲸坞色系" title="打开设置，自定义主题文件">＋</button>
         </div>
-        <button class="ghost-button" id="toggle-chat" type="button" aria-pressed="false">对话 ⌘K</button>
-        <button class="ghost-button" id="exit-cockpit" type="button">退出驾驶舱</button>
+        <button class="ghost-button" id="toggle-chat" type="button" aria-pressed="false">AI 工作台 ⌘K</button>
+        <button class="ghost-button" id="exit-cockpit" type="button">经典侧栏（旧）</button>
       </div>
       <section id="cockpit-task-flow" aria-label="鲸坞任务流">
         <div class="panel-title"><strong>鲸坞任务流</strong><div id="task-state" data-state="offline"><span class="lamp"></span><span id="task-state-label">正在接线</span></div></div>

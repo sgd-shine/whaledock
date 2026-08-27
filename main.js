@@ -873,6 +873,9 @@ const SHELL_RAIL_WIDTH = 132;
 // 驾驶舱对话不再塞进右侧窄栏。它是航道下方的全宽现场；顶部只保留
 // 第一方航道与匿名任务摘要，完整 dsh Web UI 不注入、不裁切、不重载。
 const COCKPIT_HEADER_HEIGHT = 136;
+// 进入 AI 工作台后，九阶段航道与任务摘要让位，只留工作区身份、主路径提示和返回入口。
+// 这不是第二套驾驶舱，而是同一内容在右侧交给 AI 执行的工作状态。
+const COCKPIT_CHAT_HEADER_HEIGHT = 96;
 const VIDEO_WATCH_DEBOUNCE_MS = 220;
 const VIDEO_WATCH_FALLBACK_MS = 4000;
 const VIDEO_STAGE_LABELS = Object.freeze({
@@ -2513,7 +2516,7 @@ const WORKBENCH_INSTALL_LIMITS = Object.freeze({
 let workbenchCache = null;
 const WORKBENCH_REMEMBERED_LIMIT = 64;
 
-// 主 dsh 视图的唯一布局函数。经典台和「退出驾驶舱」精确沿用 v0.6 的 132px 左栏；
+// 主 dsh 视图的唯一布局函数。经典台和「经典侧栏（旧）」精确沿用 v0.6 的 132px 左栏；
 // 视频驾驶舱把完整 dsh 作为航道下方的全宽「对话现场」。现场模式只隐藏视图，
 // 不 destroy/reload，因此切回对话时会话、滚动位置和未发送草稿都还在。
 function mainViewLayout(options = {}) {
@@ -2528,7 +2531,9 @@ function mainViewLayout(options = {}) {
       bounds: { x: rail, y: 0, width: Math.max(0, width - rail), height }
     };
   }
-  const top = Math.min(height, COCKPIT_HEADER_HEIGHT);
+  const headerHeight = options.chatOpen === true
+    ? COCKPIT_CHAT_HEADER_HEIGHT : COCKPIT_HEADER_HEIGHT;
+  const top = Math.min(height, headerHeight);
   return {
     mode: options.chatOpen === true ? 'cockpit-chat' : 'cockpit',
     visible: options.chatOpen === true && width > 0 && height > top,
@@ -14039,7 +14044,7 @@ function workbenchMenuTemplate() {
     ...(active && active.cockpit === 'video' ? [
       { type: 'separator' },
       {
-        label: cockpitChatOpen ? '返回视频创作现场' : '打开驾驶舱对话',
+        label: cockpitChatOpen ? '返回创作流程' : '打开 AI 工作台',
         accelerator: 'CommandOrControl+K',
         click: () => {
           if (cockpitChatOpen) {
@@ -14052,7 +14057,7 @@ function workbenchMenuTemplate() {
         }
       },
       {
-        label: cockpitNativeMode ? '返回视频驾驶舱' : '退出驾驶舱看原生 dsh',
+        label: cockpitNativeMode ? '返回视频创作流程' : '打开经典侧栏（旧）',
         click: () => {
           cockpitNativeMode = !cockpitNativeMode;
           cockpitChatOpen = false;

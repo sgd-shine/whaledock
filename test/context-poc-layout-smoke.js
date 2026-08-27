@@ -675,7 +675,7 @@ async function main() {
     assert.equal(state.sessions.current, 'c');
   });
 
-  await test('受管壳层只有内容库｜会话一组入口，原生 New Session 与 details 都常驻可用', async () => {
+  await test('创作文件｜对话记录说清流程，对话记录模式隐藏但不卸载当前内容', async () => {
     const pref = preference({ contentViewMode: 'content', contentViewHintSeen: false });
     const state = {
       panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
@@ -705,26 +705,37 @@ async function main() {
     const leftColumn = classNode(tree, 'wd10-left');
     assert.equal(findAll(leftColumn, (node) => node.props?.role === 'tablist').length, 1);
     assert.deepEqual(findAll(leftColumn, (node) => node.props?.role === 'tab').map(textOf),
-      ['内容库', '会话']);
+      ['创作文件', '对话记录']);
     assert.equal(classNode(tree, 'wd10-leftView').props.hidden, false);
     assert.equal(classNode(tree, 'wd10-nativeSidebar').props.hidden, true);
     let frame = findAll(tree, (node) => node.props?.['data-whaledock-layout'] === 'v0.10-p1')[0];
     assert.equal(frame.props['data-whaledock-mode'], 'content');
     assert.equal(frame.props['data-whaledock-left'], 'library');
     assert.equal(frame.props['data-whaledock-panel'], 'expanded');
-    assert.match(textOf(tree), /左边「会话」是原生会话与设置；「收起工作台」能让对话占满。/u);
+    assert.match(textOf(tree), /左边选内容，中间推进，右边 AI 执行，结果回到这条内容/u);
+    assert.match(textOf(tree), /第1步 选择内容/u);
+    assert.match(textOf(tree), /第2步 推进当前内容/u);
+    assert.match(textOf(tree), /任务状态/u);
+    assert.match(textOf(tree), /工作台交给右侧 AI 的进度与结果/u);
+    assert.doesNotMatch(textOf(tree), /任务回执/u);
     const creatorDetailFiber = harness.renderer.fiberIds('CreatorDetail')[0];
     const receiptFiber = harness.renderer.fiberIds('TaskReceiptStrip')[0];
     button(tree, '知道了').props.onClick();
     await Promise.resolve();
     assert(pref.writes.some((patch) => patch.contentViewHintSeen === true));
-    button(tree, '会话').props.onClick();
+    button(tree, '对话记录').props.onClick();
     harness.renderer.unmounts.length = 0;
     tree = harness.renderer.render(harness.AppFrame, props);
     assert.equal(classNode(tree, 'wd10-leftView').props.hidden, true);
     assert.equal(classNode(tree, 'wd10-nativeSidebar').props.hidden, false);
     frame = findAll(tree, (node) => node.props?.['data-whaledock-layout'] === 'v0.10-p1')[0];
     assert.equal(frame.props['data-whaledock-left'], 'sessions');
+    assert.equal(frame.props['data-whaledock-panel'], 'hidden');
+    assert.equal(frame.props.style.gridTemplateColumns, '272px minmax(0, 1fr)');
+    assert.equal(classNode(tree, 'wd10-detailFrame').props.hidden, true);
+    assert.equal(classNode(tree, 'wd10-detailRail').props.hidden, true);
+    assert.match(textOf(tree),
+      /左边选对话记录，右边继续和 AI 沟通；切回“创作文件”推进内容/u);
     assert(findAll(tree, (node) => node.type === 'button' && node.props.className === 'wd10-workspaceChoice').length > 0);
     assert.equal(harness.renderer.unmounts.includes('CreatorSidebar'), false);
     assert.equal(harness.renderer.fiberIds('CreatorDetail')[0], creatorDetailFiber);
@@ -747,10 +758,17 @@ async function main() {
     assert.equal(harness.renderer.unmounts.includes('DetailsColumn'), false);
     assert.equal(classNode(tree, 'wd10-contentDetails').props['aria-hidden'], false);
     slots.length = 0;
-    button(tree, '内容库').props.onClick();
+    button(tree, '创作文件').props.onClick();
     tree = harness.renderer.render(harness.AppFrame, props);
     await Promise.resolve();
     assert(slots.some((call) => call.name === 'sidebar'));
+    frame = findAll(tree, (node) => node.props?.['data-whaledock-layout'] === 'v0.10-p1')[0];
+    assert.equal(frame.props['data-whaledock-panel'], 'expanded');
+    assert.match(frame.props.style.gridTemplateColumns, /^272px \d+px minmax\(0, 1fr\)$/u);
+    assert.equal(classNode(tree, 'wd10-detailFrame').props.hidden, false);
+    assert.equal(classNode(tree, 'wd10-detailRail').props.hidden, true);
+    assert.equal(harness.renderer.fiberIds('CreatorDetail')[0], creatorDetailFiber);
+    assert.equal(harness.renderer.fiberIds('TaskReceiptStrip')[0], receiptFiber);
     assert(pref.writes.some((patch) => patch.contentViewMode === 'content'));
     assert(pref.writes.every((patch) => Object.keys(patch).every((key) => (
       key === 'contentViewMode' || key === 'contentViewHintSeen'
@@ -766,6 +784,43 @@ async function main() {
     assert(defaultFrame);
     assert.equal(defaultFrame.props['data-whaledock-mode'], 'content');
     assert.equal(defaultFrame.props['data-whaledock-left'], 'library');
+
+    const returning = loadBundle({ whaledockShellPreferences:
+      preference({ contentViewMode: 'content', contentViewHintSeen: true }), sessions: { open() {} } });
+    const returningTree = returning.renderer.render(
+      returning.AppFrame,
+      uiProps(state, returning.integration, [])
+    );
+    assert.match(textOf(returningTree),
+      /左边选内容，中间推进，右边 AI 执行，结果回到这条内容/u,
+      '旧版已经看过一次性提示的用户也必须看到永久主路径');
+
+    const narrowSessions = loadBundle({ whaledockShellPreferences:
+      preference({ contentViewMode: 'sessions', contentViewHintSeen: true }), sessions: { open() {} } },
+    { width: 960 });
+    const narrowSessionsTree = narrowSessions.renderer.render(
+      narrowSessions.AppFrame,
+      uiProps({ ...state, panels: { ...state.panels, narrow: true, narrowExpanded: false } },
+        narrowSessions.integration, [])
+    );
+    const narrowSessionsFrame = findAll(narrowSessionsTree,
+      (node) => node.props?.['data-whaledock-layout'] === 'v0.10-p1')[0];
+    assert.equal(narrowSessionsFrame.props.style.gridTemplateColumns,
+      '232px minmax(0, 1fr)', '960px 的对话记录入口必须保持可读宽度');
+
+    const localOnlyPref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    localOnlyPref.write = async (patch) => {
+      localOnlyPref.writes.push({ ...patch });
+      return { ok: false, code: 'preferences-unavailable' };
+    };
+    const localOnly = loadBundle({ whaledockShellPreferences: localOnlyPref,
+      sessions: { open() {} } });
+    const localOnlyProps = uiProps(state, localOnly.integration, []);
+    let localOnlyTree = localOnly.renderer.render(localOnly.AppFrame, localOnlyProps);
+    button(localOnlyTree, '对话记录').props.onClick();
+    localOnlyTree = await settle(localOnly, localOnlyProps);
+    assert.match(textOf(localOnlyTree), /本次切换只在当前窗口生效；不影响继续使用/u);
+    assert.doesNotMatch(textOf(localOnlyTree), /偏好/u);
   });
 
   await test('content-shell 缺失时回退 rc.2 官方三栏且 SidebarRoot 仍由原 slot 渲染', async () => {
@@ -3333,20 +3388,37 @@ async function main() {
     const receiptFiber = harness.renderer.fiberIds('TaskReceiptStrip')[0];
     const preferenceWrites = pref.writes.length;
     harness.renderer.unmounts.length = 0;
-    button(tree, '收起工作台').props.onClick();
+    button(tree, '只看 AI 对话').props.onClick();
     tree = harness.renderer.render(harness.AppFrame, props);
     let frame = findAll(tree, (node) => node.props?.['data-whaledock-layout'] === 'v0.10-p1')[0];
     assert.equal(frame.props['data-whaledock-panel'], 'collapsed');
     assert.match(frame.props.style.gridTemplateColumns, /^272px 36px /u);
     assert.equal(classNode(tree, 'wd10-detailFrame').props.hidden, true);
     assert.equal(classNode(tree, 'wd10-detailRail').props.hidden, false);
+    assert.match(textOf(tree), /点“返回当前内容”继续推进/u);
     assert.match(textOf(classNode(tree, 'wd10-detailFrame')), /将发往 目标 A/u);
     assert.equal(harness.renderer.fiberIds('CreatorDetail')[0], creatorDetailFiber);
     assert.equal(harness.renderer.fiberIds('TaskReceiptStrip')[0], receiptFiber);
     assert.equal(harness.renderer.unmounts.includes('CreatorDetail'), false);
     assert.equal(harness.renderer.unmounts.includes('TaskReceiptStrip'), false);
     assert.equal(pref.writes.length, preferenceWrites);
-    button(tree, '展开工作台').props.onClick();
+
+    button(tree, '对话记录').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    assert.equal(classNode(tree, 'wd10-detailFrame').props.hidden, true);
+    button(tree, '创作文件').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    frame = findAll(tree, (node) => node.props?.['data-whaledock-layout'] === 'v0.10-p1')[0];
+    assert.equal(frame.props['data-whaledock-panel'], 'expanded',
+      '切回创作文件必须直接恢复可推进的中栏');
+    assert.equal(classNode(tree, 'wd10-detailFrame').props.hidden, false);
+    assert.equal(pref.writes.length, preferenceWrites + 2,
+      '只有两次主视图切换应写入持久偏好');
+    const writesAfterModeRoundTrip = pref.writes.length;
+
+    button(tree, '只看 AI 对话').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    button(tree, '返回当前内容').props.onClick();
     tree = harness.renderer.render(harness.AppFrame, props);
     frame = findAll(tree, (node) => node.props?.['data-whaledock-layout'] === 'v0.10-p1')[0];
     assert.equal(frame.props['data-whaledock-panel'], 'expanded');
@@ -3355,7 +3427,7 @@ async function main() {
     assert.match(textOf(tree), /将发往 目标 A/u);
     assert.equal(harness.renderer.fiberIds('CreatorDetail')[0], creatorDetailFiber);
     assert.equal(harness.renderer.fiberIds('TaskReceiptStrip')[0], receiptFiber);
-    assert.equal(pref.writes.length, preferenceWrites);
+    assert.equal(pref.writes.length, writesAfterModeRoundTrip);
     button(tree, '确认发送').props.onClick();
     button(tree, '确认发送').props.onClick();
     tree = await settle(harness, props);
