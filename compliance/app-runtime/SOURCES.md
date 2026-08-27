@@ -5,7 +5,7 @@
 - 根 App inventory：`inventory.json` 在 `redistributedComponents` 独立登记下列 fork，但它们不计入 npm `packageCount`
 - 内置 dsh runtime：`../SOURCES.json`（独立合规链，不包含下列 fork）
 - fork 信任源：`refork/dsh-ui/upstream-lock.json` SHA-256 `72b22c244c1e9e55207f4a8cb0fd6f6bcfaf1c3780159235df097d556e4f3aab`
-- context-poc 固定信任根：`lib/context-poc-baseline.json` digest `3e98e63c0bdf8b27eeb2ddf70175b51d07d60d5c878f9d8cd83d5e984b388f0b`
+- context-poc 固定信任根：`lib/context-poc-baseline.json` digest `e2af31daec657adc651f159ad60e76ea4409ec4f15d0a048277d452d61af4365`
 - MIT 原文：`licenses/redistributed-forks/DeepSeek-MIT.txt` SHA-256 `ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be`
 
 ## 组件
