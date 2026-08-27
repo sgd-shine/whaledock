@@ -1,14 +1,16 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-25（公开稳定版 v0.9.1；v0.10 Batch 3.0 创作链已完成并固化为本地 `0.10.0-alpha.2`）
+更新：2026-08-27（v0.10 alpha.2 已经 PR #19 合入 main；尚未打 tag 或公开发布）
 
 ## 阶段结论
 
-**公开稳定/恢复入口仍是 v0.9.1；所有后续功能开发统一从 `codex/v010-forward` 的 `0.10.0-alpha.2` 继续。v0.10 的受管上下文、可复现 refork、双合规链，以及内容卡与回执、概览、脚本、发布、复盘、拍摄六段创作链都已落地；本机唯一安装也已替换为 alpha.2。v0.10 尚未打 tag 或公开发布。**
+**公开稳定/恢复入口仍是 v0.9.1；v0.10 的受管上下文、可复现 refork、双合规链与六段创作链已经由 PR #19 合入 `main@742989a`。当前仍是 `0.10.0-alpha.2`，尚未打 tag 或公开发布；下一步是界面去冗余的独立批次。**
+
+- v0.10 止血 PR [#19](https://github.com/sgd-shine/whaledock/pull/19) 以 merge commit `742989ace0570f61d79bc6ff0fb580d757f9f533` 合入 main；最终 PR head `9bd7067f672f10584a4d87f9b93d9628f63879b0` 的 [PR CI 33070994859](https://github.com/sgd-shine/whaledock/actions/runs/33070994859) 与合并后的 [main CI 33071242784](https://github.com/sgd-shine/whaledock/actions/runs/33071242784) 均为 macOS、Ubuntu、Windows 全绿。备份 tag `backup/v010-alpha2-c0dc75a` 已远端回读到 `c0dc75a`；本批没有正式版本 tag 或 Release。
 
 - v0.9.1 PR [#18](https://github.com/sgd-shine/whaledock/pull/18) 合入 `main@670e32c1abd45f5cb355dfd6e6eeaa9ee18ff27c`；[main CI 32869008546](https://github.com/sgd-shine/whaledock/actions/runs/32869008546) 三平台全绿，[Release run 32869263514](https://github.com/sgd-shine/whaledock/actions/runs/32869263514) attempt 2 成功，[公开 v0.9.1 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.1) 为非 draft、非 prerelease且含 8 项资产。
 - 官方 macOS arm64 v0.9.1 已安装并完成版本、架构、签名、公证、Gatekeeper、两条成品合规链与 Spotlight 唯一安装回读；v0.9.1 ZIP/DMG 已另存为可恢复基线。本地 alpha 替换正式 App 前必须继续保留这份恢复路径。
-- v0.10 工作树为 `harness-desktop-v010-forward`，分支 `codex/v010-forward`，基线是上述 `main@670e32c`。当前版本 `0.10.0-alpha.2` 使用专属 `electron-builder.v0.10-preview.cjs` 和 `release-preview/`，不会沿用正式版本的发布输出。
+- v0.10 源码已进入上述 main；保留工作树 `harness-desktop-v010-forward` 与分支 `codex/v010-forward@9bd7067` 作为 alpha.2 提交线。当前版本 `0.10.0-alpha.2` 使用专属 `electron-builder.v0.10-preview.cjs` 和 `release-preview/`，不会沿用正式版本的发布输出。
 - Batch 1 已完成官方会话侧栏与内容视图共存、三栏项目/会话对齐、零会话显式连接、官方 `connect → input/migrate → sessions.open` 草稿链、偏好同步与 core journal 隔离、受管/非受管发送分流、桥不可用可见降级、认证重放/限流/尺寸门、受管页面重载重签，以及对齐/填草稿的迟到操作失效边界。
 - 受管内容模式的数据根固定为 WhaleDock-owned `userData/context-poc/v1/dsh-home`；可信前端资产另存为摘要绑定、只读、可复用的 asset root。正常退出、后端重启、App 重启或工作区切换不得删除数据根。用户 `~/.dsh` 始终不读、不写、不迁移、不清理，也不会自动导入；首次使用可能要重新配置模型。
 - Batch 2 已将两个修改后 dsh UI fork 收口为可复现重建：仅接受锁定的 rc.2 版本与 npm HTTPS URL，在网络前验证 lock/patch，并对下载时限与大小、ustar 路径/类型、zero-fuzz patch、EOF 换行、终态摘要、差异预算及并发提交/回滚 fail-closed。布局 fork 差异为 `42+/5-`，对话 fork 为 `19+/3-`。

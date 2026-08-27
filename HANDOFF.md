@@ -1,11 +1,14 @@
 # HANDOFF.md — WhaleDock v0.10+ 当前交接
 
-更新：2026-08-25 · 公开稳定版为 v0.9.1；v0.10 Batch 3.0 创作链已完成，本地执行线为 `0.10.0-alpha.2`
+更新：2026-08-27 · v0.10 alpha.2 已经 PR #19 合入 main；公开稳定版仍为 v0.9.1
 
 ## v0.10+ 当前执行线
 
-- 工作树：`harness-desktop-v010-forward`；分支：`codex/v010-forward`；基线：`main@670e32c1abd45f5cb355dfd6e6eeaa9ee18ff27c`；应用身份：`0.10.0-alpha.2`。
-- 新功能不再落到 v0.9.x。v0.9.1 只作为公开稳定/恢复入口；本地 alpha 使用独立 preview builder 与 `release-preview/`，没有 tag、没有 Release、没有发布授权。
+- 合并状态：PR [#19](https://github.com/sgd-shine/whaledock/pull/19) 已以 merge commit `742989ace0570f61d79bc6ff0fb580d757f9f533` 进入 main；最终 PR head 为 `9bd7067f672f10584a4d87f9b93d9628f63879b0`。
+- 自动证据：[PR CI 33070994859](https://github.com/sgd-shine/whaledock/actions/runs/33070994859) 与 [main CI 33071242784](https://github.com/sgd-shine/whaledock/actions/runs/33071242784) 均三平台全绿；Windows 的 refork、全量 smoke 与 runtime inventory 均通过。
+- 备份与版本边界：远端 `backup/v010-alpha2-c0dc75a` 精确指向 `c0dc75a`；应用身份仍是 `0.10.0-alpha.2`，没有正式 tag、没有 v0.10 Release。
+- 保留工作树：`harness-desktop-v010-forward`；分支：`codex/v010-forward@9bd7067`。后续功能从 main 新开独立分支，不回到 v0.9.x。
+- v0.9.1 只作为公开稳定/恢复入口；本地 alpha 使用独立 preview builder 与 `release-preview/`，没有 tag、没有 Release。
 - Batch 1 已完成固定资产清单、受管页面认证/重载重签、官方 SidebarRoot/三栏对齐、Host↔main 偏好协议与 core journal 隔离、官方草稿填充链、迟到 align/fillDraft 失效和可见降级；真实 rc.2 持久性证据保持有效。
 - Batch 2 已将 `ui-layout` / `ui-conversation` 收口为一条可复现 refork 命令：锁定 rc.2 npm 上游、网络前验 lock/patch、拒绝 redirect/超时/超限、严格解析 ustar 和 zero-fuzz unified patch，并校验终态摘要、差异预算与并发回滚。布局 fork 为 `42+/5-`，对话 fork 为 `19+/3-`；`--check` 从 `lib/config` 读取生产版本且不写工作树。
 - Batch 3.0 已完成内容卡与回执、概览、脚本、发布、复盘、拍摄六段能力回迁。原生拍摄现场支持全文分页、提词、重来/完成/缺口、二阶段收工、两份 owned 文件独占写入与历史读回；browserOnly 保留原生会话并提供 64 KiB 手动页内提词，零工作区读取、零 RPC、零写入。
