@@ -1,12 +1,12 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-29（v0.10 Batch 1c 首次路径零概念已完成源码与新档验收；独立 PR [#23](https://github.com/sgd-shine/whaledock/pull/23) 正在合入 main；尚未打 tag 或公开发布）
+更新：2026-08-29（v0.10 Batch 1c 首次路径零概念已随独立 PR [#23](https://github.com/sgd-shine/whaledock/pull/23) 合入 main，并从最终 main 重建安装本机 arm64 alpha；尚未打 tag 或公开发布）
 
 ## 阶段结论
 
-**公开稳定/恢复入口仍是 v0.9.1；v0.10 当前身份仍为 `0.10.0-alpha.2`。Batch 10、1b 已进入 `main@6317584`，Batch 1c 在独立 PR [#23](https://github.com/sgd-shine/whaledock/pull/23) 中完成“首次进入 AI 工作台即自动就位”的零概念路径。当前还要完成该 PR 的三平台 CI/合并、合并后 main CI 和最终 main 的本机 alpha 重建安装；这些机器门全部回读后，下一门才是 SGD 亲手跑 4 步卡并回“过”。在此之前不启动 v0.10.0 发版批次，不打 tag、不创建 Release。**
+**公开稳定/恢复入口仍是 v0.9.1；v0.10 当前身份仍为 `0.10.0-alpha.2`。Batch 10、1b、1c 已进入 `main@5ca193a`，PR 与合并后 main 的三平台 CI 全绿，最终 main 的本机 arm64 alpha 已完成重建、验签、合规回读与唯一安装。下一门只剩 SGD 亲手跑 4 步卡并回“过”；在此之前不启动 v0.10.0 发版批次，不打 tag、不创建 Release。**
 
-- v0.10 基础线 PR [#19](https://github.com/sgd-shine/whaledock/pull/19) 以 merge commit `742989ace0570f61d79bc6ff0fb580d757f9f533` 合入 main；Batch 10 PR [#20](https://github.com/sgd-shine/whaledock/pull/20) 与 Windows CI 修复 PR [#21](https://github.com/sgd-shine/whaledock/pull/21) 已合入，Batch 1b PR [#22](https://github.com/sgd-shine/whaledock/pull/22) 以 merge commit `631758479b3b996c260cbf5b80333e6b6cbc2ea8` 合入。该提交的 [main CI 33107845635](https://github.com/sgd-shine/whaledock/actions/runs/33107845635) 为 macOS、Ubuntu、Windows 全绿。Batch 1c 由独立 PR [#23](https://github.com/sgd-shine/whaledock/pull/23) 继续合入；本轮没有正式版本 tag 或 Release。
+- v0.10 基础线 PR [#19](https://github.com/sgd-shine/whaledock/pull/19)、Batch 10 PR [#20](https://github.com/sgd-shine/whaledock/pull/20)、Windows CI 修复 PR [#21](https://github.com/sgd-shine/whaledock/pull/21) 与 Batch 1b PR [#22](https://github.com/sgd-shine/whaledock/pull/22) 均已进入 main。Batch 1c PR [#23](https://github.com/sgd-shine/whaledock/pull/23) 以 merge commit `5ca193a7ff67752f49f915f8c250e0c85be3e712` 合入；最终 head 的 [PR CI 33240914493](https://github.com/sgd-shine/whaledock/actions/runs/33240914493) 与合并后的 [main CI 33240982250](https://github.com/sgd-shine/whaledock/actions/runs/33240982250) 均为 macOS、Ubuntu、Windows 全绿。本轮没有正式版本 tag 或 Release。
 
 - v0.9.1 PR [#18](https://github.com/sgd-shine/whaledock/pull/18) 合入 `main@670e32c1abd45f5cb355dfd6e6eeaa9ee18ff27c`；[main CI 32869008546](https://github.com/sgd-shine/whaledock/actions/runs/32869008546) 三平台全绿，[Release run 32869263514](https://github.com/sgd-shine/whaledock/actions/runs/32869263514) attempt 2 成功，[公开 v0.9.1 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.1) 为非 draft、非 prerelease且含 8 项资产。
 - 官方 macOS arm64 v0.9.1 已安装并完成版本、架构、签名、公证、Gatekeeper、两条成品合规链与 Spotlight 唯一安装回读；v0.9.1 ZIP/DMG 已另存为可恢复基线。本地 alpha 替换正式 App 前必须继续保留这份恢复路径。
@@ -22,11 +22,11 @@
 - 根 App 源码 runtime 仍为 52 包 / 830 文件，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`；修改后 fork 的上游 lock、patch、MIT 归属、许可原文与终态摘要已进入 `compliance/app-runtime/` 的独立来源材料，不计入 npm 包数，也不与内置 dsh runtime 合规链混合。
 - 真实内置 rc.2 在同一鲸坞持久 home 上完成两次冷启动：Host 握手与 HTTP 均两次成功，会话/cwd 恢复，home 和固定 asset root 复用，settings/credentials 哈希不变，退出后回环端口已关闭；结论为 `RC2_PERSISTENCE_PASS`。
 - Batch 3.0 源码态真实 UI 已走完“工作台拍摄页 → 原生全屏拍摄 → 二次确认写回 → 工作台历史读回”，并另行验证浏览器默认会话与手动页内提词；10 张关键帧、四段原始视频、20 秒索引视频及两份写回文件均已留在 `WhaleDock-evidence.noindex/v0.10-batch9/source-preview/programmatic-ui-flow/`。这不是上游模型、设备或平台数据证据。
-- 以下安装数字是 Batch 1b 前一轮 alpha.2 基线，不是 Batch 1c 最终 main 成品：arm64 成品 app-runtime 回读 `52 packages / 449 files`、tree `b363e6c80bca9296e566e0accae30143e6ce02dc53a660ec706bf8c9cfac1d02`，内置 dsh 合规回读 `copies=1`。App 为 Developer ID Application `wang jie (CS4NK76DA5)` + Hardened Runtime，`codesign --deep --strict` 通过；当时安装版 `app.asar` 与 no-index 构建归档同为 `6d66dda5…e62`，Spotlight 只发现 `/Applications/WhaleDock.app`。
-- 上述旧 alpha.2 no-index 归档 App / dsh runtime 为 `615,644 / 300,776 KiB`，安装位置实际分配为 `601,316 / 286,532 KiB`；`app.asar` `19,846,037 B`，ZIP / DMG `193,761,407 / 175,732,383 B`。Gatekeeper 当时明确回读 `Unnotarized Developer ID`，没有公证或 stapled ticket；Batch 1c 的新包体与哈希须从最终 main 重建后另行记录。
+- Batch 1c 最终 main arm64 alpha 成品的 app-runtime 回读为 `52 packages / 449 files`、tree `b363e6c80bca9296e566e0accae30143e6ce02dc53a660ec706bf8c9cfac1d02`、compliance `bff3775b9f87f605a9a71a907895ee1e159e5ff15e198fd3ddc00826ac59ec06`；内置 dsh 合规回读 `copies=1`。App 为 Developer ID Application `wang jie (CS4NK76DA5)` + Hardened Runtime，`codesign --deep --strict` 通过；安装版与 no-index 构建归档的 `app.asar` 均为 `fa8fd13de1f1870ca5b59606e84f1f8cd300d07a15ba1ac4cd5a162eb5c6fbeb`，Spotlight 与 `/Applications` 顶层都只发现 `/Applications/WhaleDock.app`。
+- 最终 no-index 归档 App / dsh runtime 为 `615,724 / 300,776 KiB`，安装位置实际分配为 `601,356 / 286,532 KiB`；`app.asar` 为 `19,856,711 B`。ZIP 为 `193,768,735 B`、SHA-256 `f989ba24073493ac10efa75116685e85964357b946a1389bcdcefbc0d06094d2`；DMG 为 `175,736,069 B`、SHA-256 `1b48581d6b1f061e17dcb4c4a85b9be9e7e4eb4fb346f99e528cb2b8da55498d`。DMG/ZIP 完整性通过；Gatekeeper 明确回读 `Unnotarized Developer ID`，没有公证或 stapled ticket。旧安装与上一份预览产物均已移入本批 no-index 备份目录，可恢复。
 - 安装态隔离运行日志回读 alpha.2/arm64 与内置 rc.2 就绪，并实际显示 4 张真实内容卡和 3/3 拍摄全文；安装态截图/短视频在 `WhaleDock-evidence.noindex/v0.10-batch9/installed-alpha2/`。真实指针全链以源码态视频为准，安装态程序化选择使用快照锚定 DOM 激活，不冒充人工点击。
 - 安装态首次沿用 macOS 受保护文稿目录 cwd 时，自动验收不代用户授予 TCC 权限；本轮改用专用、非受保护的测试工作区后完成运行验证。这只是验收环境调整，不是产品绕过 TCC，也不证明原受保护目录已获授权。
-- v0.10 尚未打 tag、没有公开 Release。Batch 1c 合 main 并从最终 main 重建本机 arm64 alpha 后，只向 SGD 提交 4 步人工卡；必须收到“过”才允许开始 v0.10.0 发版。正式发布仍需独立完成版本切换、三平台 CI、Apple 公证、公开资产回读；Windows/Intel 真机、真实模型与人工交互继续单列，不由源码 smoke、受控 UI 或本地安装代报。
+- v0.10 尚未打 tag、没有公开 Release。Batch 1c 已合 main，并已从最终 main 重建、静态回读和安装本机 arm64 alpha；现在只向 SGD 提交 4 步人工卡，必须收到“过”才允许开始 v0.10.0 发版。正式发布仍需独立完成版本切换、三平台 CI、Apple 公证、公开资产回读；Windows/Intel 真机、真实模型与人工交互继续单列，不由源码 smoke、受控 UI 或本地安装代报。
 
 ### v0.9.0 与早期侦察历史（以下为当时证据）
 

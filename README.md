@@ -9,14 +9,14 @@
 ## 当前状态（2026-08-29）
 
 - **公开稳定版是 v0.9.1**：tag 精确指向 `main@670e32c`；[main CI 32869008546](https://github.com/sgd-shine/whaledock/actions/runs/32869008546) 三平台全绿，[Release run 32869263514](https://github.com/sgd-shine/whaledock/actions/runs/32869263514) attempt 2 成功，[正式 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.1) 为非 draft、非 prerelease，共 8 项资产。v0.9.1 是稳定与恢复入口，不再是新功能开发线。
-- **新功能开发已经切到 v0.10+**：应用身份仍为 `0.10.0-alpha.2`。Batch 10、1b 已进入 main，Batch 1c 由独立 PR [#23](https://github.com/sgd-shine/whaledock/pull/23) 合入；本地预览包使用独立构建配置与 `release-preview/`，不会冒充正式 v0.10 Release。
+- **新功能开发已经切到 v0.10+**：应用身份仍为 `0.10.0-alpha.2`。Batch 10、1b、1c 已进入 `main@5ca193a`；Batch 1c 独立 PR [#23](https://github.com/sgd-shine/whaledock/pull/23) 及合并后 main 的三平台 CI 全绿。本地预览包使用独立构建配置与 `release-preview/`，不会冒充正式 v0.10 Release。
 - v0.10 的原生页面保留官方会话侧栏，同时加入内容视图、多项目对齐、受控草稿填充、发送前上下文闸门、偏好持久化和桥不可用时的可见降级。受管页面只在鲸坞自行拉起、精确内置 dsh `0.1.1-rc.2` 且固定资产清单逐文件通过时启用；外部或无法证明的 dsh 继续使用原生会话，不接管发送。
 - v0.10 受管模式使用鲸坞自己的持久 dsh 数据目录，跨后端重启、App 重启与工作区切换保留会话、设置、凭据、附件、存储和预设。它不会读取、迁移、覆盖或清理 `~/.dsh`；旧环境数据不会自动导入，首次使用可能需要重新配置模型。
 - **v0.10 Batch 1 已完成受管上下文与持久数据根收口**：真实 rc.2 双冷启动回读了 Host/HTTP、会话与 cwd 恢复、同一持久 home/asset root 复用，设置与凭据文件保持不变，退出后端口已关闭。
 - **v0.10 Batch 2 已完成可复现 refork 与双合规闭环**：两个 dsh UI fork 均由锁定的 rc.2 上游 tarball 和精确 patch 重建，布局 fork 差异为 `42+/5-`，对话 fork 为 `19+/3-`；未知版本在网络前拒绝，下载、tar、patch、差异预算与原子更新均有 fail-closed 守门。
 - **v0.10 创作链与首次路径已经接通**：真实内容卡与任务回执、概览决策、脚本块提案、发布检查单、复盘打法库、原生拍摄现场与浏览器页内提词均已接通。Batch 1c 让内容态只认工作台当前工作区：首次进入或从「对话记录」回来时，右栏会自动复用或打开对应会话，不再要求新用户理解或点击“对齐”；异常时才显示一句人话和明确按钮。统一 `npm run smoke` 实跑 **856 PASS / 44 个 ALL PASS**，layout **59/59 PASS**；当前 context 基线为 **15 个文件 / 810,828 B**，digest `16ffc4198355b93a1950965eece991d4b615d5005f63b3ab2da6933038496fb1`。
-- **arm64 alpha.2 已成为本机开发安装，但仍只是本地证据**：当前列出的成品数字来自 Batch 1b 前一轮安装基线，不是 Batch 1c 最终 main 成品。它使用 Developer ID Application + Hardened Runtime，回读根 App runtime `52 packages / 449 files`、单份内置 dsh 合规材料，Spotlight 只发现这一份 App；ZIP / DMG 为 `193,761,407 B` / `175,732,383 B`，归档 App / 内置 dsh runtime 为 `615,644 / 300,776 KiB`，`app.asar` 为 `19,846,037 B`。Gatekeeper 当时明确回读 `Unnotarized Developer ID`，没有公证或 stapled ticket；Batch 1c 新数字须从最终 main 重建后另记。
-- 安装态沿用 macOS 受保护文稿目录作为 cwd 时，自动验收不代用户授予 TCC 文件访问权限；已有运行验证使用专用、非受保护测试工作区。这不代表文稿目录权限已通过。v0.10 仍未发布；Batch 1c 合 main 后先重建本机 alpha 并等待 SGD 4 步卡回复“过”，之后才允许开始版本切换、tag、公证与公开 Release。Windows/Intel 真机、真实模型与人工体验仍是独立证据门。
+- **最终 main 的 arm64 alpha.2 已成为本机开发安装，但仍只是本地证据**：Developer ID Application + Hardened Runtime 与严格验签通过，回读根 App runtime `52 packages / 449 files`、单份内置 dsh 合规材料；Spotlight 只发现 `/Applications/WhaleDock.app`。ZIP / DMG 为 `193,768,735 B` / `175,736,069 B`，归档 App / 内置 dsh runtime 为 `615,724 / 300,776 KiB`，`app.asar` 为 `19,856,711 B`。Gatekeeper 明确回读 `Unnotarized Developer ID`，没有公证或 stapled ticket。
+- 安装态沿用 macOS 受保护文稿目录作为 cwd 时，自动验收不代用户授予 TCC 文件访问权限；已有运行验证使用专用、非受保护测试工作区。这不代表文稿目录权限已通过。v0.10 仍未发布；当前只等待 SGD 4 步卡回复“过”，之后才允许开始版本切换、tag、公证与公开 Release。Windows/Intel 真机、真实模型与人工体验仍是独立证据门。
 
 ## v0.2 带来了什么
 

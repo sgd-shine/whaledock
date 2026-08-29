@@ -1,11 +1,11 @@
 # HANDOFF.md — WhaleDock v0.10+ 当前交接
 
-更新：2026-08-29 · v0.10 Batch 10、1b 已合 main，Batch 1c 由独立 PR [#23](https://github.com/sgd-shine/whaledock/pull/23) 合入；公开稳定版仍为 v0.9.1
+更新：2026-08-29 · v0.10 Batch 10、1b、1c 已合 main；最终 main arm64 alpha 已重建并安装；公开稳定版仍为 v0.9.1
 
 ## v0.10+ 当前执行线
 
-- 合并状态：基础线 PR [#19](https://github.com/sgd-shine/whaledock/pull/19)、Batch 10 PR [#20](https://github.com/sgd-shine/whaledock/pull/20) 及其 Windows CI 修复 PR [#21](https://github.com/sgd-shine/whaledock/pull/21)、Batch 1b PR [#22](https://github.com/sgd-shine/whaledock/pull/22) 均已进入 main；Batch 1b merge 为 `631758479b3b996c260cbf5b80333e6b6cbc2ea8`。Batch 1c 由独立 PR [#23](https://github.com/sgd-shine/whaledock/pull/23) 合入，不与发版 PR 混合。
-- 自动证据：Batch 1b 合并后的 [main CI 33107845635](https://github.com/sgd-shine/whaledock/actions/runs/33107845635) 三平台全绿。Batch 1c 本地最终为 layout **59/59 PASS**、全仓 **856 PASS / 44 个 ALL PASS**，末行 `ALL PASS`；PR 与合并后 main CI 以本批最终链接为准。
+- 合并状态：基础线 PR [#19](https://github.com/sgd-shine/whaledock/pull/19)、Batch 10 PR [#20](https://github.com/sgd-shine/whaledock/pull/20) 及其 Windows CI 修复 PR [#21](https://github.com/sgd-shine/whaledock/pull/21)、Batch 1b PR [#22](https://github.com/sgd-shine/whaledock/pull/22) 均已进入 main。Batch 1c 独立 PR [#23](https://github.com/sgd-shine/whaledock/pull/23) 以 merge commit `5ca193a7ff67752f49f915f8c250e0c85be3e712` 合入，不与发版 PR 混合。
+- 自动证据：Batch 1c 最终 head 的 [PR CI 33240914493](https://github.com/sgd-shine/whaledock/actions/runs/33240914493) 与合并后的 [main CI 33240982250](https://github.com/sgd-shine/whaledock/actions/runs/33240982250) 均为 macOS、Ubuntu、Windows 全绿。本地最终为 layout **59/59 PASS**、全仓 **856 PASS / 44 个 ALL PASS**，末行 `ALL PASS`。
 - 备份与版本边界：远端 `backup/v010-alpha2-c0dc75a` 精确指向 `c0dc75a`；应用身份仍是 `0.10.0-alpha.2`，没有正式 tag、没有 v0.10 Release。
 - 后续功能从 main 新开独立分支，不回到 v0.9.x；旧 worktree/已合分支只在 v0.11 清理项中登记，本批不删。
 - v0.9.1 只作为公开稳定/恢复入口；本地 alpha 使用独立 preview builder 与 `release-preview/`，没有 tag、没有 Release。
@@ -19,11 +19,11 @@
 - 受管 v0.10 不读取、不写入、不迁移、不清理 `~/.dsh`，也不自动导入旧数据；设置页明确提示首次使用可能需要重新配置模型。该隔离边界是产品合同，不得写成历史数据丢失或已迁移。
 - 当前固定基线为 **15 文件 / 810,828 B**，digest `16ffc4198355b93a1950965eece991d4b615d5005f63b3ab2da6933038496fb1`。根 App 源码 runtime 为 52 包 / 830 文件，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`；修改后 fork 与内置 dsh runtime 继续使用两条独立合规身份。
 - 真实 rc.2 双冷启动为 `RC2_PERSISTENCE_PASS`：Host 握手×2、HTTP×2、会话/cwd 恢复、home/asset root 复用、settings/credentials 哈希不变，收尾后回环端口关闭。
-- 以下成品事实是 Batch 1b 前一轮 alpha.2 安装基线，不是 Batch 1c 最终 main 成品：app-runtime 回读 `52 packages / 449 files`、tree `b363e6c80bca9296e566e0accae30143e6ce02dc53a660ec706bf8c9cfac1d02`，内置 dsh 合规回读 `copies=1`。Developer ID `wang jie (CS4NK76DA5)`、Hardened Runtime 与严格验签通过；当时安装版 `app.asar` 与构建归档同为 `6d66dda5…e62`，Spotlight 唯一发现 `/Applications/WhaleDock.app`。
-- 上述旧 alpha.2 no-index 归档 App / dsh runtime 为 `615,644 / 300,776 KiB`，安装位置实际分配为 `601,316 / 286,532 KiB`；`app.asar` `19,846,037 B`，ZIP / DMG `193,761,407 / 175,732,383 B`。Gatekeeper 当时为 `Unnotarized Developer ID`，没有公证或 stapled ticket；Batch 1c 新数字必须从最终 main 重建后另记。
+- Batch 1c 最终 main arm64 alpha 成品的 app-runtime 回读为 `52 packages / 449 files`、tree `b363e6c80bca9296e566e0accae30143e6ce02dc53a660ec706bf8c9cfac1d02`、compliance `bff3775b9f87f605a9a71a907895ee1e159e5ff15e198fd3ddc00826ac59ec06`，内置 dsh 合规回读 `copies=1`。Developer ID `wang jie (CS4NK76DA5)`、Hardened Runtime 与严格验签通过；安装版和构建归档 `app.asar` 同为 `fa8fd13de1f1870ca5b59606e84f1f8cd300d07a15ba1ac4cd5a162eb5c6fbeb`，Spotlight 与 `/Applications` 顶层都只发现 `/Applications/WhaleDock.app`。
+- 最终 no-index 归档 App / dsh runtime 为 `615,724 / 300,776 KiB`，安装位置实际分配为 `601,356 / 286,532 KiB`；`app.asar` `19,856,711 B`。ZIP 为 `193,768,735 B`、SHA-256 `f989ba24073493ac10efa75116685e85964357b946a1389bcdcefbc0d06094d2`；DMG 为 `175,736,069 B`、SHA-256 `1b48581d6b1f061e17dcb4c4a85b9be9e7e4eb4fb346f99e528cb2b8da55498d`。两包完整性通过；Gatekeeper 为 `Unnotarized Developer ID`，没有公证或 stapled ticket；旧安装与上一份预览产物已可恢复地归档到本批 no-index 备份目录。
 - 源码态真实指针视频已走完拍摄、二次收工、两文件写回和历史读回；安装态回读 alpha.2/arm64、内置 rc.2、4 张内容卡与 3/3 拍摄全文。证据分别位于 `WhaleDock-evidence.noindex/v0.10-batch9/source-preview/` 与 `installed-alpha2/`。
 - TCC 边界：安装态沿用 macOS 受保护文稿目录 cwd 时，自动验收不代用户授权；本轮只改用专用非受保护测试工作区完成运行验证。这不是产品绕过权限，也不是原目录 TCC 已通过。
-- 后续功能开发统一基于 alpha.2，不再回到 v0.9.x 或 alpha.1。当前先完成 Batch 1c 独立 PR、三平台 CI/合并与合并后 main CI，再从最终 main 重建并安装 arm64 alpha，最后交给 SGD 跑 4 步卡；SGD 未明确回复“过”，不得开始 v0.10.0 发版、不得打 tag 或创建 Release。Windows/Intel 真机、真实模型和人工可见体验仍是独立证据门。
+- 后续功能开发统一基于 alpha.2，不再回到 v0.9.x 或 alpha.1。Batch 1c 独立 PR、三平台 PR/main CI 与最终 main arm64 alpha 重建安装均已完成；当前只交给 SGD 跑 4 步卡。SGD 未明确回复“过”，不得开始 v0.10.0 发版、不得打 tag 或创建 Release。Windows/Intel 真机、真实模型和人工可见体验仍是独立证据门。
 
 ## SGD 人工验收与 Batch 2 门
 
