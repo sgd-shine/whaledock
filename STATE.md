@@ -1,12 +1,12 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-29（v0.10 Batch 1c 首次路径零概念已完成源码与新档验收；本文件随独立 PR 合入 main；尚未打 tag 或公开发布）
+更新：2026-08-29（v0.10 Batch 1c 首次路径零概念已完成源码与新档验收；独立 PR [#23](https://github.com/sgd-shine/whaledock/pull/23) 正在合入 main；尚未打 tag 或公开发布）
 
 ## 阶段结论
 
-**公开稳定/恢复入口仍是 v0.9.1；v0.10 当前身份仍为 `0.10.0-alpha.2`。Batch 10、1b 已进入 `main@6317584`，Batch 1c 在本文件所随独立 PR 中完成“首次进入 AI 工作台即自动就位”的零概念路径。当前还要完成该 PR 的三平台 CI/合并、合并后 main CI 和最终 main 的本机 alpha 重建安装；这些机器门全部回读后，下一门才是 SGD 亲手跑 4 步卡并回“过”。在此之前不启动 v0.10.0 发版批次，不打 tag、不创建 Release。**
+**公开稳定/恢复入口仍是 v0.9.1；v0.10 当前身份仍为 `0.10.0-alpha.2`。Batch 10、1b 已进入 `main@6317584`，Batch 1c 在独立 PR [#23](https://github.com/sgd-shine/whaledock/pull/23) 中完成“首次进入 AI 工作台即自动就位”的零概念路径。当前还要完成该 PR 的三平台 CI/合并、合并后 main CI 和最终 main 的本机 alpha 重建安装；这些机器门全部回读后，下一门才是 SGD 亲手跑 4 步卡并回“过”。在此之前不启动 v0.10.0 发版批次，不打 tag、不创建 Release。**
 
-- v0.10 基础线 PR [#19](https://github.com/sgd-shine/whaledock/pull/19) 以 merge commit `742989ace0570f61d79bc6ff0fb580d757f9f533` 合入 main；Batch 10 PR [#20](https://github.com/sgd-shine/whaledock/pull/20) 与 Windows CI 修复 PR [#21](https://github.com/sgd-shine/whaledock/pull/21) 已合入，Batch 1b PR [#22](https://github.com/sgd-shine/whaledock/pull/22) 以 merge commit `631758479b3b996c260cbf5b80333e6b6cbc2ea8` 合入。该提交的 [main CI 33107845635](https://github.com/sgd-shine/whaledock/actions/runs/33107845635) 为 macOS、Ubuntu、Windows 全绿。Batch 1c 由本文件所随独立 PR 继续合入；本轮没有正式版本 tag 或 Release。
+- v0.10 基础线 PR [#19](https://github.com/sgd-shine/whaledock/pull/19) 以 merge commit `742989ace0570f61d79bc6ff0fb580d757f9f533` 合入 main；Batch 10 PR [#20](https://github.com/sgd-shine/whaledock/pull/20) 与 Windows CI 修复 PR [#21](https://github.com/sgd-shine/whaledock/pull/21) 已合入，Batch 1b PR [#22](https://github.com/sgd-shine/whaledock/pull/22) 以 merge commit `631758479b3b996c260cbf5b80333e6b6cbc2ea8` 合入。该提交的 [main CI 33107845635](https://github.com/sgd-shine/whaledock/actions/runs/33107845635) 为 macOS、Ubuntu、Windows 全绿。Batch 1c 由独立 PR [#23](https://github.com/sgd-shine/whaledock/pull/23) 继续合入；本轮没有正式版本 tag 或 Release。
 
 - v0.9.1 PR [#18](https://github.com/sgd-shine/whaledock/pull/18) 合入 `main@670e32c1abd45f5cb355dfd6e6eeaa9ee18ff27c`；[main CI 32869008546](https://github.com/sgd-shine/whaledock/actions/runs/32869008546) 三平台全绿，[Release run 32869263514](https://github.com/sgd-shine/whaledock/actions/runs/32869263514) attempt 2 成功，[公开 v0.9.1 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.1) 为非 draft、非 prerelease且含 8 项资产。
 - 官方 macOS arm64 v0.9.1 已安装并完成版本、架构、签名、公证、Gatekeeper、两条成品合规链与 Spotlight 唯一安装回读；v0.9.1 ZIP/DMG 已另存为可恢复基线。本地 alpha 替换正式 App 前必须继续保留这份恢复路径。

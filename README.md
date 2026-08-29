@@ -9,7 +9,7 @@
 ## 当前状态（2026-08-29）
 
 - **公开稳定版是 v0.9.1**：tag 精确指向 `main@670e32c`；[main CI 32869008546](https://github.com/sgd-shine/whaledock/actions/runs/32869008546) 三平台全绿，[Release run 32869263514](https://github.com/sgd-shine/whaledock/actions/runs/32869263514) attempt 2 成功，[正式 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.1) 为非 draft、非 prerelease，共 8 项资产。v0.9.1 是稳定与恢复入口，不再是新功能开发线。
-- **新功能开发已经切到 v0.10+**：应用身份仍为 `0.10.0-alpha.2`。Batch 10、1b 已进入 main，Batch 1c 由本文件所在独立 PR 合入；本地预览包使用独立构建配置与 `release-preview/`，不会冒充正式 v0.10 Release。
+- **新功能开发已经切到 v0.10+**：应用身份仍为 `0.10.0-alpha.2`。Batch 10、1b 已进入 main，Batch 1c 由独立 PR [#23](https://github.com/sgd-shine/whaledock/pull/23) 合入；本地预览包使用独立构建配置与 `release-preview/`，不会冒充正式 v0.10 Release。
 - v0.10 的原生页面保留官方会话侧栏，同时加入内容视图、多项目对齐、受控草稿填充、发送前上下文闸门、偏好持久化和桥不可用时的可见降级。受管页面只在鲸坞自行拉起、精确内置 dsh `0.1.1-rc.2` 且固定资产清单逐文件通过时启用；外部或无法证明的 dsh 继续使用原生会话，不接管发送。
 - v0.10 受管模式使用鲸坞自己的持久 dsh 数据目录，跨后端重启、App 重启与工作区切换保留会话、设置、凭据、附件、存储和预设。它不会读取、迁移、覆盖或清理 `~/.dsh`；旧环境数据不会自动导入，首次使用可能需要重新配置模型。
 - **v0.10 Batch 1 已完成受管上下文与持久数据根收口**：真实 rc.2 双冷启动回读了 Host/HTTP、会话与 cwd 恢复、同一持久 home/asset root 复用，设置与凭据文件保持不变，退出后端口已关闭。

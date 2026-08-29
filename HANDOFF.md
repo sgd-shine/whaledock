@@ -1,10 +1,10 @@
 # HANDOFF.md — WhaleDock v0.10+ 当前交接
 
-更新：2026-08-29 · v0.10 Batch 10、1b 已合 main，Batch 1c 随本文件所在独立 PR 合入；公开稳定版仍为 v0.9.1
+更新：2026-08-29 · v0.10 Batch 10、1b 已合 main，Batch 1c 由独立 PR [#23](https://github.com/sgd-shine/whaledock/pull/23) 合入；公开稳定版仍为 v0.9.1
 
 ## v0.10+ 当前执行线
 
-- 合并状态：基础线 PR [#19](https://github.com/sgd-shine/whaledock/pull/19)、Batch 10 PR [#20](https://github.com/sgd-shine/whaledock/pull/20) 及其 Windows CI 修复 PR [#21](https://github.com/sgd-shine/whaledock/pull/21)、Batch 1b PR [#22](https://github.com/sgd-shine/whaledock/pull/22) 均已进入 main；Batch 1b merge 为 `631758479b3b996c260cbf5b80333e6b6cbc2ea8`。Batch 1c 由本文件所在独立 PR 合入，不与发版 PR 混合。
+- 合并状态：基础线 PR [#19](https://github.com/sgd-shine/whaledock/pull/19)、Batch 10 PR [#20](https://github.com/sgd-shine/whaledock/pull/20) 及其 Windows CI 修复 PR [#21](https://github.com/sgd-shine/whaledock/pull/21)、Batch 1b PR [#22](https://github.com/sgd-shine/whaledock/pull/22) 均已进入 main；Batch 1b merge 为 `631758479b3b996c260cbf5b80333e6b6cbc2ea8`。Batch 1c 由独立 PR [#23](https://github.com/sgd-shine/whaledock/pull/23) 合入，不与发版 PR 混合。
 - 自动证据：Batch 1b 合并后的 [main CI 33107845635](https://github.com/sgd-shine/whaledock/actions/runs/33107845635) 三平台全绿。Batch 1c 本地最终为 layout **59/59 PASS**、全仓 **856 PASS / 44 个 ALL PASS**，末行 `ALL PASS`；PR 与合并后 main CI 以本批最终链接为准。
 - 备份与版本边界：远端 `backup/v010-alpha2-c0dc75a` 精确指向 `c0dc75a`；应用身份仍是 `0.10.0-alpha.2`，没有正式 tag、没有 v0.10 Release。
 - 后续功能从 main 新开独立分支，不回到 v0.9.x；旧 worktree/已合分支只在 v0.11 清理项中登记，本批不删。
