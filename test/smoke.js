@@ -13,7 +13,8 @@ const config = require('../lib/config');
 const log = require('../lib/log');
 const update = require('../lib/update');
 const hotfixBuild = require('../scripts/hotfix-build-config');
-const previewBuild = require('../electron-builder.v0.10-preview.cjs');
+const contextPocManifest = require('../scripts/context-poc-manifest');
+const formalBuild = require('../electron-builder.v0.10.cjs');
 const macosBuildVisibility = require('../scripts/macos-build-visibility');
 const macosCodesign = require('../scripts/macos-codesign');
 
@@ -281,20 +282,72 @@ async function main() {
 
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
   const sourceContextResources = pkg.build.extraResources.filter(hotfixBuild.isContextPocResource);
-  const previewContextResources = previewBuild.extraResources.filter(hotfixBuild.isContextPocResource);
-  const previewScripts = [
+  const formalContextResources = formalBuild.extraResources.filter(hotfixBuild.isContextPocResource);
+  const formalScripts = [
     pkg.scripts['dist:mac:arm64'],
     pkg.scripts['dist:mac:x64'],
     pkg.scripts['dist:win']
   ];
-  check('packaging: v0.10 alpha 预览身份、独立输出与 context-poc 携带合同',
-    pkg.version === '0.10.0-alpha.2'
-      && previewBuild.directories.output === 'release-preview'
+  check('packaging: v0.10 正式身份、release 输出与 context-poc 携带合同',
+    pkg.version === '0.10.0'
+      && formalBuild.directories.output === 'release'
       && sourceContextResources.length === 1
-      && previewContextResources.length === 1
-      && previewScripts.every((script) =>
-        script.includes('--config electron-builder.v0.10-preview.cjs')
+      && formalContextResources.length === 1
+      && formalScripts.every((script) =>
+        script.includes('--config electron-builder.v0.10.cjs')
           && script.includes('--publish never')));
+  const previewSource = fs.readFileSync(
+    path.join(__dirname, '..', 'electron-builder.v0.10-preview.cjs'),
+    'utf8'
+  );
+  check('packaging: v0.10 alpha 预览配置保留独立版本锁与输出目录',
+    previewSource.includes("const PREVIEW_VERSION = '0.10.0-alpha.2';")
+      && previewSource.includes("output: 'release-preview'"));
+
+  const packageModulePath = require.resolve('../package.json');
+  const formalModulePath = require.resolve('../electron-builder.v0.10.cjs');
+  const committedPackageExports = require.cache[packageModulePath].exports;
+  let wrongFormalVersionRejected = false;
+  try {
+    delete require.cache[formalModulePath];
+    require.cache[packageModulePath].exports = { ...committedPackageExports, version: '0.10.1' };
+    require(formalModulePath);
+  } catch (_error) {
+    wrongFormalVersionRejected = true;
+  } finally {
+    require.cache[packageModulePath].exports = committedPackageExports;
+    delete require.cache[formalModulePath];
+  }
+  check('packaging: v0.10 正式配置拒绝错版 package', wrongFormalVersionRejected);
+
+  const packagedResources = path.join(tmp, 'v010-packaged-resources');
+  fs.mkdirSync(packagedResources, { recursive: true });
+  fs.cpSync(
+    path.join(__dirname, '..', 'context-poc'),
+    path.join(packagedResources, 'context-poc'),
+    { recursive: true }
+  );
+  const packagedReceipt = contextPocManifest.verifyPackagedResources(packagedResources);
+  fs.writeFileSync(path.join(packagedResources, 'context-poc', 'unexpected.txt'), 'unexpected');
+  let extraPackagedFileRejected = false;
+  try { contextPocManifest.verifyPackagedResources(packagedResources); }
+  catch (_error) { extraPackagedFileRejected = true; }
+  fs.rmSync(path.join(packagedResources, 'context-poc', 'unexpected.txt'));
+  const packagedClient = path.join(packagedResources, 'context-poc', 'plugin', 'lib', 'client.js');
+  fs.appendFileSync(packagedClient, '\n// tampered\n');
+  let tamperedPackagedFileRejected = false;
+  try { contextPocManifest.verifyPackagedResources(packagedResources); }
+  catch (_error) { tamperedPackagedFileRejected = true; }
+  fs.rmSync(packagedClient);
+  let missingPackagedFileRejected = false;
+  try { contextPocManifest.verifyPackagedResources(packagedResources); }
+  catch (_error) { missingPackagedFileRejected = true; }
+  check('packaging: v0.10 成品 context-poc 精确树与逐字节信任根 fail-closed',
+    packagedReceipt.files === contextPocManifest.SOURCE_FILES.length
+      && packagedReceipt.digest === contextPocManifest.readBaseline().digest
+      && extraPackagedFileRejected
+      && tamperedPackagedFileRejected
+      && missingPackagedFileRejected);
 
   const hotfixPackage = { ...pkg, version: hotfixBuild.HOTFIX_VERSION };
   const hotfixConfig = hotfixBuild.createHotfixBuildConfig(hotfixPackage);
@@ -372,18 +425,23 @@ async function main() {
   );
   const publishStepOffset = releaseWorkflow.indexOf('  publish-release:');
   const publishStep = releaseWorkflow.slice(publishStepOffset);
-  const hotfixConfigUseCount = (releaseWorkflow.match(/--config electron-builder\.v0\.9\.1\.cjs/g) || []).length;
+  const formalConfigUseCount = (releaseWorkflow.match(/--config electron-builder\.v0\.10\.cjs/g) || []).length;
+  const legacyConfigUseCount = (releaseWorkflow.match(/--config electron-builder\.v0\.9\.1\.cjs/g) || []).length;
   const hotfixReadbackCount = (releaseWorkflow.match(/hotfix-build-config\.js "?--resources/g) || []).length;
-  check('packaging: v0.9.1 三平台构建与全载体回读都经过实验资产排除门',
-    hotfixConfigUseCount === 3
-      && hotfixReadbackCount >= 8
-      && publishStep.includes('## v0.9.1 更新')
-      && publishStep.includes('切换不再“点了没反应”')
-      && publishStep.includes('安全启动可见降级')
-      && publishStep.includes('本版不含 v0.10 实验功能')
-      && publishStep.includes('默认关闭的壳侧预备代码仍在')
-      && resumeWorkflow.includes('hotfix-build-config.js --resources="$mount_dir/WhaleDock.app/Contents/Resources"')
-      && resumeWorkflow.includes('## v0.9.1 更新'));
+  const contextReadbackCount = (releaseWorkflow.match(/context-poc-manifest\.js "?--resources/g) || []).length;
+  const requiredSessionSentence = 'v0.10 用鲸坞自己的会话数据目录，`~/.dsh` 不读不写不迁移，第一次进 AI 工作台可能要重新配一次模型。';
+  check('packaging: v0.10 三平台构建与全载体回读都经过 context-poc 包含校验门',
+    formalConfigUseCount === 3
+      && legacyConfigUseCount === 0
+      && hotfixReadbackCount === 0
+      && contextReadbackCount >= 8
+      && publishStep.includes('同屏创作台把左边选内容、中间推进任务、右边交给 AI 执行放在一屏，执行结果会回到这条内容。')
+      && publishStep.includes(requiredSessionSentence)
+      && publishStep.includes('Windows 仍为实验性支持（未真机验证）。')
+      && !publishStep.includes('本版不含 v0.10 实验功能')
+      && resumeWorkflow.includes('context-poc-manifest.js --resources="$mount_dir/WhaleDock.app/Contents/Resources"')
+      && !resumeWorkflow.includes('hotfix-build-config.js --resources=')
+      && resumeWorkflow.includes(requiredSessionSentence));
   check('packaging: 发布仅下载 final macOS 与 Windows 成品，排除 pending 覆盖',
     publishStepOffset > 0
       && publishStep.includes('name: whaledock-mac-${{ github.ref_name }}')

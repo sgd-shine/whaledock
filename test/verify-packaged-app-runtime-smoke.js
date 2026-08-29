@@ -472,18 +472,19 @@ test('CI、Release 与续公证覆盖两套合规和全部安装载体', () => {
   ]) assert.equal(release.includes(expected), true, expected);
   assert.equal((release.match(/verify-packaged-compliance\.js/g) || []).length >= 9, true);
   assert.equal((release.match(/verify-packaged-app-runtime\.js/g) || []).length >= 8, true);
-  assert.match(release, /hotfix-build-config\.js --resources=release\/\.app-archives\.noindex/);
-  assert.match(resume, /hotfix-build-config\.js --resources="\$mount_dir\/WhaleDock\.app\/Contents\/Resources"/);
+  assert.match(release, /context-poc-manifest\.js --resources=release\/\.app-archives\.noindex/);
+  assert.match(resume, /context-poc-manifest\.js --resources="\$mount_dir\/WhaleDock\.app\/Contents\/Resources"/);
+  assert.equal(release.includes('hotfix-build-config.js --resources='), false);
+  assert.equal(resume.includes('hotfix-build-config.js --resources='), false);
   assert.match(resume, /Resume tag\/package\/lock version mismatch/);
   assert.match(resume, /verify-packaged-compliance\.js --search="\$mount_dir\/WhaleDock\.app\/Contents\/Resources"/);
   assert.match(resume, /verify-packaged-app-runtime\.js --app="\$mount_dir\/WhaleDock\.app"/);
-  assert.match(release, /## v0\.9\.1 更新/);
-  assert.match(resume, /## v0\.9\.1 更新/);
+  const requiredSessionSentence = 'v0.10 用鲸坞自己的会话数据目录，`~/.dsh` 不读不写不迁移，第一次进 AI 工作台可能要重新配一次模型。';
   for (const value of [release, resume]) {
-    assert.match(value, /切换不再“点了没反应”/);
-    assert.match(value, /安全启动可见降级/);
-    assert.match(value, /本版不含 v0\.10 实验功能/);
-    assert.match(value, /默认关闭的壳侧预备代码仍在/);
+    assert.match(value, /同屏创作台把左边选内容、中间推进任务、右边交给 AI 执行放在一屏，执行结果会回到这条内容。/);
+    assert.equal(value.includes(requiredSessionSentence), true);
+    assert.match(value, /Windows 仍为实验性支持（未真机验证）。/);
+    assert.equal(value.includes('本版不含 v0.10 实验功能'), false);
   }
 });
 

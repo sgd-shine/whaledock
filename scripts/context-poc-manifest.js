@@ -213,14 +213,64 @@ function assertCommittedBaseline(options = {}) {
   });
 }
 
+function verifyPackagedResources(resourcesPath) {
+  if (typeof resourcesPath !== 'string' || !resourcesPath.trim()) {
+    throw new Error('CONTEXT_POC_RESOURCES_ARGS 缺少成品 Resources 目录');
+  }
+  const resolvedResources = path.resolve(resourcesPath);
+  assertDirectory(resolvedResources, '成品 Resources 目录');
+  const baselinePath = BASELINE_PATH;
+  const rootDir = path.join(resolvedResources, 'context-poc');
+  const baseline = readBaseline(baselinePath);
+  const actual = createManifest(rootDir);
+  assertManifestMatches(baseline, actual);
+  return Object.freeze({
+    files: actual.files.length,
+    totalBytes: actual.totalBytes,
+    digest: actual.digest,
+    baselinePath,
+    resourcesPath: resolvedResources,
+    rootDir
+  });
+}
+
 function parseArgs(argv) {
-  const result = { mode: 'check', rootDir: CONTEXT_POC_ROOT, baselinePath: BASELINE_PATH };
+  const result = {
+    mode: 'check',
+    rootDir: CONTEXT_POC_ROOT,
+    baselinePath: BASELINE_PATH,
+    resourcesPath: null
+  };
+  let explicitMode = null;
+  let rootSpecified = false;
+  let baselineSpecified = false;
   for (const value of argv) {
-    if (value === '--check') result.mode = 'check';
-    else if (value === '--print') result.mode = 'print';
-    else if (value.startsWith('--root=')) result.rootDir = path.resolve(value.slice(7));
-    else if (value.startsWith('--baseline=')) result.baselinePath = path.resolve(value.slice(11));
+    if (value === '--check' || value === '--print') {
+      if (explicitMode && explicitMode !== value) {
+        throw new Error('CONTEXT_POC_MANIFEST_ARGS 只能选择一种模式');
+      }
+      explicitMode = value;
+      result.mode = value.slice(2);
+    } else if (value.startsWith('--resources=')) {
+      const resourcesPath = value.slice('--resources='.length);
+      if (!resourcesPath || explicitMode) {
+        throw new Error('CONTEXT_POC_MANIFEST_ARGS --resources 必须单独指定一次');
+      }
+      explicitMode = '--resources';
+      result.mode = 'resources';
+      result.resourcesPath = path.resolve(resourcesPath);
+    } else if (value.startsWith('--root=')) {
+      rootSpecified = true;
+      result.rootDir = path.resolve(value.slice(7));
+    }
+    else if (value.startsWith('--baseline=')) {
+      baselineSpecified = true;
+      result.baselinePath = path.resolve(value.slice(11));
+    }
     else throw new Error(`CONTEXT_POC_MANIFEST_ARGS 未知参数：${value}`);
+  }
+  if (result.mode === 'resources' && (rootSpecified || baselineSpecified)) {
+    throw new Error('CONTEXT_POC_MANIFEST_ARGS --resources 只使用 committed baseline');
   }
   return result;
 }
@@ -229,6 +279,13 @@ function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   if (args.mode === 'print') {
     process.stdout.write(canonicalBytes(createManifest(args.rootDir)));
+    return;
+  }
+  if (args.mode === 'resources') {
+    const result = verifyPackagedResources(args.resourcesPath);
+    console.log(
+      `CONTEXT_POC_RESOURCES_VERIFIED files=${result.files} bytes=${result.totalBytes} digest=${result.digest}`
+    );
     return;
   }
   const result = assertCommittedBaseline(args);
@@ -255,6 +312,7 @@ module.exports = Object.freeze({
   readBaseline,
   assertManifestMatches,
   assertCommittedBaseline,
+  verifyPackagedResources,
   parseArgs,
   main
 });
