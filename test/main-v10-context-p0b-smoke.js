@@ -353,6 +353,7 @@ async function mainTest() {
 
     const controller = { controllerId: 'controller-12345678' };
     const runtime = { handshake: handshake(), cursor: 0 };
+    const deliveryTargetRef = `delivery-target-${'d'.repeat(64)}`;
     const selected = main.contextPocBindingValue({
       state: 'selected',
       hostInstanceId: 'host-12345678',
@@ -360,9 +361,24 @@ async function mainTest() {
       code: null,
       controllerId: controller.controllerId,
       pageInstanceId: 'page-123456789012',
-      selectionRevision: 1
+      selectionRevision: 1,
+      deliveryTargetRef
     }, runtime, controller);
     assert.equal(selected.sessionRef, `session-${'a'.repeat(64)}`);
+    assert.equal(selected.deliveryTargetRef, deliveryTargetRef);
+    assert.equal(main.contextPocBindingValue({
+      state: 'selected',
+      hostInstanceId: 'host-12345678',
+      sessionRef: `session-${'a'.repeat(64)}`,
+      code: null,
+      controllerId: controller.controllerId,
+      pageInstanceId: 'page-123456789012',
+      selectionRevision: 1
+    }, runtime, controller), null, '受管 selected 必须同时绑定精确投递目标');
+    assert.equal(main.contextPocBindingValue({
+      state: 'none', hostInstanceId: 'host-12345678', sessionRef: null,
+      code: null, deliveryTargetRef
+    }, runtime, controller), null, 'none 不得携带上一个会话的投递引用');
     assert.equal(main.contextPocBindingValue({
       state: 'selected',
       hostInstanceId: 'host-12345678',
@@ -370,8 +386,27 @@ async function mainTest() {
       code: null,
       controllerId: 'controller-wrong000',
       pageInstanceId: 'page-123456789012',
-      selectionRevision: 1
+      selectionRevision: 1,
+      deliveryTargetRef
     }, runtime, controller), null);
+
+    const mainSource = source('main.js');
+    const adapterOptions = mainSource.slice(
+      mainSource.indexOf('function managedVideoDeliveryTargetOptions'),
+      mainSource.indexOf('function latestPromptTarget')
+    );
+    assert.match(adapterOptions, /backendState\.contextBridgeAuthToken/);
+    assert.match(adapterOptions, /backendState\.contextHostInstanceId/);
+    assert.match(adapterOptions, /deliveryTargetSecret: backendState\.contextBridgeAuthToken/);
+    assert.match(adapterOptions,
+      /deliveryTargetHostInstanceId: backendState\.contextHostInstanceId/);
+    const bridgeStart = mainSource.slice(
+      mainSource.indexOf('async function startContextPocBridge'),
+      mainSource.indexOf('function budgetIsPaused')
+    );
+    assert.match(bridgeStart,
+      /Object\.defineProperty\(state, 'contextHostInstanceId',[\s\S]*?enumerable: false/,
+      'Host 代际只能作为主进程 HMAC 输入，不得枚举进投影');
 
     const batch = {
       contract: bridge.CONTRACT_VERSION,
@@ -749,6 +784,24 @@ async function mainTest() {
     assert.equal(main.contextPocWorkspaceFileRequestValue({
       ...request, deadlineMs: request.deadlineMs + 1
     }), null, 'Host 不得漂移绝对 deadline');
+    const deliveryTargetRef = `delivery-target-${'d'.repeat(64)}`;
+    const deliveryRequest = {
+      ...request,
+      operation: 'project.action.prepare',
+      input: { projectToken: `project-${'a'.repeat(24)}`, actionId: 'script' },
+      deliveryTargetRef
+    };
+    assert.deepEqual(
+      main.contextPocWorkspaceFileRequestValue(deliveryRequest),
+      deliveryRequest,
+      '只有四项投递作业可从 Host 队列携带匿名精确目标'
+    );
+    assert.equal(main.contextPocWorkspaceFileRequestValue({
+      ...deliveryRequest, deliveryTargetRef: `delivery-target-${'g'.repeat(64)}`
+    }), null);
+    assert.equal(main.contextPocWorkspaceFileRequestValue({
+      ...request, deliveryTargetRef
+    }), null, '非投递操作不得夹带会话目标');
     const clip = main.contextPocUtf8Clip('鲸'.repeat(1000), 1800);
     assert.equal(Buffer.byteLength(clip.text, 'utf8') <= 1800, true);
     assert.equal(clip.truncated, true);
@@ -904,6 +957,7 @@ async function mainTest() {
     const resultToken = 'result-opaque-01';
     const sourceRelativePath = '02_脚本/稳定项目.md';
     const blockReceiptId = 'receipt-opaque-2';
+    const deliveryTargetRef = `delivery-target-${'d'.repeat(64)}`;
     const unrelatedReceiptId = 'receipt-opaque-4';
     const otherWorkspaceReceiptId = 'receipt-opaque-6';
     const rootIdentityKey = '101:202';
@@ -926,8 +980,8 @@ async function mainTest() {
           }))
         }))
       }),
-      projectAction: async (input) => {
-        calls.push(['projectAction', input]);
+      projectAction: async (input, internalContext) => {
+        calls.push(['projectAction', input, internalContext]);
         if (!Object.prototype.hasOwnProperty.call(input, 'preflightToken')) {
           return {
             kind: 'preflight', preflightToken,
@@ -1079,7 +1133,8 @@ async function mainTest() {
       projectToken, actionId, extra: true
     }));
     const prepareRaw = await ops['project.action.prepare'].handle({
-      input: { projectToken, actionId }, context: { assertCurrent: () => true }
+      input: { projectToken, actionId },
+      context: { assertCurrent: () => true, deliveryTargetRef }
     });
     const prepared = ops['project.action.prepare'].redact(prepareRaw);
     assert.equal(prepared.kind, 'preflight');
@@ -1095,7 +1150,8 @@ async function mainTest() {
       ...submitInput, extra: true
     }));
     const submitRaw = await ops['project.action.submit'].handle({
-      input: submitInput, context: { assertCurrent: () => true }
+      input: submitInput,
+      context: { assertCurrent: () => true, deliveryTargetRef }
     });
     assert.deepEqual(ops['project.action.submit'].redact(submitRaw), {
       state: 'accepted', reason: 'queued', target: '目标会话', receiptId
@@ -1103,6 +1159,10 @@ async function mainTest() {
     assert.throws(() => ops['project.action.submit'].redact({
       ...submitRaw, sessionRef: `session-${'c'.repeat(64)}`
     }));
+    assert.deepEqual(calls.filter((call) => call[0] === 'projectAction')
+      .map((call) => call[2]), [
+      { deliveryTargetRef }, { deliveryTargetRef }
+    ], '准备与提交必须从内部 job context 获取同一 opaque 目标');
 
     assert.deepEqual(ops['receipts.read'].validate({ projectToken, limit: 6 }), {
       projectToken, limit: 6
@@ -1456,6 +1516,7 @@ async function mainTest() {
     ];
     const otherProjectToken = `project-${'c'.repeat(24)}`;
     const blockToken = `block-${'d'.repeat(24)}`;
+    const deliveryTargetRef = `delivery-target-${'e'.repeat(64)}`;
     const preflightToken = 'preflight-batch6-01';
     const receiptId = 'receipt-batch6-01';
     const proposalToken = 'proposal-video-batch6_01';
@@ -1508,8 +1569,8 @@ async function mainTest() {
         submitted: 'accepted', target: '目标会话'
       };
     };
-    const blockAction = async (input) => {
-      blockCalls.push(input);
+    const blockAction = async (input, internalContext) => {
+      blockCalls.push([input, internalContext]);
       if (!Object.prototype.hasOwnProperty.call(input, 'preflightToken')) {
         return {
           kind: 'preflight', preflightToken,
@@ -1543,7 +1604,7 @@ async function mainTest() {
       catalog, blockAction, proposalSurface: surfaceFor,
       proposalDecision, proposalUndo
     });
-    const current = { assertCurrent: () => true };
+    const current = { assertCurrent: () => true, deliveryTargetRef };
 
     for (const action of ['revise', 'spoken', 'shorten', 'ask']) {
       assert.deepEqual(ops['block.action.prepare'].validate({
@@ -1585,7 +1646,11 @@ async function mainTest() {
       target: '目标会话', receiptId, message: null
     });
     assert.deepEqual(blockCalls, [
-      { projectToken: projectVersions[0], blockToken, action: 'spoken' }, submitInput
+      [
+        { projectToken: projectVersions[0], blockToken, action: 'spoken' },
+        { deliveryTargetRef }
+      ],
+      [submitInput, { deliveryTargetRef }]
     ]);
 
     assert.deepEqual(ops['proposal.read'].validate({ contentRef }), { contentRef });

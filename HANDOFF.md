@@ -1,27 +1,44 @@
 # HANDOFF.md — WhaleDock v0.10+ 当前交接
 
-更新：2026-08-27 · v0.10 alpha.2 已经 PR #19 合入 main；公开稳定版仍为 v0.9.1
+更新：2026-08-29 · v0.10 Batch 10、1b 已合 main，Batch 1c 随本文件所在独立 PR 合入；公开稳定版仍为 v0.9.1
 
 ## v0.10+ 当前执行线
 
-- 合并状态：PR [#19](https://github.com/sgd-shine/whaledock/pull/19) 已以 merge commit `742989ace0570f61d79bc6ff0fb580d757f9f533` 进入 main；最终 PR head 为 `9bd7067f672f10584a4d87f9b93d9628f63879b0`。
-- 自动证据：[PR CI 33070994859](https://github.com/sgd-shine/whaledock/actions/runs/33070994859) 与 [main CI 33071242784](https://github.com/sgd-shine/whaledock/actions/runs/33071242784) 均三平台全绿；Windows 的 refork、全量 smoke 与 runtime inventory 均通过。
+- 合并状态：基础线 PR [#19](https://github.com/sgd-shine/whaledock/pull/19)、Batch 10 PR [#20](https://github.com/sgd-shine/whaledock/pull/20) 及其 Windows CI 修复 PR [#21](https://github.com/sgd-shine/whaledock/pull/21)、Batch 1b PR [#22](https://github.com/sgd-shine/whaledock/pull/22) 均已进入 main；Batch 1b merge 为 `631758479b3b996c260cbf5b80333e6b6cbc2ea8`。Batch 1c 由本文件所在独立 PR 合入，不与发版 PR 混合。
+- 自动证据：Batch 1b 合并后的 [main CI 33107845635](https://github.com/sgd-shine/whaledock/actions/runs/33107845635) 三平台全绿。Batch 1c 本地最终为 layout **59/59 PASS**、全仓 **856 PASS / 44 个 ALL PASS**，末行 `ALL PASS`；PR 与合并后 main CI 以本批最终链接为准。
 - 备份与版本边界：远端 `backup/v010-alpha2-c0dc75a` 精确指向 `c0dc75a`；应用身份仍是 `0.10.0-alpha.2`，没有正式 tag、没有 v0.10 Release。
-- 保留工作树：`harness-desktop-v010-forward`；分支：`codex/v010-forward@9bd7067`。后续功能从 main 新开独立分支，不回到 v0.9.x。
+- 后续功能从 main 新开独立分支，不回到 v0.9.x；旧 worktree/已合分支只在 v0.11 清理项中登记，本批不删。
 - v0.9.1 只作为公开稳定/恢复入口；本地 alpha 使用独立 preview builder 与 `release-preview/`，没有 tag、没有 Release。
 - Batch 1 已完成固定资产清单、受管页面认证/重载重签、官方 SidebarRoot/三栏对齐、Host↔main 偏好协议与 core journal 隔离、官方草稿填充链、迟到 align/fillDraft 失效和可见降级；真实 rc.2 持久性证据保持有效。
 - Batch 2 已将 `ui-layout` / `ui-conversation` 收口为一条可复现 refork 命令：锁定 rc.2 npm 上游、网络前验 lock/patch、拒绝 redirect/超时/超限、严格解析 ustar 和 zero-fuzz unified patch，并校验终态摘要、差异预算与并发回滚。布局 fork 为 `42+/5-`，对话 fork 为 `19+/3-`；`--check` 从 `lib/config` 读取生产版本且不写工作树。
 - Batch 3.0 已完成内容卡与回执、概览、脚本、发布、复盘、拍摄六段能力回迁。原生拍摄现场支持全文分页、提词、重来/完成/缺口、二阶段收工、两份 owned 文件独占写入与历史读回；browserOnly 保留原生会话并提供 64 KiB 手动页内提词，零工作区读取、零 RPC、零写入。
-- Batch 3.0 定向六组为 **156/156**；alpha.2 最终全仓 smoke 为 **835 PASS / 44 个 ALL PASS**，末行 `ALL PASS`。refork、context manifest、双合规 verifier、`git diff --check` 均通过，Backend/core 与只读 UI 审计无 P1/P2。
+- Batch 10 已完成界面去冗余，Batch 1b 已补齐首次说明与工作流可理解性；Batch 1c 进一步消除了新手第一脚的手工“对齐”概念。内容态只认工作台当前工作区，首次进入、从会话态返回或目标路径变化会自动复用/创建一个根会话；只有用户自己把右栏切走或服务异常时才出现人话兜底。
+- Batch 1c 的精确目标采用 HMAC 派生 opaque delivery ref；prepare/submit 前后均解析并冻结精确会话，只有四个投递 operation 允许显式 mismatch override。公开 operation 名称、输入/输出、`workspaceMatch` 和回执 override 语义未改，browserOnly 仍零工作区读写/RPC。
+- Batch 1c layout 为 **59/59 PASS**；alpha.2 全仓 smoke 为 **856 PASS / 44 个 ALL PASS**，末行 `ALL PASS`。refork、context manifest、双合规 verifier、`git diff --check` 均通过；代码与只读审查无 P0/P1/P2。
 - 可信静态资产与可变 dsh 数据已经拆根：摘要绑定、只读的 asset root 可跨启动复用；稳定数据根为 `userData/context-poc/v1/dsh-home`，必须跨后端/App 重启和工作区切换保留 sessions、settings、credentials、attachments、storages 与 presets。退出和启动 sweep 都不得触达数据根。
 - 受管 v0.10 不读取、不写入、不迁移、不清理 `~/.dsh`，也不自动导入旧数据；设置页明确提示首次使用可能需要重新配置模型。该隔离边界是产品合同，不得写成历史数据丢失或已迁移。
-- 当前固定基线为 **15 文件 / 784,416 B**，digest `3e98e63c0bdf8b27eeb2ddf70175b51d07d60d5c878f9d8cd83d5e984b388f0b`。根 App 源码 runtime 为 52 包 / 830 文件，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`；修改后 fork 与内置 dsh runtime 继续使用两条独立合规身份。
+- 当前固定基线为 **15 文件 / 810,828 B**，digest `16ffc4198355b93a1950965eece991d4b615d5005f63b3ab2da6933038496fb1`。根 App 源码 runtime 为 52 包 / 830 文件，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`；修改后 fork 与内置 dsh runtime 继续使用两条独立合规身份。
 - 真实 rc.2 双冷启动为 `RC2_PERSISTENCE_PASS`：Host 握手×2、HTTP×2、会话/cwd 恢复、home/asset root 复用、settings/credentials 哈希不变，收尾后回环端口关闭。
-- alpha.2 arm64 本地构建成功；成品 app-runtime 回读 `52 packages / 449 files`、tree `b363e6c80bca9296e566e0accae30143e6ce02dc53a660ec706bf8c9cfac1d02`，内置 dsh 合规回读 `copies=1`。Developer ID `wang jie (CS4NK76DA5)`、Hardened Runtime 与严格验签通过，已替换安装到 `/Applications/WhaleDock.app`；`app.asar` 与构建归档同为 `6d66dda5…e62`，Spotlight 唯一发现该 App。
-- alpha.2 no-index 归档 App / dsh runtime 为 `615,644 / 300,776 KiB`，安装位置实际分配为 `601,316 / 286,532 KiB`；`app.asar` `19,846,037 B`，ZIP / DMG `193,761,407 / 175,732,383 B`。Gatekeeper 为 `Unnotarized Developer ID`，没有公证或 stapled ticket。
+- 以下成品事实是 Batch 1b 前一轮 alpha.2 安装基线，不是 Batch 1c 最终 main 成品：app-runtime 回读 `52 packages / 449 files`、tree `b363e6c80bca9296e566e0accae30143e6ce02dc53a660ec706bf8c9cfac1d02`，内置 dsh 合规回读 `copies=1`。Developer ID `wang jie (CS4NK76DA5)`、Hardened Runtime 与严格验签通过；当时安装版 `app.asar` 与构建归档同为 `6d66dda5…e62`，Spotlight 唯一发现 `/Applications/WhaleDock.app`。
+- 上述旧 alpha.2 no-index 归档 App / dsh runtime 为 `615,644 / 300,776 KiB`，安装位置实际分配为 `601,316 / 286,532 KiB`；`app.asar` `19,846,037 B`，ZIP / DMG `193,761,407 / 175,732,383 B`。Gatekeeper 当时为 `Unnotarized Developer ID`，没有公证或 stapled ticket；Batch 1c 新数字必须从最终 main 重建后另记。
 - 源码态真实指针视频已走完拍摄、二次收工、两文件写回和历史读回；安装态回读 alpha.2/arm64、内置 rc.2、4 张内容卡与 3/3 拍摄全文。证据分别位于 `WhaleDock-evidence.noindex/v0.10-batch9/source-preview/` 与 `installed-alpha2/`。
 - TCC 边界：安装态沿用 macOS 受保护文稿目录 cwd 时，自动验收不代用户授权；本轮只改用专用非受保护测试工作区完成运行验证。这不是产品绕过权限，也不是原目录 TCC 已通过。
-- 后续功能开发统一基于 alpha.2，不再回到 v0.9.x 或 alpha.1。v0.10 仍未打 tag、未公开发布；正式发布需独立补齐三平台 CI、Windows/Intel 真机、Apple 公证、公开资产回读与 SGD 人工验收。
+- 后续功能开发统一基于 alpha.2，不再回到 v0.9.x 或 alpha.1。当前先完成 Batch 1c 独立 PR、三平台 CI/合并与合并后 main CI，再从最终 main 重建并安装 arm64 alpha，最后交给 SGD 跑 4 步卡；SGD 未明确回复“过”，不得开始 v0.10.0 发版、不得打 tag 或创建 Release。Windows/Intel 真机、真实模型和人工可见体验仍是独立证据门。
+
+## SGD 人工验收与 Batch 2 门
+
+- 先用最终 main 的本地 `0.10.0-alpha.2` 安装版走 4 步卡：首次进入右栏自动就位；示例卡预检为「工作区匹配」并确认一次；New Session 往返后仍匹配或按人话按钮返回；全屏拍摄完成后能读回本地记录。
+- SGD 卡住时只需记具体步骤；只有明确回复“过”，Batch 2 才可开工。当前 **NEEDS-HUMAN**，源码态程序化点击、smoke、PR CI 与本地静态安装回读都不能代替。
+- Batch 2 才负责 `0.10.0` 版本、正式 builder/Release workflow、tag、公证、八项公开资产与官方成品回读。本批没有这些事实。
+
+## v0.11 下一批登记（本批不动）
+
+1. 灵感收件箱与灵感拆条回迁同屏台，新增 `inspiration.*` 需过文件 RPC 黑名单与投影脱敏。
+2. 把「今天，推进一件事」回迁为内容库顶部的「今天」卡。
+3. 视频工作台默认进入同屏台；旧驾驶舱入口移到设置「经典驾驶舱（旧）」。
+4. 将 `main.js` 的 21 个 context operation 抽到纯 Node 可加载的 `lib/context-workspace-ops.js`，由 smoke 直测。
+5. 统一「视频工作台」与「AI 工作台」的一词两义，先给 SGD 2–3 个候选名再定。
+6. 按 D6 清理两个 prunable worktree、已合并本地分支；`docs/_to_delete/` 由 SGD 自己移入废纸篓。
 
 ## v0.9.1 已公开发布与恢复入口
 

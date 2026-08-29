@@ -20,6 +20,7 @@ const CAPABILITIES = Object.freeze([
 ]);
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 const SESSION_REF_RE = /^session-[a-f0-9]{64}$/;
+const DELIVERY_TARGET_REF_RE = /^delivery-target-[a-f0-9]{64}$/;
 const PROJECT_ID_RE = /^wdp1_[a-f0-9]{32}$/;
 const PROJECT_REVISION_RE = /^[a-f0-9]{64}$/;
 const WORKBENCH_ID_RE = /^(?:builtin|user):[A-Za-z0-9][A-Za-z0-9._-]{0,87}$/;
@@ -51,6 +52,10 @@ const WORKSPACE_FILE_OPERATIONS = new Set([
   'shoot.open', 'shoot.history.read',
   'receipts.read', 'receipts.ack', 'receipts.open'
 ]);
+const WORKSPACE_FILE_DELIVERY_OPERATIONS = new Set([
+  'project.action.prepare', 'project.action.submit',
+  'block.action.prepare', 'block.action.submit'
+]);
 const WORKSPACE_FILE_STATES = new Set([
   'queued', 'running', 'fulfilled', 'rejected', 'cancelled', 'expired'
 ]);
@@ -62,6 +67,7 @@ const WORKSPACE_FILE_FORBIDDEN_KEYS = new Set([
   'absolutepath', 'relativepath', 'effectivepath', 'workspacekey', 'cwd',
   'filepath', 'root', 'rootpath', 'frontmatter', 'patch',
   'sessionref', 'currentsessionid', 'rawsession', 'context', 'envelope',
+  'deliverytargetref',
   'authtoken', 'selectiontoken', 'controllerproof', 'claimtoken', 'requestseq',
   'hash', 'dev', 'ino'
 ]);
@@ -115,6 +121,12 @@ function bridgeHmac(secret, label, clientNonce, hostInstanceId) {
   return createHmac('sha256', secret)
     .update(`${label}\0${CONTRACT}\0${clientNonce}\0${hostInstanceId}`)
     .digest('hex');
+}
+
+function deliveryTargetRef(secret, hostInstanceId, rawSessionId) {
+  return `delivery-target-${createHmac('sha256', secret)
+    .update(`whaledock-delivery-target-v1\0${hostInstanceId}\0${rawSessionId}`)
+    .digest('hex')}`;
 }
 
 function tokenMatches(actual, expected) {
@@ -729,6 +741,13 @@ export function apply(ctx) {
       session = record && ctx.sessions && typeof ctx.sessions.get === 'function'
         ? ctx.sessions.get(record.raw) : null;
     } catch (_error) { session = null; }
+    const boundDeliveryTarget = Boolean(
+      WORKSPACE_FILE_DELIVERY_OPERATIONS.has(job?.operation)
+      && typeof record?.raw === 'string'
+      && typeof job?.deliveryTargetRef === 'string'
+      && DELIVERY_TARGET_REF_RE.test(job.deliveryTargetRef)
+      && job.deliveryTargetRef === deliveryTargetRef(authToken, hostInstanceId, record.raw)
+    );
     return Boolean(selection && selection.managed === true
       && selection.pageInstanceId === job.pageInstanceId
       && selection.selectionRevision === job.selectionRevision
@@ -737,7 +756,7 @@ export function apply(ctx) {
       && envelope.revision === job.contextRevision
       && envelope.project.projectId === job.projectId
       && envelope.project.projectRevision === job.projectRevision
-      && sessionProjectId(session) === job.projectId);
+      && (sessionProjectId(session) === job.projectId || boundDeliveryTarget));
   };
 
   const sweepWorkspaceFileJobs = (now = Date.now()) => {
@@ -820,7 +839,9 @@ export function apply(ctx) {
         ? ctx.sessions.get(record.raw) : null;
     } catch (_error) { session = null; }
     const selectedProjectId = sessionProjectId(session);
-    if (!selectedProjectId || selectedProjectId !== envelope.project.projectId) {
+    const deliveryOperation = WORKSPACE_FILE_DELIVERY_OPERATIONS.has(payload.operation);
+    if ((!selectedProjectId || selectedProjectId !== envelope.project.projectId)
+        && !deliveryOperation) {
       return ok({
         accepted: false, requestToken: null, state: 'rejected',
         code: 'workspace-mismatch', deadlineMs: null
@@ -847,6 +868,9 @@ export function apply(ctx) {
     const requestToken = sha256(
       `workspace-file\0${randomUUID()}\0${issuedAtMs}\0${requestSeq}`
     );
+    const boundDeliveryTarget = deliveryOperation
+      ? deliveryTargetRef(authToken, hostInstanceId, record.raw) : null;
+    if (deliveryOperation && !DELIVERY_TARGET_REF_RE.test(boundDeliveryTarget)) return internal();
     const job = {
       requestToken,
       requestSeq,
@@ -859,6 +883,7 @@ export function apply(ctx) {
       contextRevision: envelope.revision,
       operation: payload.operation,
       input,
+      deliveryTargetRef: boundDeliveryTarget,
       issuedAtMs,
       deadlineMs,
       runningDeadlineMs: null,
@@ -926,6 +951,8 @@ export function apply(ctx) {
         contextRevision: job.contextRevision,
         operation: job.operation,
         input: job.input,
+        ...(job.deliveryTargetRef === null
+          ? {} : { deliveryTargetRef: job.deliveryTargetRef }),
         issuedAtMs: job.issuedAtMs,
         deadlineMs: job.deadlineMs
       }));
@@ -1134,12 +1161,17 @@ export function apply(ctx) {
           return ok({ state: 'none', hostInstanceId, sessionRef: null, code: null });
         }
         const current = resolveSelectionState(selection);
+        const boundDeliveryTarget = current.state === 'selected'
+          && typeof selection.raw === 'string'
+          ? deliveryTargetRef(authToken, hostInstanceId, selection.raw) : null;
         return ok({
           ...current,
           hostInstanceId,
           controllerId: selection.controllerId,
           pageInstanceId: selection.pageInstanceId,
-          selectionRevision: selection.selectionRevision
+          selectionRevision: selection.selectionRevision,
+          ...(boundDeliveryTarget === null
+            ? {} : { deliveryTargetRef: boundDeliveryTarget })
         });
       }
       if (endpoint === 'context/stage') {

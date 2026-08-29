@@ -96,6 +96,9 @@ function adapterOptions(fetch, overrides = {}) {
   };
 }
 
+const DELIVERY_TARGET_SECRET = 'ab'.repeat(32);
+const DELIVERY_TARGET_HOST = 'host-delivery-target01';
+
 async function main() {
   await test('根包 proof 默认锁 rc.6，候选只接受显式精确 SemVer 与字节级等值', async () => {
     assert.equal(backend.hasExactDshPackageProof({
@@ -240,6 +243,142 @@ async function main() {
       updatedAt: 3000,
       cwd: '/private/workspace'
     });
+  });
+
+  await test('精确 target ref 可匿名解析已选 root blank，普通列表仍排除 blank', async () => {
+    const seen = [];
+    const exact = backend.createDshPromptAdapter(adapterOptions(fixtureFetch(seen), {
+      deliveryTargetSecret: DELIVERY_TARGET_SECRET,
+      deliveryTargetHostInstanceId: DELIVERY_TARGET_HOST
+    }));
+    const listed = await exact.listTargets();
+    assert.equal(listed.targets.length, 1);
+    assert.equal(JSON.stringify(listed).includes('blank'), false);
+    const deliveryTargetRef = backend.dshDeliveryTargetRef(
+      DELIVERY_TARGET_SECRET,
+      DELIVERY_TARGET_HOST,
+      'raw-session-blank'
+    );
+    assert.match(deliveryTargetRef, /^delivery-target-[a-f0-9]{64}$/);
+    const resolved = await exact.resolveTarget(deliveryTargetRef);
+    assert.deepEqual(resolved, {
+      targetToken: 'target-2',
+      label: '当前会话',
+      running: false,
+      updatedAt: 2000,
+      cwd: null
+    });
+    assert.deepEqual(await exact.revalidateTarget(resolved.targetToken), resolved);
+    const result = await exact.submitText({
+      targetToken: resolved.targetToken,
+      text: '精确投递给已选空会话'
+    });
+    assert.deepEqual(result, { state: 'accepted', reason: 'accepted' });
+    const prompt = seen.find((item) => item.request.method === 'session.prompt');
+    assert.deepEqual(prompt.request.payload, {
+      sessionId: 'raw-session-blank',
+      mode: 'queue',
+      content: [{ type: 'text', text: '精确投递给已选空会话' }]
+    });
+    const publicValues = JSON.stringify({ listed, resolved, result });
+    assert.equal(publicValues.includes('raw-session-blank'), false);
+    assert.equal(publicValues.includes(deliveryTargetRef), false);
+    await exact.close();
+  });
+
+  await test('未知、篡改、跨 host 与非 root target ref 全部 fail-closed 且零 prompt', async () => {
+    assert.throws(() => backend.createDshPromptAdapter(adapterOptions(async () => {
+      throw new Error('must not fetch');
+    }, {
+      deliveryTargetSecret: DELIVERY_TARGET_SECRET
+    })), (error) => error.code === 'ERR_DSH_PROMPT_CONTRACT');
+
+    const seen = [];
+    const exact = backend.createDshPromptAdapter(adapterOptions(fixtureFetch(seen), {
+      deliveryTargetSecret: DELIVERY_TARGET_SECRET,
+      deliveryTargetHostInstanceId: DELIVERY_TARGET_HOST
+    }));
+    await assert.rejects(
+      exact.resolveTarget('delivery-target-short'),
+      (error) => error.code === 'ERR_DSH_PROMPT_TARGET'
+    );
+    assert.equal(seen.length, 0);
+    const rejectedRefs = [
+      `delivery-target-${'0'.repeat(64)}`,
+      backend.dshDeliveryTargetRef(
+        DELIVERY_TARGET_SECRET,
+        'host-delivery-target02',
+        'raw-session-blank'
+      ),
+      backend.dshDeliveryTargetRef(
+        DELIVERY_TARGET_SECRET,
+        DELIVERY_TARGET_HOST,
+        'raw-session-subagent'
+      ),
+      backend.dshDeliveryTargetRef(
+        DELIVERY_TARGET_SECRET,
+        DELIVERY_TARGET_HOST,
+        'raw-session-fork'
+      )
+    ];
+    for (const deliveryTargetRef of rejectedRefs) {
+      await assert.rejects(
+        exact.resolveTarget(deliveryTargetRef),
+        (error) => error.code === 'ERR_DSH_PROMPT_TARGET'
+      );
+    }
+    assert.equal(seen.filter((item) => item.request.method === 'session.prompt').length, 0);
+    assert.equal(JSON.stringify(seen).includes(DELIVERY_TARGET_SECRET), false);
+    await exact.close();
+
+    const ordinarySeen = [];
+    const ordinary = backend.createDshPromptAdapter(adapterOptions(fixtureFetch(ordinarySeen)));
+    await assert.rejects(
+      ordinary.resolveTarget(backend.dshDeliveryTargetRef(
+        DELIVERY_TARGET_SECRET,
+        DELIVERY_TARGET_HOST,
+        'raw-session-root'
+      )),
+      (error) => error.code === 'ERR_DSH_PROMPT_TARGET'
+    );
+    assert.equal(ordinarySeen.length, 0);
+    await ordinary.close();
+  });
+
+  await test('精确 blank token 的 revalidate 仅接受同一 root/non-subagent 会话', async () => {
+    const seen = [];
+    let listCalls = 0;
+    const exact = backend.createDshPromptAdapter(adapterOptions(fixtureFetch(seen, {
+      list: () => {
+        listCalls += 1;
+        if (listCalls < 3) {
+          return { items: [{
+            sessionId: 'raw-exact-blank', updatedAt: 10,
+            running: false, blank: true, cwd: '/workspace/exact'
+          }] };
+        }
+        return { items: [{
+          sessionId: 'raw-exact-blank', parentSessionId: 'raw-parent',
+          updatedAt: 11, running: false, blank: true, cwd: '/workspace/exact'
+        }] };
+      }
+    }), {
+      deliveryTargetSecret: DELIVERY_TARGET_SECRET,
+      deliveryTargetHostInstanceId: DELIVERY_TARGET_HOST
+    }));
+    const resolved = await exact.resolveTarget(backend.dshDeliveryTargetRef(
+      DELIVERY_TARGET_SECRET,
+      DELIVERY_TARGET_HOST,
+      'raw-exact-blank'
+    ));
+    assert.equal(resolved.label, 'exact', '精确目标应以工作区目录名对应右栏当前工作区');
+    assert.equal((await exact.revalidateTarget(resolved.targetToken)).cwd, '/workspace/exact');
+    await assert.rejects(
+      exact.revalidateTarget(resolved.targetToken),
+      (error) => error.code === 'ERR_DSH_PROMPT_TARGET'
+    );
+    assert.equal(seen.filter((item) => item.request.method === 'session.prompt').length, 0);
+    await exact.close();
   });
 
   await test('revalidate 重读 cwd 仍锁定原会话，排序竞态不改投', async () => {

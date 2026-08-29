@@ -4381,6 +4381,18 @@ function deliverySessionSalt() {
   return FALLBACK_DELIVERY_SESSION_SALT;
 }
 
+function managedVideoDeliveryTargetOptions() {
+  if (!backendReady || !spawnedByUs || !backendState || backendState.exited === true
+      || typeof backendState.contextBridgeAuthToken !== 'string'
+      || !CONTEXT_POC_TOKEN_RE.test(backendState.contextBridgeAuthToken)
+      || typeof backendState.contextHostInstanceId !== 'string'
+      || !CONTEXT_POC_ID_RE.test(backendState.contextHostInstanceId)) return {};
+  return {
+    deliveryTargetSecret: backendState.contextBridgeAuthToken,
+    deliveryTargetHostInstanceId: backendState.contextHostInstanceId
+  };
+}
+
 function createVideoPromptAdapter(sessionSalt, onDeliveryPrepared) {
   return backend.createDshPromptAdapter({
     port: config.get('port'),
@@ -4388,6 +4400,7 @@ function createVideoPromptAdapter(sessionSalt, onDeliveryPrepared) {
     packageVersionProof: spawnedByUs && backendState
       ? backendState.packageVersionProof : null,
     sessionSalt,
+    ...managedVideoDeliveryTargetOptions(),
     ...(typeof onDeliveryPrepared === 'function'
       ? { onDeliveryPrepared, requireDeliveryPrepared: true } : {})
   });
@@ -4426,24 +4439,38 @@ function validateVideoDeliverySpec(spec) {
   return spec;
 }
 
-async function prepareVideoPromptDelivery(rawSpec) {
+function videoDeliveryTargetRefValue(value) {
+  return typeof value === 'string' && CONTEXT_POC_DELIVERY_TARGET_REF_RE.test(value)
+    ? value : null;
+}
+
+async function prepareVideoPromptDelivery(rawSpec, rawDeliveryTargetRef = null) {
   const spec = validateVideoDeliverySpec(rawSpec);
+  const deliveryTargetRef = videoDeliveryTargetRefValue(rawDeliveryTargetRef);
+  if (rawDeliveryTargetRef !== null && deliveryTargetRef === null) {
+    return { state: 'error', text: '当前会话身份无效，请重新打开内容页后再点。' };
+  }
   if (!backendReady) return { state: 'error', text: '后端还没就绪，等它起来再点。' };
   let adapter = null;
   try {
     const sessionSalt = deliverySessionSalt();
     adapter = createVideoPromptAdapter(sessionSalt);
-    const listed = await adapter.listTargets();
-    const target = latestPromptTarget(listed);
-    if (!target) {
-      return {
-        state: 'error',
-        text: listed && listed.reason === 'package-unproven'
-          ? '后端版本不可证明，没有发送。'
-          : '没有找到可用会话，先在右边开一个会话再点。'
-      };
+    let inspected;
+    if (deliveryTargetRef) {
+      inspected = await adapter.resolveTarget(deliveryTargetRef);
+    } else {
+      const listed = await adapter.listTargets();
+      const target = latestPromptTarget(listed);
+      if (!target) {
+        return {
+          state: 'error',
+          text: listed && listed.reason === 'package-unproven'
+            ? '后端版本不可证明，没有发送。'
+            : '没有找到可用会话，先在右边开一个会话再点。'
+        };
+      }
+      inspected = adapter.inspectTarget(target.targetToken);
     }
-    const inspected = adapter.inspectTarget(target.targetToken);
     const workspace = currentDeliveryWorkspace();
     if (workspace.busy || workspace.generation === null) {
       return { state: 'error', text: '工作区正在切换，完成后再发送。' };
@@ -4452,11 +4479,12 @@ async function prepareVideoPromptDelivery(rawSpec) {
     const preflight = deliveryReceiptService.createPreflight({
       owner: VIDEO_DELIVERY_OWNER,
       actionFingerprint: spec.fingerprint,
-      targetToken: target.targetToken,
+      targetToken: inspected.targetToken,
       sessionRef: inspected.sessionRef,
       cwdFacts,
       context: {
         ...spec.context,
+        deliveryTargetRef,
         workspaceGeneration: workspace.generation,
         text: spec.text,
         anchorRef: spec.anchorRef,
@@ -4482,7 +4510,18 @@ async function prepareVideoPromptDelivery(rawSpec) {
   }
 }
 
-async function findFrozenPromptTarget(adapter, sessionRef) {
+async function findFrozenPromptTarget(adapter, sessionRef, rawDeliveryTargetRef = null) {
+  const deliveryTargetRef = videoDeliveryTargetRefValue(rawDeliveryTargetRef);
+  if (rawDeliveryTargetRef !== null && deliveryTargetRef === null) {
+    throw new Error('精确目标已失效，请重新预检');
+  }
+  if (deliveryTargetRef) {
+    const resolved = await adapter.resolveTarget(deliveryTargetRef);
+    if (!resolved || resolved.sessionRef !== sessionRef) {
+      throw new Error('目标会话已变化，请重新预检');
+    }
+    return adapter.revalidateTarget(resolved.targetToken);
+  }
   const listed = await adapter.listTargets();
   if (!listed || listed.available !== true || !Array.isArray(listed.targets)) {
     throw new Error('目标会话当前不可读取，请重新预检');
@@ -4717,8 +4756,17 @@ function noteVideoReceiptFileUpdates(runtime, items, proposalSurface) {
   return changed;
 }
 
-async function submitPreparedVideoPrompt(rawSpec, confirmation, beforeSend) {
+async function submitPreparedVideoPrompt(
+  rawSpec,
+  confirmation,
+  beforeSend,
+  rawDeliveryTargetRef = null
+) {
   const spec = validateVideoDeliverySpec(rawSpec);
+  const deliveryTargetRef = videoDeliveryTargetRefValue(rawDeliveryTargetRef);
+  if (rawDeliveryTargetRef !== null && deliveryTargetRef === null) {
+    return { state: 'error', text: '当前会话身份无效，没有发送。' };
+  }
   const preflightToken = confirmation && deliveryToken(confirmation.preflightToken);
   if (!preflightToken || typeof confirmation.override !== 'boolean') {
     return { state: 'error', text: '投递预检已失效，请重新点一次。' };
@@ -4731,6 +4779,12 @@ async function submitPreparedVideoPrompt(rawSpec, confirmation, beforeSend) {
   });
   if (!consumed.accepted) {
     return { state: 'error', text: '投递预检已过期或未获确认，没有发送。' };
+  }
+  const frozenDeliveryTargetRef = videoDeliveryTargetRefValue(
+    consumed.delivery.context.deliveryTargetRef
+  );
+  if (frozenDeliveryTargetRef !== deliveryTargetRef) {
+    return { state: 'error', text: '当前会话在确认前发生变化，请重新预检；没有发送。' };
   }
   if (!backendReady) return { state: 'error', text: '后端还没就绪，没有发送。' };
   if (!workspaceCoordinator || workspaceCoordinator.busy) {
@@ -4752,7 +4806,11 @@ async function submitPreparedVideoPrompt(rawSpec, confirmation, beforeSend) {
         return { registered: false, available: false };
       }
     });
-    const target = await findFrozenPromptTarget(adapter, consumed.delivery.sessionRef);
+    const target = await findFrozenPromptTarget(
+      adapter,
+      consumed.delivery.sessionRef,
+      deliveryTargetRef
+    );
     const workspace = currentDeliveryWorkspace();
     const currentFacts = deliveryWorkspaceFacts(target.cwd, workspace.cwd);
     const previousFacts = consumed.delivery.cwdFacts;
@@ -5792,8 +5850,14 @@ function videoTargetedActionPrompt(relativePath, actionPrompt) {
   ].join('\n');
 }
 
-async function submitVideoProjectAction(value) {
+function videoDeliveryTargetRefFromInternalContext(context) {
+  return context && Object.prototype.hasOwnProperty.call(context, 'deliveryTargetRef')
+    ? context.deliveryTargetRef : null;
+}
+
+async function submitVideoProjectAction(value, internalContext = null) {
   const dispatch = videoProjectDispatchRequest(value);
+  const deliveryTargetRef = videoDeliveryTargetRefFromInternalContext(internalContext);
   const request = dispatch.request;
   const { runtime, record } = readVideoDocumentByToken(request.projectToken);
   const active = currentWorkbench();
@@ -5822,10 +5886,10 @@ async function submitVideoProjectAction(value) {
   };
   if (!dispatch.confirmation) {
     log.line('video', `项目动作 ${record.stage || 'unknown'}/${allowed.id} 等待投递预检`);
-    return prepareVideoPromptDelivery(spec);
+    return prepareVideoPromptDelivery(spec, deliveryTargetRef);
   }
   log.line('video', `项目动作 ${record.stage || 'unknown'}/${allowed.id} 使用 token 与预检绑定目标`);
-  return submitPreparedVideoPrompt(spec, dispatch.confirmation);
+  return submitPreparedVideoPrompt(spec, dispatch.confirmation, null, deliveryTargetRef);
 }
 
 function videoSceneActionRequest(value) {
@@ -6076,8 +6140,9 @@ async function runVideoSceneAction(raw) {
   throw new Error('视频现场动作未实现');
 }
 
-async function submitVideoBlockAction(value) {
+async function submitVideoBlockAction(value, internalContext = null) {
   const dispatch = videoBlockDispatchRequest(value);
+  const deliveryTargetRef = videoDeliveryTargetRefFromInternalContext(internalContext);
   const request = dispatch.request;
   const { runtime, document } = readVideoDocumentByToken(request.projectToken);
   const blockRecord = runtime.blockTokens.get(request.blockToken);
@@ -6117,8 +6182,8 @@ async function submitVideoBlockAction(value) {
       }
     };
     return dispatch.confirmation
-      ? submitPreparedVideoPrompt(spec, dispatch.confirmation)
-      : prepareVideoPromptDelivery(spec);
+      ? submitPreparedVideoPrompt(spec, dispatch.confirmation, null, deliveryTargetRef)
+      : prepareVideoPromptDelivery(spec, deliveryTargetRef);
   }
   if (videoProposal) {
     return { state: 'error', text: '还有一张建议卡等你采用或退回。' };
@@ -6147,7 +6212,7 @@ async function submitVideoBlockAction(value) {
       intentLabel
     }
   };
-  if (!dispatch.confirmation) return prepareVideoPromptDelivery(spec);
+  if (!dispatch.confirmation) return prepareVideoPromptDelivery(spec, deliveryTargetRef);
 
   let createdProposal = null;
   let createdProposalRuntime = null;
@@ -6201,7 +6266,7 @@ async function submitVideoBlockAction(value) {
       throw new Error('建议副本实体绑定未知，原稿没有变；请在建议卡中核对或退回');
     }
     return {};
-  });
+  }, deliveryTargetRef);
   if (!createdProposal || !videoProposal || videoProposal !== createdProposal) return result;
   videoProposal.submitState = result.state;
   videoProposal.target = result.target || null;
@@ -6823,6 +6888,7 @@ function registerShootingIpc() {
 const CONTEXT_POC_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 const CONTEXT_POC_TOKEN_RE = /^[a-f0-9]{64}$/;
 const CONTEXT_POC_SESSION_REF_RE = /^session-[a-f0-9]{64}$/;
+const CONTEXT_POC_DELIVERY_TARGET_REF_RE = /^delivery-target-[a-f0-9]{64}$/;
 const CONTEXT_POC_PROJECT_ID_RE = /^wdp1_[a-f0-9]{32}$/;
 const CONTEXT_POC_PROJECT_REVISION_RE = /^[a-f0-9]{64}$/;
 const CONTEXT_POC_PREFERENCES_CAPABILITY = 'ui-preferences-v1';
@@ -6843,6 +6909,10 @@ const CONTEXT_POC_WORKSPACE_FILE_OPERATIONS = new Set([
   'shoot.open', 'shoot.history.read',
   'project.action.prepare', 'project.action.submit',
   'receipts.read', 'receipts.ack', 'receipts.open'
+]);
+const CONTEXT_POC_WORKSPACE_FILE_DELIVERY_OPERATIONS = new Set([
+  'block.action.prepare', 'block.action.submit',
+  'project.action.prepare', 'project.action.submit'
 ]);
 const CONTEXT_POC_WORKSPACE_FILE_REJECT_CODES = new Set([
   'workspace-unavailable', 'workspace-mismatch', 'operation-invalid',
@@ -6891,7 +6961,7 @@ function contextPocWorkspaceFileRequestValue(value) {
     'requestToken', 'requestSeq', 'controllerId', 'pageInstanceId',
     'selectionRevision', 'projectId', 'projectRevision', 'contextRevision',
     'operation', 'input', 'issuedAtMs', 'deadlineMs'
-  ]) || !CONTEXT_POC_TOKEN_RE.test(String(value.requestToken || ''))
+  ], ['deliveryTargetRef']) || !CONTEXT_POC_TOKEN_RE.test(String(value.requestToken || ''))
       || !Number.isSafeInteger(value.requestSeq) || value.requestSeq < 1
       || !contextPocValidId(value.controllerId) || !contextPocValidId(value.pageInstanceId)
       || !Number.isSafeInteger(value.selectionRevision) || value.selectionRevision < 1
@@ -6903,6 +6973,10 @@ function contextPocWorkspaceFileRequestValue(value) {
       || !Number.isSafeInteger(value.issuedAtMs) || value.issuedAtMs < 0
       || !Number.isSafeInteger(value.deadlineMs)
       || value.deadlineMs !== value.issuedAtMs + CONTEXT_POC_WORKSPACE_FILE_PENDING_MS) return null;
+  const deliveryOperation = CONTEXT_POC_WORKSPACE_FILE_DELIVERY_OPERATIONS.has(value.operation);
+  if (deliveryOperation
+    ? !CONTEXT_POC_DELIVERY_TARGET_REF_RE.test(String(value.deliveryTargetRef || ''))
+    : Object.prototype.hasOwnProperty.call(value, 'deliveryTargetRef')) return null;
   const input = contextPocWorkspaceFileInputValue(value.input);
   return input ? Object.freeze({ ...value, input }) : null;
 }
@@ -8402,7 +8476,9 @@ function contextPocWorkspaceFileOperations(options = {}) {
           projectToken: input.projectToken
         });
         const prepared = contextPocWorkspaceActionPrepareResult(
-          await blockAction(input)
+          await blockAction(input, {
+            deliveryTargetRef: context.deliveryTargetRef || null
+          })
         );
         const latest = contextPocWorkspaceProjectIdentity(catalog(), {
           contentRef: identity.contentRef
@@ -8445,7 +8521,9 @@ function contextPocWorkspaceFileOperations(options = {}) {
           projectToken: input.projectToken
         });
         const submitted = contextPocWorkspaceActionSubmitResult(
-          await blockAction(input)
+          await blockAction(input, {
+            deliveryTargetRef: context.deliveryTargetRef || null
+          })
         );
         if (submitted.state === 'error') {
           return {
@@ -9187,7 +9265,9 @@ function contextPocWorkspaceFileOperations(options = {}) {
       validate: contextPocWorkspaceFileActionPrepareInput,
       async handle({ input, context }) {
         contextPocAssertWorkspaceOperationCurrent(context);
-        return projectAction(input);
+        return projectAction(input, {
+          deliveryTargetRef: context.deliveryTargetRef || null
+        });
       },
       redact: contextPocWorkspaceActionPrepareResult,
       errorCode: contextPocWorkspaceOperationErrorCode
@@ -9196,7 +9276,9 @@ function contextPocWorkspaceFileOperations(options = {}) {
       validate: contextPocWorkspaceFileActionSubmitInput,
       async handle({ input, context }) {
         contextPocAssertWorkspaceOperationCurrent(context);
-        return projectAction(input);
+        return projectAction(input, {
+          deliveryTargetRef: context.deliveryTargetRef || null
+        });
       },
       redact: contextPocWorkspaceActionSubmitResult,
       errorCode: contextPocWorkspaceOperationErrorCode
@@ -9368,6 +9450,7 @@ function createContextPocWorkspaceFileCoordinator(options = {}) {
         requestSeq: row.requestSeq,
         claimToken: internalClaim.claimToken,
         context: Object.freeze({
+          deliveryTargetRef: request.deliveryTargetRef || null,
           assertCurrent() {
             return contextPocWorkspaceBindingEqual(bindingFor(runtime, request), binding);
           }
@@ -9667,22 +9750,27 @@ function contextPocHandshakeValue(value) {
 
 function contextPocBindingValue(value, runtime, controller = contextPocController) {
   if (!contextPocExact(value, ['state', 'hostInstanceId', 'sessionRef', 'code'], [
-    'controllerId', 'pageInstanceId', 'selectionRevision'
+    'controllerId', 'pageInstanceId', 'selectionRevision', 'deliveryTargetRef'
   ]) || !['selected', 'none', 'stale', 'conflict'].includes(value.state)
       || value.hostInstanceId !== runtime.handshake.hostInstanceId
       || !(value.code === null || (typeof value.code === 'string' && value.code.length <= 64))) {
     return null;
   }
   if (value.state !== 'selected') {
-    return value.sessionRef === null ? { state: value.state, code: value.code } : null;
+    return value.sessionRef === null
+      && !Object.prototype.hasOwnProperty.call(value, 'deliveryTargetRef')
+      ? { state: value.state, code: value.code } : null;
   }
   if (typeof value.sessionRef !== 'string' || !CONTEXT_POC_SESSION_REF_RE.test(value.sessionRef)
+      || typeof value.deliveryTargetRef !== 'string'
+      || !CONTEXT_POC_DELIVERY_TARGET_REF_RE.test(value.deliveryTargetRef)
       || value.controllerId !== controller.controllerId
       || !contextPocValidId(value.pageInstanceId)
       || !Number.isSafeInteger(value.selectionRevision) || value.selectionRevision < 1) return null;
   return {
     state: 'selected',
     sessionRef: value.sessionRef,
+    deliveryTargetRef: value.deliveryTargetRef,
     controllerId: value.controllerId,
     pageInstanceId: value.pageInstanceId,
     selectionRevision: value.selectionRevision,
@@ -9846,6 +9934,12 @@ function contextPocWorkspaceFileBindingFor(runtime, request) {
         || request.controllerId !== runtime.binding.controllerId
         || request.pageInstanceId !== runtime.binding.pageInstanceId
         || request.selectionRevision !== runtime.binding.selectionRevision) return null;
+    const deliveryOperation = CONTEXT_POC_WORKSPACE_FILE_DELIVERY_OPERATIONS.has(
+      request.operation
+    );
+    if (deliveryOperation
+      ? request.deliveryTargetRef !== runtime.binding.deliveryTargetRef
+      : Object.prototype.hasOwnProperty.call(request, 'deliveryTargetRef')) return null;
 
     const identity = currentContextPocWorkspaceIdentity();
     const project = identity && currentContextPocProject(identity);
@@ -10130,6 +10224,7 @@ async function contextPocTick(runtime) {
       }
       const bindingChanged = !runtime.binding
         || runtime.binding.sessionRef !== binding.sessionRef
+        || runtime.binding.deliveryTargetRef !== binding.deliveryTargetRef
         || runtime.binding.pageInstanceId !== binding.pageInstanceId
         || runtime.binding.selectionRevision !== binding.selectionRevision;
       if (bindingChanged) {
@@ -10260,6 +10355,13 @@ async function startContextPocBridge(state) {
     if (generation !== contextPocBridgeGeneration || backendState !== state || state.exited) return false;
     const handshake = contextPocHandshakeValue(rawHandshake);
     if (!handshake) throw new Error('context POC handshake invalid');
+    // 与 auth token 一样只留在主进程的 backend 身份上；送入 renderer
+    // 的只有 Host 签发的 opaque deliveryTargetRef，不是这两个 HMAC 输入。
+    Object.defineProperty(state, 'contextHostInstanceId', {
+      value: handshake.hostInstanceId,
+      enumerable: false,
+      configurable: true
+    });
     const eligibility = backend.contextBridgeEligibility({
       enabled: true,
       spawnedByUs: true,
@@ -14358,6 +14460,8 @@ if (MAIN_HELPER_TEST) {
     contextPocDrainEventPages,
     shouldInitializeRemoteSecureState,
     deliveryWorkspaceFacts,
+    videoDeliveryTargetRefValue,
+    findFrozenPromptTarget,
     applyHotkeyBindings,
     ocrScriptsRoot,
     captureDeliveryRequest,

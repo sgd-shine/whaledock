@@ -14,6 +14,8 @@ window.__ModuleLoader__.load({
     const WORKSPACE_TEXT_CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
     const PREFLIGHT_TIMEOUT_MS = 2500;
     const PREFLIGHT_RETRY_MS = 120;
+    const ALIGNMENT_SETTLE_MS = 1500;
+    const ALIGNMENT_STORAGE_PREFIX = 'whaledock.content-alignment.v1.';
     const MAX_PREFERENCE_REVISION = 1_000_000_000;
     const MAX_PREFERENCE_LISTENERS = 64;
     const PREFERENCE_BOOTSTRAP_RETRY_MS = Object.freeze([50, 100, 200, 400, 800]);
@@ -77,7 +79,7 @@ window.__ModuleLoader__.load({
     const OPAQUE_VALUE_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,255}$/;
     const ACTIVE_RECEIPT_STATES = new Set(['submitting', 'queued', 'running', 'waiting']);
     const SHELL_CONTRACT = 'whaledock.content-shell/v1';
-    const inject = ['connection', 'sessions'];
+    const inject = ['connection', 'sessions', 'workspaces'];
 
     const SHELL_CSS = `.wd10-left{background:var(--dsw-specific-sidebar-fill);border-right:1px solid var(--dsw-alias-border-l1);min-width:0;height:100%;display:flex;flex-direction:column;overflow:hidden}.wd10-switch{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:12px;padding:4px;border-radius:10px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1)}.wd10-switch button{border:0;border-radius:7px;padding:7px 10px;color:var(--dsw-alias-fg-secondary);background:transparent;font:inherit;font-size:13px;cursor:pointer}.wd10-switch button[aria-selected=true]{background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);box-shadow:0 1px 3px rgba(0,0,0,.08)}.wd10-library{min-height:0;overflow:auto;padding:0 10px 18px}.wd10-libraryHead{padding:8px 6px 10px}.wd10-eyebrow{font-size:11px;letter-spacing:.08em;color:var(--dsw-alias-fg-tertiary);text-transform:uppercase}.wd10-libraryHead h2{font-size:17px;line-height:1.35;margin:4px 0;color:var(--dsw-alias-fg-primary)}.wd10-libraryHead p{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-refresh,.wd10-loadMore{margin-top:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;padding:5px 8px;background:transparent;color:var(--dsw-alias-fg-secondary);font:inherit;font-size:11px;cursor:pointer}.wd10-refresh:disabled,.wd10-loadMore:disabled{opacity:.55;cursor:default}.wd10-loadMore{width:100%;padding:8px}.wd10-workspaceList{margin:0 0 10px;padding:8px 6px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}.wd10-workspaceChoice{width:100%;text-align:left;border:1px solid transparent;border-radius:8px;padding:7px 8px;margin-top:4px;background:transparent;color:inherit;cursor:pointer}.wd10-workspaceChoice:hover,.wd10-workspaceChoice[aria-current=true]{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l1)}.wd10-projectPath{display:block;margin-top:3px;font-size:10px;color:var(--dsw-alias-fg-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wd10-project{width:100%;text-align:left;border:1px solid transparent;border-radius:10px;padding:10px;margin:2px 0 6px;background:transparent;color:inherit;cursor:pointer}.wd10-project:hover{background:var(--dsw-alias-bg-layer-1)}.wd10-project[aria-current=true]{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l2)}.wd10-projectTitle{display:block;font-size:13px;font-weight:600;color:var(--dsw-alias-fg-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wd10-projectMeta{display:flex;align-items:center;gap:7px;margin-top:5px;font-size:11px;color:var(--dsw-alias-fg-tertiary)}.wd10-stageBadge{border-radius:999px;padding:1px 7px;background:var(--dsw-alias-state-business-tertiary);color:var(--dsw-alias-state-business-primary)}.wd10-detailFrame{min-width:0;height:100%;overflow:hidden}.wd10-detailFrame[hidden],.wd10-detailRail[hidden]{display:none}.wd10-detailRail{min-width:0;height:100%;display:flex;background:var(--dsw-alias-bg-layer-1);border-right:1px solid var(--dsw-alias-border-l2);overflow:hidden}.wd10-detailRail button{width:36px;height:100%;border:0;padding:12px 0;background:transparent;color:var(--dsw-alias-fg-secondary);font:inherit;font-size:11px;letter-spacing:.12em;writing-mode:vertical-rl;text-orientation:upright;cursor:pointer}.wd10-detailRail button:hover{color:var(--dsw-alias-fg-primary);background:var(--dsw-alias-bg-base)}.wd10-detail{min-width:0;height:100%;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base);border-right:1px solid var(--dsw-alias-border-l2);overflow:hidden}.wd10-detailHead{position:relative;padding:22px 118px 12px 24px}.wd10-collapseButton{position:absolute;top:18px;right:18px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 9px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-secondary);font:inherit;font-size:11px;cursor:pointer}.wd10-collapseButton:hover{color:var(--dsw-alias-fg-primary);border-color:var(--dsw-alias-fg-tertiary)}.wd10-detailHead h1{font-size:22px;line-height:1.25;margin:5px 0 7px;color:var(--dsw-alias-fg-primary)}.wd10-detailHead p{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-projectActions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.wd10-projectActions button,.wd10-receipt button,.wd10-choice,.wd10-nextAction{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 9px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:11px;cursor:pointer}.wd10-projectActions button:disabled,.wd10-receipt button:disabled,.wd10-choice:disabled,.wd10-nextAction:disabled{opacity:.55;cursor:default}.wd10-tabs{display:flex;gap:3px;padding:0 20px;border-bottom:1px solid var(--dsw-alias-border-l1);overflow:auto}.wd10-tabs button{border:0;border-bottom:2px solid transparent;padding:10px 8px 9px;background:transparent;color:var(--dsw-alias-fg-secondary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}.wd10-tabs button[aria-selected=true]{border-bottom-color:var(--dsw-alias-fg-primary);color:var(--dsw-alias-fg-primary)}.wd10-receipts{flex:none;max-height:188px;overflow:auto;padding:10px 18px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}.wd10-receiptTitle{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-receipt{margin-top:7px;padding:8px 10px;border-radius:9px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-receiptHead,.wd10-receiptFoot{display:flex;align-items:center;justify-content:space-between;gap:8px}.wd10-receipt strong{color:var(--dsw-alias-fg-primary)}.wd10-receipt p{margin:5px 0 0;line-height:1.45}.wd10-preflight{border-color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-state-warn-tertiary)}.wd10-pulse{color:var(--dsw-alias-state-business-primary);font-weight:600}.wd10-panel{min-height:0;overflow:auto;padding:20px 24px 28px}.wd10-card{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:16px;background:var(--dsw-alias-bg-layer-1);margin-bottom:12px}.wd10-card h3{font-size:14px;margin:0 0 7px;color:var(--dsw-alias-fg-primary)}.wd10-card p{font-size:12px;line-height:1.65;margin:0;color:var(--dsw-alias-fg-secondary)}.wd10-overviewMeta{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}.wd10-overviewMeta div{border:1px solid var(--dsw-alias-border-l1);border-radius:9px;padding:9px;background:var(--dsw-alias-bg-base)}.wd10-overviewMeta span,.wd10-currentChoice span{display:block;font-size:10px;color:var(--dsw-alias-fg-tertiary);margin-bottom:3px}.wd10-overviewMeta strong,.wd10-currentChoice strong{font-size:12px;color:var(--dsw-alias-fg-primary)}.wd10-currentChoices{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}.wd10-currentChoice{border-left:3px solid var(--dsw-alias-state-business-primary);padding:7px 9px;background:var(--dsw-alias-bg-base);border-radius:0 8px 8px 0}.wd10-choiceGroup{margin-top:14px}.wd10-choiceGroup h4{font-size:11px;margin:0 0 7px;color:var(--dsw-alias-fg-secondary)}.wd10-choiceList{display:flex;flex-wrap:wrap;gap:6px}.wd10-choice[aria-pressed=true]{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-tertiary);font-weight:600}.wd10-incomplete{color:var(--dsw-alias-state-warn-primary)!important;margin-top:10px!important}.wd10-next{margin-top:16px;padding-top:14px;border-top:1px solid var(--dsw-alias-border-l1)}.wd10-nextAction{margin-top:8px;border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-bg-base);font-weight:600}.wd10-unfinished strong{display:block;margin:8px 0;color:var(--dsw-alias-fg-primary)}.wd10-feedback{font-size:12px;line-height:1.5;margin:8px 0 0;color:var(--dsw-alias-fg-secondary)}.wd10-chat{min-width:0;height:100%;display:flex;overflow:hidden}.wd10-chatMain{min-width:0;flex:1;display:flex;flex-direction:column;overflow:hidden}.wd10-empty{padding:24px;color:var(--dsw-alias-fg-secondary);font-size:13px;line-height:1.6}@media(max-width:1120px){.wd10-detailHead{padding:18px 112px 10px 18px}.wd10-collapseButton{top:14px;right:14px}.wd10-panel{padding:16px 18px}.wd10-detailHead h1{font-size:19px}.wd10-tabs{padding:0 14px}.wd10-receipts{padding:9px 14px}.wd10-overviewMeta,.wd10-currentChoices{grid-template-columns:1fr}}.wd10-leftViews,.wd10-leftView,.wd10-nativeSidebar{min-height:0;flex:1;overflow:hidden}.wd10-leftView[hidden],.wd10-nativeSidebar[hidden]{display:none}.wd10-banner,.wd10-hint{display:flex;align-items:center;gap:8px;margin:10px 18px 0;padding:9px 10px;border:1px solid var(--dsw-alias-state-warn-primary);border-radius:9px;color:var(--dsw-alias-fg-primary);background:var(--dsw-alias-state-warn-tertiary);font-size:12px;line-height:1.45}.wd10-banner span,.wd10-hint span{min-width:0;flex:1}.wd10-banner button,.wd10-hint button{flex:none;border:1px solid currentColor;border-radius:7px;padding:4px 8px;background:transparent;color:inherit;cursor:pointer}.wd10-banner button:disabled{opacity:.55;cursor:default}.wd10-prefStatus{margin:0 14px 8px;color:var(--dsw-alias-state-warn-primary);font-size:11px}.wd10-contentDetails{transition:width var(--ds-transition-duration-slow) var(--ds-ease-in-out);flex-shrink:0}`;
     const SCRIPT_CSS = `.wd10-script{display:flex;flex-direction:column;gap:10px}.wd10-scriptHead,.wd10-blockMeta{display:flex;align-items:center;justify-content:space-between;gap:8px}.wd10-scriptHead h3{margin:0;color:var(--dsw-alias-fg-primary);font-size:14px}.wd10-scriptHead span,.wd10-blockMeta span{font-size:10px;color:var(--dsw-alias-fg-tertiary)}.wd10-block{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:13px;background:var(--dsw-alias-bg-layer-1)}.wd10-blockMeta strong{font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-block pre,.wd10-compare pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:9px 0 0;font:inherit;font-size:12px;line-height:1.6;color:var(--dsw-alias-fg-primary)}.wd10-blockActions,.wd10-proposalActions{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}.wd10-blockActions button,.wd10-proposalActions button,.wd10-undo{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 9px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:11px;cursor:pointer}.wd10-blockActions button:disabled,.wd10-proposalActions button:disabled,.wd10-undo:disabled{opacity:.5;cursor:default}.wd10-proposal{border-color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-state-warn-tertiary)}.wd10-compare{margin-top:10px;border-radius:9px;padding:10px;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1)}.wd10-compare h4{margin:0;font-size:11px;color:var(--dsw-alias-fg-secondary)}.wd10-proposalActions button:first-child,.wd10-undo{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);font-weight:600}.wd10-undo{margin-top:11px}`;
@@ -141,30 +143,41 @@ window.__ModuleLoader__.load({
 
     function creatorProjects(state, workspaces) {
       const groups = new Map();
+      const pathGroups = new Map();
       const claimed = new Set();
       const archived = new Set(workspaces.archivedSessionIds || []);
       for (const workspace of workspaces.items) {
         const workspacePath = normalizeProjectPath(workspace.path);
-        const project = {
-          key: `workspace:${String(workspace.workspaceId)}`,
-          workspaceId: workspace.workspaceId,
-          title: workspace.title || '未命名项目',
-          pathTail: projectPathTail(workspacePath),
-          sessions: [],
-          sessionIds: [],
-          running: false,
-          updatedAt: 0,
-          representativeId: undefined
-        };
+        const key = workspacePath ? `path:${workspacePath}`
+          : `workspace:${String(workspace.workspaceId)}`;
+        let project = groups.get(key);
+        if (project === undefined) {
+          project = {
+            key,
+            workspaceId: workspace.workspaceId,
+            title: workspace.title || projectTitle(workspacePath, '未命名项目'),
+            path: workspacePath,
+            pathTail: projectPathTail(workspacePath),
+            sessions: [],
+            sessionIds: [],
+            running: false,
+            updatedAt: 0,
+            representativeId: undefined
+          };
+          groups.set(key, project);
+          if (workspacePath) pathGroups.set(workspacePath, project);
+        }
         for (const id of workspace.sessionIds) {
           const session = state.byId[id];
-          if (archived.has(id) || session === undefined || session.origin === 'subagent') continue;
+          if (archived.has(id) || session === undefined || session.origin === 'subagent'
+              || normalizeProjectPath(session.cwd) !== workspacePath) continue;
           claimed.add(id);
-          project.sessions.push(session);
-          project.sessionIds.push(id);
+          if (!project.sessionIds.includes(id)) {
+            project.sessions.push(session);
+            project.sessionIds.push(id);
+          }
           project.running ||= session.running === true;
         }
-        groups.set(project.key, project);
       }
       for (const id of state.ids) {
         const session = state.byId[id];
@@ -173,11 +186,12 @@ window.__ModuleLoader__.load({
         const normalizedCwd = normalizeProjectPath(session.cwd);
         const sourceKey = normalizedCwd || `session:${String(id)}`;
         const key = `cwd:${sourceKey}`;
-        let project = groups.get(key);
+        let project = normalizedCwd ? pathGroups.get(normalizedCwd) : groups.get(key);
         if (project === undefined) {
           project = {
-            key,
+            key: normalizedCwd ? `path:${normalizedCwd}` : key,
             title: projectTitle(normalizedCwd, session.displayTitle),
+            path: normalizedCwd,
             pathTail: projectPathTail(normalizedCwd),
             sessions: [],
             sessionIds: [],
@@ -185,7 +199,8 @@ window.__ModuleLoader__.load({
             updatedAt: 0,
             representativeId: undefined
           };
-          groups.set(key, project);
+          groups.set(project.key, project);
+          if (normalizedCwd) pathGroups.set(normalizedCwd, project);
         }
         project.sessions.push(session);
         project.sessionIds.push(id);
@@ -863,8 +878,7 @@ window.__ModuleLoader__.load({
       return `${Math.floor(seconds / 60)} 分 ${String(seconds % 60).padStart(2, '0')} 秒`;
     }
 
-    function CreatorSidebar({ workspace, workspaces, activeWorkspaceKey, onWorkspaceSelect,
-      catalog, selectedToken, onSelect, onRefresh, onLoadMore }) {
+    function CreatorSidebar({ workspace, catalog, selectedToken, onSelect, onRefresh, onLoadMore }) {
       const copy = catalog.status === 'loading' ? '正在读取当前工作区的 front matter…'
         : catalog.status === 'error' ? '内容文件暂时读不到，没有使用旧数据。'
           : catalog.status === 'ready' && catalog.projects.length === 0
@@ -886,17 +900,11 @@ window.__ModuleLoader__.load({
               disabled: catalog.status === 'loading', onClick: onRefresh,
               children: catalog.status === 'loading' ? '正在刷新…' : '刷新内容' })
           ]
-        }), workspaces.length > 0 && react_jsx_runtime.jsxs('div', {
+        }), workspace && react_jsx_runtime.jsxs('div', {
           className: 'wd10-workspaceList', children: [
-            react_jsx_runtime.jsx('div', { className: 'wd10-eyebrow', children: '会话对齐工作区' }),
-            ...workspaces.map((item) => react_jsx_runtime.jsxs('button', {
-              type: 'button', className: 'wd10-workspaceChoice',
-              'aria-current': item.key === activeWorkspaceKey,
-              onClick: () => onWorkspaceSelect(item), children: [
-                react_jsx_runtime.jsx('span', { className: 'wd10-projectTitle', children: item.title }),
-                react_jsx_runtime.jsx('span', { className: 'wd10-projectPath', children: item.pathTail })
-              ]
-            }, item.key))
+            react_jsx_runtime.jsx('div', { className: 'wd10-eyebrow', children: '当前内容文件夹' }),
+            react_jsx_runtime.jsx('span', { className: 'wd10-projectTitle', children: workspace.title }),
+            react_jsx_runtime.jsx('span', { className: 'wd10-projectPath', children: workspace.pathTail })
           ]
         }), ...catalog.projects.map((project) => react_jsx_runtime.jsxs('button', {
           className: 'wd10-project',
@@ -921,7 +929,8 @@ window.__ModuleLoader__.load({
     }
 
     function TaskReceiptStrip({ projectToken, workspaceFiles, preflight, pending,
-      feedback, onConfirm, onCancel, refreshKey, onCatalogRefresh, preflightRemaining }) {
+      feedback, onConfirm, onAlignThenRetry, onCancel, refreshKey, onCatalogRefresh,
+      preflightRemaining }) {
       const [receiptState, setReceiptState] = react.useState({ status: 'idle', receipts: [] });
       const [operationFeedback, setOperationFeedback] = react.useState('');
       const pollAttempt = react.useRef(0);
@@ -995,8 +1004,7 @@ window.__ModuleLoader__.load({
         } catch (_error) { setOperationFeedback('结果暂时打不开；请从当前工作区核对。'); }
       };
       const matchText = preflight?.workspaceMatch === 'match' ? '工作区匹配'
-        : preflight?.workspaceMatch === 'mismatch' ? '工作区不匹配'
-          : '工作区无法确认';
+        : '右边的对话不在这条内容的文件夹里';
       return react_jsx_runtime.jsxs('section', {
         className: 'wd10-receipts', 'aria-label': '任务状态', children: [
           react_jsx_runtime.jsxs('div', { className: 'wd10-receiptTitle', children: [
@@ -1011,13 +1019,22 @@ window.__ModuleLoader__.load({
               ] }),
               react_jsx_runtime.jsx('p', { children:
                 `${preflight.workspaceLabel} · ${preflight.targetRunning ? '会话正在运行' : '会话当前未运行'} · ${preflight.eventTracking === 'ready' ? '事件回执已接通' : '事件回执未接通'} · ${preflightRemaining ?? 0} 秒后过期` }),
-              react_jsx_runtime.jsxs('div', { className: 'wd10-receiptFoot', children: [
-                react_jsx_runtime.jsx('button', { type: 'button', disabled: pending,
-                  onClick: onCancel, children: '取消' }),
-                react_jsx_runtime.jsx('button', { type: 'button', disabled: pending,
-                  onClick: onConfirm, children: pending ? '正在提交…'
-                    : preflight.workspaceMatch === 'match' ? '确认发送' : '仍然发' })
-              ] })
+              preflight.workspaceMatch === 'match'
+                ? react_jsx_runtime.jsxs('div', { className: 'wd10-receiptFoot', children: [
+                  react_jsx_runtime.jsx('button', { type: 'button', disabled: pending,
+                    onClick: onCancel, children: '取消' }),
+                  react_jsx_runtime.jsx('button', { type: 'button', disabled: pending,
+                    onClick: onConfirm, children: pending ? '正在提交…' : '确认发送' })
+                ] })
+                : react_jsx_runtime.jsxs('div', { className: 'wd10-receiptFoot', children: [
+                  react_jsx_runtime.jsx('button', { type: 'button', disabled: pending,
+                    onClick: onAlignThenRetry,
+                    children: pending ? '正在回到这条内容的对话…' : '先回到这条内容的对话再发' }),
+                  react_jsx_runtime.jsx('button', { type: 'button', disabled: pending,
+                    onClick: onConfirm, children: pending ? '正在提交…' : '仍然发到现在的对话' }),
+                  react_jsx_runtime.jsx('button', { type: 'button', disabled: pending,
+                    onClick: onCancel, children: '取消' })
+                ] })
             ]
           }),
           receiptState.status === 'loading' && react_jsx_runtime.jsx('p', {
@@ -2984,6 +3001,7 @@ window.__ModuleLoader__.load({
       const pendingRef = react.useRef(false);
       const actionAttempt = react.useRef(0);
       const actionAbort = react.useRef(null);
+      const preparedActionRef = react.useRef(null);
       react.useEffect(() => {
         actionAttempt.current += 1;
         actionAbort.current?.abort();
@@ -2993,6 +3011,7 @@ window.__ModuleLoader__.load({
         setPreflight(null);
         setPreflightRemaining(null);
         setFeedback('');
+        preparedActionRef.current = null;
         return () => {
           actionAttempt.current += 1;
           actionAbort.current?.abort();
@@ -3020,8 +3039,9 @@ window.__ModuleLoader__.load({
         tick();
         return () => { if (timer !== null) globalThis.clearTimeout(timer); };
       }, [preflight]);
-      const runPreparedAction = async (spec) => {
+      const runPreparedAction = async (spec, options = {}) => {
         if (!project || pendingRef.current) return;
+        preparedActionRef.current = spec;
         pendingRef.current = true;
         setPending(true);
         setPreflight(null);
@@ -3030,9 +3050,36 @@ window.__ModuleLoader__.load({
         actionAbort.current = controller;
         const attempt = ++actionAttempt.current;
         try {
-          const snapshot = await workspaceFiles.execute(
-            spec.prepareOperation, spec.prepareInput, controller.signal
-          );
+          const retryAlignmentTransient = options.retryAlignmentTransient === true
+            && ['project.action.prepare', 'block.action.prepare'].includes(spec.prepareOperation);
+          const retryDeadline = retryAlignmentTransient
+            ? Date.now() + PREFLIGHT_TIMEOUT_MS : 0;
+          let snapshot;
+          do {
+            snapshot = await workspaceFiles.execute(
+              spec.prepareOperation, spec.prepareInput, controller.signal
+            );
+            if (actionAttempt.current !== attempt) return;
+            if (!retryAlignmentTransient
+                || snapshot?.state !== 'rejected'
+                || !['workspace-unavailable', 'operation-stale'].includes(snapshot.code)
+                || Date.now() >= retryDeadline) break;
+            const retryDelay = Math.min(PREFLIGHT_RETRY_MS, retryDeadline - Date.now());
+            if (retryDelay <= 0) break;
+            const waited = await new Promise((resolve) => {
+              if (controller.signal.aborted) { resolve(false); return; }
+              let timer = null;
+              const finish = (value) => {
+                if (timer !== null) globalThis.clearTimeout(timer);
+                controller.signal.removeEventListener('abort', onAbort);
+                resolve(value);
+              };
+              const onAbort = () => finish(false);
+              controller.signal.addEventListener('abort', onAbort, { once: true });
+              timer = globalThis.setTimeout(() => finish(true), retryDelay);
+            });
+            if (!waited) return;
+          } while (Date.now() <= retryDeadline);
           if (actionAttempt.current !== attempt) return;
           let value = snapshot?.state === 'fulfilled' ? snapshot.result : null;
           if (spec.scope === 'block') {
@@ -3095,6 +3142,42 @@ window.__ModuleLoader__.load({
         setPreflight(null);
         setFeedback('已取消，没有发送。');
       };
+      const alignThenRetryPreflight = async () => {
+        if (!preflight || pendingRef.current) return;
+        const spec = preparedActionRef.current;
+        if (!spec || typeof onAlign !== 'function') {
+          setFeedback('暂时回不到这条内容的对话；没有发送。');
+          return;
+        }
+        setPreflight(null);
+        setPreflightRemaining(null);
+        pendingRef.current = true;
+        setPending(true);
+        setFeedback('正在回到这条内容的对话…');
+        const attempt = ++actionAttempt.current;
+        try {
+          const result = await onAlign();
+          if (actionAttempt.current !== attempt) return;
+          pendingRef.current = false;
+          setPending(false);
+          if (result?.ok !== true) {
+            setFeedback('暂时回不到这条内容的对话；没有发送。');
+            return;
+          }
+          // sessions.open 的官方 store 已精确落稳，但 main 的认证 selection/stage
+          // 可能还差一个 tick。只重试无副作用的 prepare，submit 与未知结果永不重试。
+          await runPreparedAction(spec, { retryAlignmentTransient: true });
+        } catch (_error) {
+          if (actionAttempt.current === attempt) {
+            setFeedback('暂时回不到这条内容的对话；没有发送。');
+          }
+        } finally {
+          if (actionAttempt.current === attempt) {
+            pendingRef.current = false;
+            setPending(false);
+          }
+        }
+      };
       const confirmPreflight = async () => {
         if (!preflight || pendingRef.current) return;
         if (Date.parse(preflight.expiresAt) <= Date.now()) {
@@ -3153,12 +3236,11 @@ window.__ModuleLoader__.load({
       const title = project?.title || routingProject?.title || '未选择内容';
       return react_jsx_runtime.jsxs('div', { className: 'wd10-detail', children: [
         alignment && react_jsx_runtime.jsxs('div', { className: 'wd10-banner', role: 'alert', children: [
-          react_jsx_runtime.jsxs('span', { children: [
-            '右栏当前在《', alignment.currentTitle, '》，不是你选的《', routingProject?.title || title, '》。',
-            alignment.error || ''
-          ] }),
-          react_jsx_runtime.jsx('button', { type: 'button', disabled: alignment.pending,
-            onClick: onAlign, children: alignment.pending ? '正在对齐…' : '一键对齐' })
+          react_jsx_runtime.jsx('span', { children: alignment.pending
+            ? '正在连到这条内容的对话…'
+            : `右边的对话现在不在这条内容的文件夹里。${alignment.error || ''}` }),
+          !alignment.pending && react_jsx_runtime.jsx('button', { type: 'button',
+            onClick: onAlign, children: '回到这条内容的对话' })
         ] }),
         react_jsx_runtime.jsxs('header', { className: 'wd10-detailHead', children: [
           react_jsx_runtime.jsx('div', { className: 'wd10-eyebrow', children: '第2步 推进当前内容' }),
@@ -3176,7 +3258,8 @@ window.__ModuleLoader__.load({
         react_jsx_runtime.jsx(TaskReceiptStrip, {
           projectToken: project?.projectToken || null,
           workspaceFiles, preflight, pending, feedback,
-          onConfirm: () => { void confirmPreflight(); }, onCancel: cancelPreflight,
+          onConfirm: () => { void confirmPreflight(); },
+          onAlignThenRetry: () => { void alignThenRetryPreflight(); }, onCancel: cancelPreflight,
           refreshKey: receiptRefresh, onCatalogRefresh, preflightRemaining
         }),
         react_jsx_runtime.jsx('main', { className: 'wd10-panel', children: tab === 'overview'
@@ -3210,8 +3293,119 @@ window.__ModuleLoader__.load({
       ] });
     }
 
-    function createProjectActions(ctx) {
+    function createProjectActions(ctx, alignmentScope) {
+      const pendingWorkspaces = new Map();
+      const workspaceIdsByPath = new Map();
+      const pendingConnections = new Map();
+      const rememberedConnections = new Map();
+      const sharedScope = typeof alignmentScope === 'string' && ID_RE.test(alignmentScope)
+        ? alignmentScope : null;
+
+      const sharedKey = (workspaceId) => {
+        const value = String(workspaceId ?? '');
+        return sharedScope !== null && ID_RE.test(value)
+          ? `${ALIGNMENT_STORAGE_PREFIX}${sharedScope}.${value}` : null;
+      };
+      const readShared = (workspaceId) => {
+        const key = sharedKey(workspaceId);
+        if (key === null) return null;
+        try {
+          const value = JSON.parse(globalThis.localStorage.getItem(key));
+          if (!exact(value, ['schema', 'sessionId', 'observed']) || value.schema !== 1
+              || !OPAQUE_VALUE_RE.test(String(value.sessionId || ''))
+              || typeof value.observed !== 'boolean') return null;
+          return Object.freeze({ sessionId: value.sessionId, observed: value.observed });
+        } catch (_error) {
+          return null;
+        }
+      };
+      const writeShared = (workspaceId, value) => {
+        const key = sharedKey(workspaceId);
+        if (key === null || !OPAQUE_VALUE_RE.test(String(value?.sessionId || ''))
+            || typeof value?.observed !== 'boolean') return;
+        try {
+          globalThis.localStorage.setItem(key, JSON.stringify({
+            schema: 1, sessionId: value.sessionId, observed: value.observed
+          }));
+        } catch (_error) { /* 共享去重失败时仍保留单页内存锁 */ }
+      };
+      const removeShared = (workspaceId, sessionId) => {
+        const key = sharedKey(workspaceId);
+        if (key === null) return;
+        try {
+          const current = readShared(workspaceId);
+          if (current !== null && Object.is(current.sessionId, sessionId)) {
+            globalThis.localStorage.removeItem(key);
+          }
+        } catch (_error) { /* 单页锁继续 fail-closed */ }
+      };
+      const withSharedLock = async (workspaceId, operation) => {
+        const key = sharedKey(workspaceId);
+        const locks = globalThis.navigator?.locks;
+        if (key === null || locks === undefined || typeof locks.request !== 'function') {
+          return operation();
+        }
+        let started = false;
+        try {
+          return await locks.request(key, { mode: 'exclusive' }, () => {
+            started = true;
+            return operation();
+          });
+        } catch (error) {
+          if (started) throw error;
+          return operation();
+        }
+      };
+
+      if (sharedScope !== null) {
+        try {
+          const currentPrefix = `${ALIGNMENT_STORAGE_PREFIX}${sharedScope}.`;
+          for (let index = globalThis.localStorage.length - 1; index >= 0; index -= 1) {
+            const key = globalThis.localStorage.key(index);
+            if (typeof key === 'string' && key.startsWith(ALIGNMENT_STORAGE_PREFIX)
+                && !key.startsWith(currentPrefix)) globalThis.localStorage.removeItem(key);
+          }
+        } catch (_error) { /* 浏览器禁用 storage 时只使用本页内存 */ }
+      }
+
       return Object.freeze({
+        target() {
+          const connection = ctx.get('connection');
+          try {
+            const cwd = normalizeProjectPath(connection?.hostDescription?.getSnapshot?.()?.cwd);
+            return cwd ? { ok: true, cwd } : { ok: false, code: 'workspace-unavailable' };
+          } catch (_error) {
+            return { ok: false, code: 'workspace-unavailable' };
+          }
+        },
+        async ensure(cwd) {
+          const workspaces = ctx.get('workspaces');
+          const path = normalizeProjectPath(cwd);
+          if (workspaces === undefined || !path || typeof workspaces.create !== 'function') {
+            return { ok: false, code: 'workspace-unavailable' };
+          }
+          const knownId = workspaceIdsByPath.get(path);
+          if (knownId !== undefined) return { ok: true, workspaceId: knownId, path };
+          const existing = pendingWorkspaces.get(path);
+          if (existing !== undefined) return existing;
+          const operation = (async () => {
+            try {
+              const workspace = await workspaces.create({ path });
+              if (workspace?.workspaceId === undefined) {
+                return { ok: false, code: 'workspace-unavailable' };
+              }
+              workspaceIdsByPath.set(path, workspace.workspaceId);
+              return { ok: true, workspaceId: workspace.workspaceId, path };
+            } catch (_error) {
+              return { ok: false, code: 'workspace-unavailable' };
+            }
+          })();
+          pendingWorkspaces.set(path, operation);
+          void operation.finally(() => {
+            if (pendingWorkspaces.get(path) === operation) pendingWorkspaces.delete(path);
+          });
+          return operation;
+        },
         open(sessionId) {
           const sessions = ctx.get('sessions');
           if (sessions === undefined) return { ok: false, code: 'session-unavailable', reason: 'service' };
@@ -3223,18 +3417,77 @@ window.__ModuleLoader__.load({
             return { ok: false, code: 'session-unavailable', reason: 'target' };
           }
         },
-        async connect(workspaceId) {
+        observe(sessionId, cwd, workspaceId) {
+          const path = normalizeProjectPath(cwd);
+          if (sessionId === undefined || !path) return;
+          const targets = workspaceId === undefined
+            ? [...rememberedConnections.keys()] : [workspaceId];
+          for (const candidateId of targets) {
+            const remembered = rememberedConnections.get(candidateId);
+            if (remembered === undefined || (remembered.path === path
+                && Object.is(remembered.sessionId, sessionId))) {
+              rememberedConnections.set(candidateId, Object.freeze({
+                path, sessionId, observed: true
+              }));
+              void withSharedLock(candidateId, async () => {
+                const shared = readShared(candidateId);
+                if (shared === null || Object.is(shared.sessionId, sessionId)) {
+                  writeShared(candidateId, { sessionId, observed: true });
+                }
+              });
+            }
+          }
+        },
+        async connect(workspaceId, cwd) {
           const workspaces = ctx.get('workspaces');
-          if (workspaces === undefined || workspaceId === undefined) {
+          const path = normalizeProjectPath(cwd);
+          if (workspaces === undefined || workspaceId === undefined || !path) {
             return { ok: false, code: 'workspace-unavailable' };
           }
-          try {
-            const sessionId = await workspaces.connectWorkspace(workspaceId);
-            return sessionId === undefined ? { ok: false, code: 'workspace-unavailable' }
-              : { ok: true, sessionId };
-          } catch (_error) {
-            return { ok: false, code: 'workspace-unavailable' };
-          }
+          const existing = pendingConnections.get(workspaceId);
+          if (existing !== undefined && existing.path === path) return existing.promise;
+          const operation = (async () => {
+            try {
+              return await withSharedLock(workspaceId, async () => {
+                const remembered = rememberedConnections.get(workspaceId);
+                const shared = readShared(workspaceId);
+                if ((remembered === undefined || remembered.path === path)
+                    && (remembered !== undefined || shared !== null)) {
+                  const sessionId = remembered?.sessionId || shared.sessionId;
+                  const observed = remembered?.observed === true || shared?.observed === true;
+                  if (!observed) {
+                    rememberedConnections.set(workspaceId, Object.freeze({
+                      path, sessionId, observed: false
+                    }));
+                    writeShared(workspaceId, { sessionId, observed: false });
+                    return { ok: true, sessionId };
+                  }
+                  rememberedConnections.delete(workspaceId);
+                  removeShared(workspaceId, sessionId);
+                } else if (remembered !== undefined) {
+                  rememberedConnections.delete(workspaceId);
+                }
+                const sessionId = await workspaces.connectWorkspace(workspaceId);
+                if (sessionId === undefined) {
+                  return { ok: false, code: 'workspace-unavailable' };
+                }
+                rememberedConnections.set(workspaceId, Object.freeze({
+                  path, sessionId, observed: false
+                }));
+                writeShared(workspaceId, { sessionId, observed: false });
+                return { ok: true, sessionId };
+              });
+            } catch (_error) {
+              return { ok: false, code: 'workspace-unavailable' };
+            }
+          })();
+          pendingConnections.set(workspaceId, Object.freeze({ path, promise: operation }));
+          void operation.finally(() => {
+            if (pendingConnections.get(workspaceId)?.promise === operation) {
+              pendingConnections.delete(workspaceId);
+            }
+          });
+          return operation;
         },
         async fillDraft(sessionId, text, workspaceId, signal) {
           const sessions = ctx.get('sessions');
@@ -3455,7 +3708,6 @@ window.__ModuleLoader__.load({
       const [hintSeen, setHintSeen] = react.useState(false);
       const [preferenceError, setPreferenceError] = react.useState('');
       const [panelCollapsed, setPanelCollapsed] = react.useState(false);
-      const [activeProjectKey, setActiveProjectKey] = react.useState(null);
       const [creatorTab, setCreatorTab] = react.useState('overview');
       const [alignmentPending, setAlignmentPending] = react.useState(false);
       const [alignmentError, setAlignmentError] = react.useState('');
@@ -3463,6 +3715,10 @@ window.__ModuleLoader__.load({
       const [selectedContentToken, setSelectedContentToken] = react.useState(null);
       const [catalogRefreshKey, setCatalogRefreshKey] = react.useState(0);
       const alignmentAttempt = react.useRef(0);
+      const alignmentInFlight = react.useRef(null);
+      const alignmentExpected = react.useRef(null);
+      const alignmentKnown = react.useRef(null);
+      const ensuredWorkspace = react.useRef({ path: null, workspaceId: undefined });
       const catalogAttempt = react.useRef(0);
       const catalogIdentity = react.useRef(null);
       const catalogPages = react.useRef(1);
@@ -3475,25 +3731,80 @@ window.__ModuleLoader__.load({
       const panelExpandButton = react.useRef(null);
       const panelFocusReady = react.useRef(false);
       const alignmentCurrent = react.useRef(sessionState.current);
-      const currentProject = sessionState.current === undefined ? undefined
-        : projects.find((project) => project.sessionIds.includes(sessionState.current));
-      const currentProjectKey = currentProject?.key || null;
-      const activeRoutingProject = projects.find((project) => project.key === activeProjectKey)
-        || projects[0];
+      const modeRef = react.useRef(mode);
+      modeRef.current = mode;
+      const managedTarget = browserOnly ? null : projectActions?.target?.();
+      const managedTargetPath = managedTarget?.ok === true
+        ? normalizeProjectPath(managedTarget.cwd) : '';
+      const managedTargetPathRef = react.useRef(managedTargetPath);
+      managedTargetPathRef.current = managedTargetPath;
+      const currentSession = sessionState.current === undefined
+        ? undefined : sessionState.byId[sessionState.current];
+      const currentPath = normalizeProjectPath(currentSession?.cwd);
+      const currentContentRoot = currentSession !== undefined
+        && currentSession.origin !== 'subagent';
+      const activeRoutingProject = projects.find((project) => project.path === managedTargetPath)
+        || (managedTargetPath ? Object.freeze({
+          key: `path:${managedTargetPath}`,
+          title: projectTitle(managedTargetPath, '当前内容'),
+          path: managedTargetPath,
+          pathTail: projectPathTail(managedTargetPath),
+          sessions: Object.freeze([]), sessionIds: Object.freeze([]),
+          running: false, updatedAt: 0, representativeId: undefined
+        }) : undefined);
       const routingMismatch = activeRoutingProject !== undefined
-        && activeRoutingProject.key !== currentProjectKey;
-      const currentCatalogIdentity = !browserOnly && !routingMismatch && activeRoutingProject
-        && sessionState.current !== undefined
-        ? `${activeRoutingProject.key}\u0000${activeRoutingProject.pathTail}\u0000${sessionState.current}`
-        : null;
+        && (!currentContentRoot || currentPath !== managedTargetPath);
+      const catalogReadable = !browserOnly && !!managedTargetPath && !routingMismatch;
+      const currentCatalogIdentity = !browserOnly && managedTargetPath
+        ? `path:${managedTargetPath}` : null;
+      const alignmentScope = react.useRef({ mode, path: managedTargetPath });
 
       react.useLayoutEffect(() => {
-        if (Object.is(alignmentCurrent.current, sessionState.current)) return;
-        alignmentCurrent.current = sessionState.current;
+        const previous = alignmentScope.current;
+        if (previous.mode === mode && previous.path === managedTargetPath) return;
+        alignmentScope.current = { mode, path: managedTargetPath };
         alignmentAttempt.current += 1;
+        alignmentInFlight.current = null;
+        const expected = alignmentExpected.current;
+        alignmentExpected.current = null;
+        expected?.finish(false);
+        if (previous.path !== managedTargetPath) alignmentKnown.current = null;
         setAlignmentPending(false);
         setAlignmentError('');
-      }, [sessionState.current]);
+      }, [mode, managedTargetPath]);
+
+      react.useLayoutEffect(() => {
+        const expected = alignmentExpected.current;
+        if (expected !== null) {
+          if (Object.is(sessionState.current, expected.sessionId)
+              && currentContentRoot && currentPath === expected.path) {
+            projectActions?.observe?.(
+              expected.sessionId, expected.path, expected.workspaceId
+            );
+            const known = alignmentKnown.current;
+            if (known !== null && known.path === expected.path
+                && Object.is(known.sessionId, expected.sessionId)) {
+              alignmentKnown.current = Object.freeze({
+                path: known.path, sessionId: known.sessionId, observed: true
+              });
+            }
+            alignmentExpected.current = null;
+            expected.finish(true);
+          } else if (sessionState.current !== undefined
+              && !Object.is(sessionState.current, expected.fromSessionId)
+              && !Object.is(sessionState.current, expected.sessionId)) {
+            alignmentExpected.current = null;
+            expected.finish(false);
+          }
+        }
+        if (!Object.is(alignmentCurrent.current, sessionState.current)) {
+          alignmentCurrent.current = sessionState.current;
+          alignmentAttempt.current += 1;
+          alignmentInFlight.current = null;
+          setAlignmentPending(false);
+          setAlignmentError('');
+        }
+      }, [sessionState.current, currentPath, currentContentRoot]);
       react.useEffect(() => {
         if (preferences === undefined) return;
         const sync = (value) => {
@@ -3527,16 +3838,6 @@ window.__ModuleLoader__.load({
         }
         (panelCollapsed ? panelExpandButton : panelCollapseButton).current?.focus();
       }, [panelCollapsed]);
-      react.useEffect(() => {
-        if (projects.some((project) => project.key === activeProjectKey)) return;
-        alignmentAttempt.current += 1;
-        setAlignmentPending(false);
-        setAlignmentError('');
-        setActiveProjectKey(
-          projects.find((project) => project.key === currentProjectKey)?.key
-            || projects[0]?.key || null
-        );
-      }, [projects, activeProjectKey, currentProjectKey]);
       const refreshCatalog = react.useCallback(() => {
         setCatalogRefreshKey((current) => current + 1);
       }, []);
@@ -3558,7 +3859,13 @@ window.__ModuleLoader__.load({
           setSelectedContentToken(null);
           setCatalog({ status: identity ? 'loading' : 'idle', projects: [], nextCursor: null });
         }
-        if (!identity || !workspaceFiles || typeof workspaceFiles.execute !== 'function') {
+        if (!identity || !catalogReadable || !workspaceFiles
+            || typeof workspaceFiles.execute !== 'function') {
+          if (identity && !catalogReadable) {
+            setCatalog((current) => current.projects.length > 0
+              ? { ...current, status: 'stale', loadingMore: false }
+              : { status: 'loading', projects: [], nextCursor: null });
+          }
           if (identity && (!workspaceFiles || typeof workspaceFiles.execute !== 'function')) {
             setCatalog({ status: 'error', projects: [], nextCursor: null });
           }
@@ -3623,7 +3930,7 @@ window.__ModuleLoader__.load({
           catalogLoadMoreAbort.current = null;
           if (timer !== null) globalThis.clearTimeout(timer);
         };
-      }, [currentCatalogIdentity, workspaceFiles, catalogRefreshKey]);
+      }, [currentCatalogIdentity, catalogReadable, workspaceFiles, catalogRefreshKey]);
 
       const selectContent = (project) => {
         selectedContentRef.current = {
@@ -3729,39 +4036,174 @@ window.__ModuleLoader__.load({
       };
       const selectMode = (next) => {
         if (next === 'content') setPanelCollapsed(false);
+        if (next === 'sessions') {
+          alignmentAttempt.current += 1;
+          alignmentInFlight.current = null;
+          const expected = alignmentExpected.current;
+          alignmentExpected.current = null;
+          expected?.finish(false);
+          setAlignmentPending(false);
+        }
         setMode(next);
         if (!browserOnly) void writePreference({ contentViewMode: next });
       };
-      const alignProject = async (project, connectMissing) => {
-        if (project === undefined) return;
+      const alignManagedProject = async () => {
+        const project = activeRoutingProject;
+        const targetPath = managedTargetPath;
+        if (browserOnly || modeRef.current !== 'content' || project === undefined || !targetPath
+            || !projectActions) {
+          return { ok: false, code: 'workspace-unavailable' };
+        }
+        const expectedAtStart = alignmentExpected.current;
+        if (expectedAtStart !== null && expectedAtStart.path === targetPath) {
+          const aligned = await expectedAtStart.promise;
+          return aligned ? { ok: true, sessionId: expectedAtStart.sessionId }
+            : { ok: false, code: 'session-unavailable' };
+        }
+        if (alignmentInFlight.current !== null) {
+          return { ok: false, code: 'workspace-unavailable' };
+        }
         const attempt = ++alignmentAttempt.current;
         const currentAtStart = alignmentCurrent.current;
-        setActiveProjectKey(project.key);
+        const operation = Object.freeze({ attempt });
+        let expectedOpening = null;
+        alignmentInFlight.current = operation;
         setAlignmentPending(true);
         setAlignmentError('');
+        const stillCurrent = () => alignmentAttempt.current === attempt
+          && alignmentInFlight.current === operation
+          && modeRef.current === 'content'
+          && managedTargetPathRef.current === targetPath
+          && Object.is(alignmentCurrent.current, currentAtStart);
         try {
+          let workspaceId = project.workspaceId;
+          if (workspaceId === undefined && ensuredWorkspace.current.path === targetPath) {
+            workspaceId = ensuredWorkspace.current.workspaceId;
+          }
+          if (workspaceId === undefined) {
+            const ensured = await projectActions.ensure(targetPath);
+            if (!stillCurrent()) return { ok: false, code: 'operation-stale' };
+            if (ensured?.ok !== true) {
+              setAlignmentError('暂时无法打开这条内容的对话。');
+              return { ok: false, code: 'workspace-unavailable' };
+            }
+            workspaceId = ensured.workspaceId;
+            ensuredWorkspace.current = { path: targetPath, workspaceId };
+          } else {
+            ensuredWorkspace.current = { path: targetPath, workspaceId };
+          }
+          if (currentContentRoot && currentPath === targetPath) {
+            projectActions.observe?.(currentAtStart, targetPath, workspaceId);
+            alignmentKnown.current = Object.freeze({
+              path: targetPath, sessionId: currentAtStart, observed: true
+            });
+            return { ok: true, sessionId: currentAtStart };
+          }
           let targetId = project.representativeId;
-          if (targetId === undefined && connectMissing) {
-            const connected = await projectActions.connect(project.workspaceId);
-            if (alignmentAttempt.current !== attempt
-                || !Object.is(alignmentCurrent.current, currentAtStart)) return;
+          let targetObserved = targetId !== undefined;
+          const known = alignmentKnown.current;
+          if (targetId === undefined && known !== null && known.path === targetPath) {
+            if (known.observed === false || project.sessionIds.includes(known.sessionId)) {
+              targetId = known.sessionId;
+              targetObserved = known.observed === true
+                || project.sessionIds.includes(known.sessionId);
+            } else alignmentKnown.current = null;
+          }
+          if (targetId === undefined) {
+            const connected = await projectActions.connect(workspaceId, targetPath);
+            if (!stillCurrent()) return { ok: false, code: 'operation-stale' };
             if (connected?.ok !== true) {
-              setAlignmentError(' 无法建立项目会话。');
-              return;
+              setAlignmentError('暂时无法打开这条内容的对话。');
+              return { ok: false, code: 'workspace-unavailable' };
             }
             targetId = connected.sessionId;
+            targetObserved = false;
           }
+          alignmentKnown.current = Object.freeze({
+            path: targetPath, sessionId: targetId, observed: targetObserved
+          });
+          let settleExpected;
+          let settled = false;
+          let settleTimer;
+          const settledPromise = new Promise((resolve) => { settleExpected = resolve; });
+          expectedOpening = Object.freeze({
+            path: targetPath,
+            workspaceId,
+            sessionId: targetId,
+            fromSessionId: currentAtStart,
+            promise: settledPromise,
+            finish(value) {
+              if (settled) return false;
+              settled = true;
+              if (settleTimer !== undefined) clearTimeout(settleTimer);
+              settleExpected(value === true);
+              return true;
+            }
+          });
+          alignmentExpected.current = expectedOpening;
+          settleTimer = setTimeout(() => {
+            if (alignmentExpected.current !== expectedOpening) return;
+            alignmentExpected.current = null;
+            expectedOpening.finish(false);
+            if (modeRef.current === 'content'
+                && managedTargetPathRef.current === targetPath) {
+              setAlignmentError('暂时无法打开这条内容的对话。');
+            }
+          }, ALIGNMENT_SETTLE_MS);
           const result = projectActions.open(targetId);
-          if (alignmentAttempt.current === attempt && result?.ok !== true) {
-            setAlignmentError(result?.reason === 'service'
-              ? ' 会话服务不可用。' : ' 代表会话不可用。');
+          if (stillCurrent() && result?.ok !== true) {
+            setAlignmentError('暂时无法打开这条内容的对话。');
           }
+          if (result?.ok !== true && alignmentExpected.current === expectedOpening) {
+            alignmentExpected.current = null;
+            expectedOpening.finish(false);
+          }
+          if (result?.ok !== true && alignmentKnown.current?.path === targetPath
+              && Object.is(alignmentKnown.current.sessionId, targetId)) {
+            alignmentKnown.current = null;
+          }
+          if (result?.ok !== true) return { ok: false, code: 'session-unavailable' };
+          const aligned = await expectedOpening.promise;
+          return aligned ? { ok: true, sessionId: targetId }
+            : { ok: false, code: 'session-unavailable' };
         } catch (_error) {
-          if (alignmentAttempt.current === attempt) setAlignmentError(' 对齐意外中断。');
+          if (alignmentExpected.current === expectedOpening) {
+            alignmentExpected.current = null;
+            expectedOpening?.finish(false);
+          }
+          if (expectedOpening !== null && alignmentKnown.current?.path === targetPath
+              && Object.is(alignmentKnown.current.sessionId, expectedOpening.sessionId)) {
+            alignmentKnown.current = null;
+          }
+          if (stillCurrent()) setAlignmentError('暂时无法打开这条内容的对话。');
+          return { ok: false, code: 'workspace-unavailable' };
         } finally {
+          if (alignmentInFlight.current === operation) alignmentInFlight.current = null;
           if (alignmentAttempt.current === attempt) setAlignmentPending(false);
         }
       };
+      react.useEffect(() => {
+        if (browserOnly || mode !== 'content' || !managedTargetPath || !activeRoutingProject) {
+          return undefined;
+        }
+        const expected = alignmentExpected.current;
+        if ((routingMismatch || activeRoutingProject.workspaceId === undefined)
+            && (expected === null || expected.path !== managedTargetPath)) {
+          void alignManagedProject();
+        }
+        return () => {
+          alignmentAttempt.current += 1;
+          alignmentInFlight.current = null;
+        };
+      }, [browserOnly, mode, managedTargetPath]);
+      react.useEffect(() => () => {
+        alignmentAttempt.current += 1;
+        alignmentInFlight.current = null;
+        const expected = alignmentExpected.current;
+        alignmentExpected.current = null;
+        expected?.finish(false);
+        alignmentKnown.current = null;
+      }, []);
 
       const modeSwitch = react_jsx_runtime.jsxs('div', {
         className: 'wd10-switch', role: 'tablist', 'aria-label': '左侧视图',
@@ -3881,7 +4323,7 @@ window.__ModuleLoader__.load({
             mode === 'content' && !hintSeen && react_jsx_runtime.jsxs('div', {
               className: 'wd10-hint', role: 'status', children: [
                 react_jsx_runtime.jsx('span', { children:
-                  '“对话记录”会暂时隐藏中间内容区，切回“创作文件”即可继续推进。' }),
+                  '“对话记录”会暂时隐藏中间内容区；切回“创作文件”时，右边会自动回到这条内容的对话。' }),
                 react_jsx_runtime.jsx('button', { type: 'button', onClick: () => {
                   setHintSeen(true);
                   void writePreference({ contentViewHintSeen: true });
@@ -3892,9 +4334,6 @@ window.__ModuleLoader__.load({
               hidden: mode !== 'content', children:
                 react_jsx_runtime.jsx(CreatorSidebar, {
                   workspace: activeProject,
-                  workspaces: projects,
-                  activeWorkspaceKey: activeProject?.key || null,
-                  onWorkspaceSelect: (project) => { void alignProject(project, false); },
                   catalog: visibleCatalog,
                   selectedToken: selectedContent?.projectToken || null,
                   onSelect: selectContent,
@@ -3912,13 +4351,11 @@ window.__ModuleLoader__.load({
               onTab: setCreatorTab,
               workspaceFiles,
               workspaceIdentity: currentCatalogIdentity,
-              alignment: mismatch ? {
-                currentTitle: currentProject?.title
-                  || sessionState.byId[sessionState.current]?.displayTitle || '未选择会话',
+              alignment: mismatch || alignmentPending ? {
                 pending: alignmentPending,
                 error: alignmentError
               } : null,
-              onAlign: () => { void alignProject(activeProject, true); },
+              onAlign: alignManagedProject,
               panelCollapseRef: panelCollapseButton,
               onPanelCollapse: () => setPanelCollapsed(true),
               onCatalogRefresh: refreshCatalog,
@@ -3951,7 +4388,7 @@ window.__ModuleLoader__.load({
         Component: WhaleDockContentShell,
         preferences: browserOnly ? undefined : preferences,
         workspaceFiles: browserOnly ? undefined : workspaceFiles,
-        projectActions: browserOnly ? null : createProjectActions(ctx),
+        projectActions: browserOnly ? null : createProjectActions(ctx, options.alignmentScope),
         browserOnly
       });
     }
@@ -4502,7 +4939,9 @@ window.__ModuleLoader__.load({
       let disposeContentShell = () => {};
       let disposeShellStyle = () => {};
       try {
-        const shell = createContentShell(ctx, preferences, workspaceFiles);
+        const shell = createContentShell(ctx, preferences, workspaceFiles, {
+          alignmentScope: controllerId
+        });
         const dispose = ctx.reflect.provide('whaledockContentShell', shell);
         if (typeof dispose === 'function') disposeContentShell = dispose;
         disposeShellStyle = installShellStyle();
