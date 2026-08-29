@@ -6,6 +6,7 @@ const path = require('path');
 const vm = require('vm');
 
 let passed = 0;
+const integrationServices = new WeakMap();
 
 async function test(name, fn) {
   try {
@@ -140,6 +141,13 @@ function makeRenderer(React, jsxRuntime, options = {}) {
     },
     fiberIds(name) {
       return [...fibers.values()].filter((fiber) => fiber.name === name).map((fiber) => fiber.id);
+    },
+    unmountAll() {
+      for (const fiber of fibers.values()) {
+        for (const cell of fiber.cells) if (cell?.kind === 'effect') cell.cleanup?.();
+        unmounts.push(fiber.name);
+      }
+      fibers.clear();
     }
   };
 
@@ -155,6 +163,11 @@ function makeRenderer(React, jsxRuntime, options = {}) {
 }
 
 function loadBundle(services = {}, options = {}) {
+  if (services.connection === undefined) {
+    services.connection = {
+      hostDescription: { getSnapshot: () => ({ cwd: services.__targetCwd || '/projects/alpha' }) }
+    };
+  }
   const layoutSource = fs.readFileSync(path.join(
     __dirname, '..', 'context-poc', 'forks', 'ui-layout', 'lib', 'client.js'
   ), 'utf8');
@@ -188,6 +201,8 @@ function loadBundle(services = {}, options = {}) {
     clearTimeout(id) { timers.delete(id); },
     console
   };
+  if (options.localStorage) sandbox.localStorage = options.localStorage;
+  if (options.navigator) sandbox.navigator = options.navigator;
   if (options.document) sandbox.document = options.document;
   if (typeof options.requestAnimationFrame === 'function') {
     sandbox.requestAnimationFrame = options.requestAnimationFrame;
@@ -214,8 +229,10 @@ function loadBundle(services = {}, options = {}) {
   const integration = options.noShell ? undefined : contextPlugin.createContentShell({
     get: (name) => services[name]
   }, services.whaledockShellPreferences, services.whaledockWorkspaceFiles, {
-    browserOnly: options.browserOnly === true
+    browserOnly: options.browserOnly === true,
+    alignmentScope: options.alignmentScope
   });
+  if (integration) integrationServices.set(integration, services);
   const plugin = layoutDefinition.factory(requireModule);
   let registration;
   plugin.apply({
@@ -303,6 +320,11 @@ function session(id, cwd, extra = {}) {
 }
 
 function uiProps(state, integration, slotCalls, slotRenderers = {}) {
+  const services = integrationServices.get(integration);
+  if (services && services.__targetCwd === undefined) {
+    services.__targetCwd = state.sessions.current === undefined
+      ? '/projects/alpha' : state.sessions.byId[state.sessions.current]?.cwd || '/projects/alpha';
+  }
   return {
     useStore: (selector) => selector(state.panels),
     useSessions: (selector) => selector(state.sessions),
@@ -324,6 +346,33 @@ function deferred() {
   let reject;
   const promise = new Promise((ok, fail) => { resolve = ok; reject = fail; });
   return { promise, resolve, reject };
+}
+
+function memoryStorage() {
+  const values = new Map();
+  return {
+    get length() { return values.size; },
+    key(index) { return [...values.keys()][index] ?? null; },
+    getItem(key) { return values.has(String(key)) ? values.get(String(key)) : null; },
+    setItem(key, value) { values.set(String(key), String(value)); },
+    removeItem(key) { values.delete(String(key)); }
+  };
+}
+
+function serialLocks() {
+  const tails = new Map();
+  return {
+    request(name, _options, operation) {
+      const previous = tails.get(name) || Promise.resolve();
+      const current = previous.then(operation, operation);
+      const settled = current.then(() => undefined, () => undefined);
+      tails.set(name, settled);
+      void settled.then(() => {
+        if (tails.get(name) === settled) tails.delete(name);
+      });
+      return current;
+    }
+  };
 }
 
 function fulfilled(result) {
@@ -506,7 +555,7 @@ function scriptBlock(hex, text, extra = {}) {
 }
 
 async function main() {
-  await test('cwd 归一化、路径尾段与代表会话选择确定', async () => {
+  await test('cwd 归一化后内容态只显示工作台当前文件夹，不暴露其他 workspace 切换', async () => {
     const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
     const state = {
       panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
@@ -522,42 +571,27 @@ async function main() {
       workspaces: { items: [] }
     };
     const opened = [];
-    let failOpen = true;
     const services = {
       whaledockShellPreferences: pref,
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: '/projects/current/' }) } },
       sessions: {
-        open(id) {
-          opened.push(id);
-          if (failOpen) throw new Error('stale target');
-          state.sessions = { ...state.sessions, current: id };
-        }
-      }
+        open(id) { opened.push(id); state.sessions = { ...state.sessions, current: id }; }
+      },
+      workspaces: { async create() { throw new Error('already registered'); } }
     };
     const harness = loadBundle(services);
     const slots = [];
     const props = uiProps(state, harness.integration, slots);
-    let tree = harness.renderer.render(harness.AppFrame, props);
+    const tree = harness.renderer.render(harness.AppFrame, props);
     const projects = findAll(tree, (node) => node.type === 'button' && node.props.className === 'wd10-workspaceChoice');
-    assert.equal(projects.length, 2);
-    const demo = projects.find((node) => textOf(node).includes('demo'));
-    assert(demo);
-    assert.match(textOf(demo), /…\/work\/demo/u);
-    assert.doesNotMatch(textOf(demo), /个会话/u);
-    demo.props.onClick();
-    assert.deepEqual(opened, ['a']);
-    tree = harness.renderer.render(harness.AppFrame, props);
-    let alerts = findAll(tree, (node) => node.props?.role === 'alert');
-    assert.equal(alerts.length, 1);
-    assert.match(textOf(alerts[0]), /右栏当前在《current》，不是你选的《demo》/u);
-    tree = harness.renderer.render(harness.AppFrame, props);
-    assert.equal(findAll(tree, (node) => node.props?.role === 'alert').length, 1);
-    failOpen = false;
-    button(tree, '一键对齐').props.onClick();
-    assert.deepEqual(opened, ['a', 'a']);
-    tree = harness.renderer.render(harness.AppFrame, props);
-    alerts = findAll(tree, (node) => node.props?.role === 'alert');
-    assert.equal(alerts.length, 0);
-    assert.equal(state.sessions.current, 'a');
+    assert.equal(projects.length, 0);
+    assert.match(textOf(tree), /当前工作区：current/u);
+    assert.match(textOf(tree), /当前内容文件夹current\/projects\/current/u);
+    assert.doesNotMatch(textOf(tree), /会话对齐工作区|…\/work\/demo/u);
+    assert.deepEqual(opened, []);
+    assert.match(textOf(findAll(tree, (node) => node.props?.role === 'alert')[0]),
+      /正在连到这条内容的对话/u);
+    assert.doesNotMatch(textOf(tree), /不匹配|无法确认/u);
   });
 
   await test('WorkspaceListState archivedSessionIds 同时过滤工作区与孤立项目卡', async () => {
@@ -580,20 +614,21 @@ async function main() {
         archivedSessionIds: ['archived']
       }
     };
-    const harness = loadBundle({ whaledockShellPreferences: pref, sessions: { open() {} } });
+    const harness = loadBundle({ whaledockShellPreferences: pref,
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: '/projects/live' }) } },
+      sessions: { open() {} } });
     const tree = harness.renderer.render(
       harness.AppFrame, uiProps(state, harness.integration, [])
     );
     const projects = findAll(tree, (node) => (
       node.type === 'button' && node.props.className === 'wd10-workspaceChoice'
     ));
-    assert.equal(projects.length, 1, '归档会话不得再形成第二张 cwd 项目卡');
-    assert.match(textOf(projects[0]), /现用项目/u);
-    assert.doesNotMatch(textOf(projects[0]), /个会话/u);
+    assert.equal(projects.length, 0, '内容态不得再暴露工作区切换按钮');
+    assert.match(textOf(tree), /当前工作区：现用项目/u);
     assert.doesNotMatch(textOf(tree), /projects\/archived/u);
   });
 
-  await test('零会话项目仅显式对齐时 connect，迟到结果不覆盖新选择', async () => {
+  await test('零会话工作台进入内容态即自动 connect，迟到结果不覆盖新选择', async () => {
     const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
     const pending = deferred();
     const opened = [];
@@ -605,31 +640,23 @@ async function main() {
     };
     const services = {
       whaledockShellPreferences: pref,
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: '/projects/empty' }) } },
       sessions: { open(id) { opened.push(id); state.sessions = { ...state.sessions, current: id }; } },
       workspaces: { connectWorkspace(id) { connected.push(id); return pending.promise; } }
     };
     const harness = loadBundle(services);
     const props = uiProps(state, harness.integration, []);
     let tree = harness.renderer.render(harness.AppFrame, props);
-    const empty = findAll(tree, (node) => node.type === 'button' && node.props.className === 'wd10-workspaceChoice')
-      .find((node) => textOf(node).includes('空项目'));
-    assert(empty);
-    empty.props.onClick();
-    tree = harness.renderer.render(harness.AppFrame, props);
-    assert.deepEqual(connected, []);
-    assert.deepEqual(opened, []);
-    button(tree, '一键对齐').props.onClick();
+    assert.equal(findAll(tree, (node) => node.props?.className === 'wd10-workspaceChoice').length, 0);
     assert.deepEqual(connected, ['empty']);
-    tree = harness.renderer.render(harness.AppFrame, props);
-    const current = findAll(tree, (node) => node.type === 'button' && node.props.className === 'wd10-workspaceChoice')
-      .find((node) => textOf(node).includes('current'));
-    assert(current);
-    current.props.onClick();
-    assert.deepEqual(opened, ['b']);
+    assert.deepEqual(opened, []);
     pending.resolve('late-session');
     await pending.promise;
     await Promise.resolve();
-    assert.deepEqual(opened, ['b']);
+    tree = await settle(harness, props);
+    assert.deepEqual(opened, ['late-session']);
+    assert.equal(state.sessions.current, 'late-session');
+    assert.doesNotMatch(textOf(tree), /一键对齐/u);
   });
 
   await test('原生右栏 B 切到 C 后，迟到的空项目 A 不再拉回会话', async () => {
@@ -650,29 +677,864 @@ async function main() {
     };
     const services = {
       whaledockShellPreferences: pref,
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: '/projects/empty-a' }) } },
       sessions: { open(id) { opened.push(id); state.sessions = { ...state.sessions, current: id }; } },
       workspaces: { connectWorkspace() { return pending.promise; } }
     };
     const harness = loadBundle(services);
     const props = uiProps(state, harness.integration, []);
     let tree = harness.renderer.render(harness.AppFrame, props);
-    const empty = findAll(tree, (node) => node.type === 'button' && node.props.className === 'wd10-workspaceChoice')
-      .find((node) => textOf(node).includes('空项目 A'));
-    assert(empty);
-    empty.props.onClick();
-    tree = harness.renderer.render(harness.AppFrame, props);
-    button(tree, '一键对齐').props.onClick();
+    assert.match(textOf(tree), /正在连到这条内容的对话/u);
 
+    button(tree, '对话记录').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
     state.sessions = { ...state.sessions, current: 'c' };
     tree = harness.renderer.render(harness.AppFrame, props);
     assert.equal(state.sessions.current, 'c');
-    assert.equal(button(tree, '一键对齐').props.disabled, false);
+    assert.equal(classNode(tree, 'wd10-nativeSidebar').props.hidden, false);
 
     pending.resolve('late-a');
     await pending.promise;
     await Promise.resolve();
     assert.deepEqual(opened, []);
     assert.equal(state.sessions.current, 'c');
+  });
+
+  await test('进入内容态 H1 自动 ensure→connect→open 各一次且全帧无不匹配文案', async () => {
+    const target = '/managed/短视频创作台';
+    const events = [];
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: [], current: undefined, byId: {} },
+      workspaces: { items: [] }
+    };
+    const services = {
+      whaledockShellPreferences: preference({ contentViewMode: 'content', contentViewHintSeen: true }),
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: target }) } },
+      workspaces: {
+        async create(input) { events.push(`ensure:${input.path}`); return { workspaceId: 'managed-ws' }; },
+        async connectWorkspace(id) { events.push(`connect:${id}`); return 'managed-session'; }
+      },
+      sessions: { open(id) {
+        events.push(`open:${id}`);
+        state.sessions = { ids: [id], current: id, byId: { [id]: session(id, target, { blank: true }) } };
+      } }
+    };
+    const harness = loadBundle(services);
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    assert.doesNotMatch(textOf(tree), /不匹配|无法确认/u);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(events, [
+      `ensure:${target}`, 'connect:managed-ws', 'open:managed-session'
+    ]);
+    assert.equal(findAll(tree, (node) => node.props?.className === 'wd10-workspaceChoice').length, 0);
+    assert.doesNotMatch(textOf(tree), /不匹配|无法确认|一键对齐/u);
+  });
+
+  await test('StrictMode 重挂共享 ensure/connect，未落稳会话不重复创建且移除后可换新', async () => {
+    const target = '/managed/短视频创作台';
+    let createCalls = 0;
+    let connectCalls = 0;
+    let sessionsSnapshot = { ids: [], current: undefined, byId: {} };
+    const firstConnection = deferred();
+    const services = {
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: target }) } },
+      sessions: {
+        list: { getSnapshot: () => sessionsSnapshot },
+        open() {}
+      },
+      workspaces: {
+        async create(input) {
+          createCalls += 1;
+          assert.equal(input.path, target);
+          return { workspaceId: 'workspace-target' };
+        },
+        connectWorkspace(id) {
+          connectCalls += 1;
+          assert.equal(id, 'workspace-target');
+          return connectCalls === 1 ? firstConnection.promise : 'replacement-root';
+        }
+      }
+    };
+    const harness = loadBundle(services);
+    const [ensuredA, ensuredB] = await Promise.all([
+      harness.projectActions.ensure(target), harness.projectActions.ensure(target)
+    ]);
+    assert.equal(createCalls, 1);
+    assert.equal(ensuredA.workspaceId, 'workspace-target');
+    assert.equal(ensuredB.workspaceId, 'workspace-target');
+
+    const pendingA = harness.projectActions.connect('workspace-target', target);
+    const pendingB = harness.projectActions.connect('workspace-target', target);
+    assert.equal(connectCalls, 1);
+    firstConnection.resolve('first-root');
+    const [connectedA, connectedB] = await Promise.all([pendingA, pendingB]);
+    assert.equal(connectedA.sessionId, 'first-root');
+    assert.equal(connectedB.sessionId, 'first-root');
+
+    const beforeReadback = await harness.projectActions.connect('workspace-target', target);
+    assert.equal(beforeReadback.sessionId, 'first-root');
+    assert.equal(connectCalls, 1, 'store 尚未落稳时必须复用首次 connect 结果');
+
+    harness.projectActions.observe('first-root', target);
+    sessionsSnapshot = {
+      ids: ['wrong-root', 'same-path-child'], current: 'wrong-root', byId: {
+        'wrong-root': session('wrong-root', '/managed/other'),
+        'same-path-child': session('same-path-child', target, { origin: 'subagent' })
+      }
+    };
+    const replacement = await harness.projectActions.connect('workspace-target', target);
+    assert.equal(replacement.sessionId, 'replacement-root');
+    assert.equal(connectCalls, 2, '已观察会话移除后才允许创建替代根会话');
+  });
+
+  await test('真实组件重挂覆盖 connect 在途与已返回未落稳两扇窗且只创建一个 blank', async () => {
+    const target = '/managed/短视频创作台';
+    const pending = deferred();
+    const events = [];
+    let connectCalls = 0;
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: { ids: [], current: undefined, byId: {} },
+      workspaces: { items: [] }
+    };
+    const services = {
+      whaledockShellPreferences: preference({ contentViewMode: 'content', contentViewHintSeen: true }),
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: target }) } },
+      sessions: {
+        list: { getSnapshot: () => state.sessions },
+        open(id) {
+          events.push(`open:${id}`);
+          state.sessions = {
+            ids: [id], current: id, byId: { [id]: session(id, target, { blank: true }) }
+          };
+        }
+      },
+      workspaces: {
+        async create(input) { events.push(`ensure:${input.path}`); return { workspaceId: 'workspace-a' }; },
+        connectWorkspace(id) {
+          connectCalls += 1;
+          events.push(`connect:${id}`);
+          return connectCalls === 1 ? pending.promise : 'replacement-blank';
+        }
+      }
+    };
+    const harness = loadBundle(services);
+    const props = uiProps(state, harness.integration, []);
+    harness.renderer.render(harness.AppFrame, props);
+    for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
+    assert.deepEqual(events, [`ensure:${target}`, 'connect:workspace-a']);
+    harness.renderer.unmountAll();
+    harness.renderer.render(harness.AppFrame, props);
+    for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
+    assert.deepEqual(events, [`ensure:${target}`, 'connect:workspace-a']);
+    pending.resolve('shared-blank');
+    await pending.promise;
+    let tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(events, [`ensure:${target}`, 'connect:workspace-a', 'open:shared-blank']);
+    assert.equal(state.sessions.current, 'shared-blank');
+    assert.doesNotMatch(textOf(tree), /不匹配|无法确认|正在连到/u);
+
+    state.sessions = {
+      ids: ['wrong-root', 'same-path-child'], current: 'wrong-root', byId: {
+        'wrong-root': session('wrong-root', '/managed/other'),
+        'same-path-child': session('same-path-child', target, { origin: 'subagent' })
+      }
+    };
+    state.workspaces = { items: [{
+      workspaceId: 'workspace-a', title: '短视频创作台', path: target,
+      sessionIds: ['same-path-child']
+    }] };
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /右边的对话现在不在这条内容的文件夹里/u);
+    button(tree, '回到这条内容的对话').props.onClick();
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(events, [
+      `ensure:${target}`, 'connect:workspace-a', 'open:shared-blank',
+      'connect:workspace-a', 'open:replacement-blank'
+    ]);
+    assert.equal(state.sessions.current, 'replacement-blank');
+
+    const delayedEvents = [];
+    const delayedState = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: {
+        ids: ['other'], current: 'other', byId: { other: session('other', '/managed/other') }
+      },
+      workspaces: { items: [] }
+    };
+    const delayedServices = {
+      whaledockShellPreferences: preference({ contentViewMode: 'content', contentViewHintSeen: true }),
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: target }) } },
+      sessions: {
+        list: { getSnapshot: () => delayedState.sessions },
+        open(id) { delayedEvents.push(`open:${id}`); }
+      },
+      workspaces: {
+        async create() { return { workspaceId: 'workspace-delayed' }; },
+        connectWorkspace(id) { delayedEvents.push(`connect:${id}`); return 'delayed-blank'; }
+      }
+    };
+    const delayedHarness = loadBundle(delayedServices);
+    const delayedProps = uiProps(delayedState, delayedHarness.integration, []);
+    delayedHarness.renderer.render(delayedHarness.AppFrame, delayedProps);
+    for (let turn = 0; turn < 12; turn += 1) await Promise.resolve();
+    assert.deepEqual(delayedEvents, ['connect:workspace-delayed', 'open:delayed-blank']);
+    delayedHarness.renderer.unmountAll();
+    delayedHarness.renderer.render(delayedHarness.AppFrame, delayedProps);
+    for (let turn = 0; turn < 12; turn += 1) await Promise.resolve();
+    assert.deepEqual(delayedEvents, [
+      'connect:workspace-delayed', 'open:delayed-blank', 'open:delayed-blank'
+    ]);
+    assert.equal(delayedEvents.filter((event) => event.startsWith('connect:')).length, 1);
+  });
+
+  await test('同一 controller 的两个真实页面经 Web Lock 共享未落稳 id 且只 connect 一个 blank', async () => {
+    const target = '/managed/短视频创作台';
+    const pending = deferred();
+    const storage = memoryStorage();
+    const navigator = { locks: serialLocks() };
+    const events = [];
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: {
+        ids: ['other'], current: 'other', byId: { other: session('other', '/managed/other') }
+      },
+      workspaces: { items: [] }
+    };
+    const services = {
+      whaledockShellPreferences: preference({ contentViewMode: 'content', contentViewHintSeen: true }),
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: target }) } },
+      sessions: { open(id) {
+        events.push(`open:${id}`);
+        state.sessions = {
+          ids: [id, 'other'], current: id, byId: {
+            [id]: session(id, target, { blank: true }),
+            other: state.sessions.byId.other
+          }
+        };
+      } },
+      workspaces: {
+        async create(input) {
+          events.push(`ensure:${input.path}`);
+          return { workspaceId: 'workspace-shared' };
+        },
+        connectWorkspace(id) {
+          events.push(`connect:${id}`);
+          return pending.promise;
+        }
+      }
+    };
+    const options = {
+      alignmentScope: 'controller-shared-page-test', localStorage: storage, navigator
+    };
+    const pageA = loadBundle(services, options);
+    const pageB = loadBundle(services, options);
+    const propsA = uiProps(state, pageA.integration, []);
+    const propsB = uiProps(state, pageB.integration, []);
+    pageA.renderer.render(pageA.AppFrame, propsA);
+    pageB.renderer.render(pageB.AppFrame, propsB);
+    for (let turn = 0; turn < 12; turn += 1) await Promise.resolve();
+    assert.equal(events.filter((event) => event.startsWith('connect:')).length, 1);
+
+    pending.resolve('shared-page-blank');
+    await pending.promise;
+    let treeA = await settle(pageA, propsA);
+    let treeB = await settle(pageB, propsB);
+    treeA = await settle(pageA, propsA);
+    treeB = await settle(pageB, propsB);
+    assert.equal(events.filter((event) => event.startsWith('connect:')).length, 1);
+    assert(events.filter((event) => event === 'open:shared-page-blank').length >= 1);
+    assert.equal(state.sessions.current, 'shared-page-blank');
+    assert.doesNotMatch(`${textOf(treeA)}${textOf(treeB)}`, /不匹配|无法确认|正在连到/u);
+  });
+
+  await test('open 成功后 store 短暂变空也不会重复 connect 或新建第二个空会话', async () => {
+    const target = '/managed/短视频创作台';
+    const events = [];
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: {
+        ids: ['previous'], current: 'previous',
+        byId: { previous: session('previous', '/managed/previous') }
+      },
+      workspaces: { items: [] }
+    };
+    const services = {
+      whaledockShellPreferences: preference({ contentViewMode: 'content', contentViewHintSeen: true }),
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: target }) } },
+      workspaces: {
+        async create(input) {
+          events.push(`ensure:${input.path}`);
+          state.workspaces = { items: [{
+            workspaceId: 'managed-ws', title: '短视频创作台', path: target, sessionIds: []
+          }] };
+          return { workspaceId: 'managed-ws' };
+        },
+        async connectWorkspace(id) { events.push(`connect:${id}`); return 'managed-session'; }
+      },
+      sessions: { open(id) { events.push(`open:${id}`); } }
+    };
+    const harness = loadBundle(services);
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(events, [
+      `ensure:${target}`, 'connect:managed-ws', 'open:managed-session'
+    ]);
+
+    state.sessions = { ids: [], current: undefined, byId: {} };
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(events, [
+      `ensure:${target}`, 'connect:managed-ws', 'open:managed-session'
+    ]);
+
+    state.sessions = {
+      ids: ['managed-session'], current: 'managed-session',
+      byId: { 'managed-session': session('managed-session', target, { blank: true }) }
+    };
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(events, [
+      `ensure:${target}`, 'connect:managed-ws', 'open:managed-session'
+    ]);
+    assert.doesNotMatch(textOf(tree), /不匹配|无法确认|正在连到/u);
+  });
+
+  await test('内容态落稳后用户切到其他会话只显示提示，明确点击才回到内容对话', async () => {
+    const target = '/managed/短视频创作台';
+    const opened = [];
+    const connected = [];
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: {
+        ids: ['target-root', 'other-root'], current: 'target-root', byId: {
+          'target-root': session('target-root', target),
+          'other-root': session('other-root', '/managed/other')
+        }
+      },
+      workspaces: { items: [{
+        workspaceId: 'workspace-target', title: '短视频创作台', path: target,
+        sessionIds: ['target-root']
+      }] }
+    };
+    const services = {
+      whaledockShellPreferences: preference({ contentViewMode: 'content', contentViewHintSeen: true }),
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: target }) } },
+      workspaces: { connectWorkspace(id) { connected.push(id); return 'must-not-connect'; } },
+      sessions: { open(id) {
+        opened.push(id);
+        state.sessions = { ...state.sessions, current: id };
+      } }
+    };
+    const harness = loadBundle(services);
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(opened, []);
+
+    state.sessions = { ...state.sessions, current: 'other-root' };
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(opened, []);
+    assert.deepEqual(connected, []);
+    assert.match(textOf(tree), /右边的对话现在不在这条内容的文件夹里/u);
+
+    button(tree, '回到这条内容的对话').props.onClick();
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(opened, ['target-root']);
+    assert.equal(state.sessions.current, 'target-root');
+    assert.doesNotMatch(textOf(tree), /不在这条内容的文件夹里/u);
+  });
+
+  await test('目标路径 A→B→A 会清理旧的待落稳锁并重新打开 A', async () => {
+    const pathA = '/managed/a';
+    const pathB = '/managed/b';
+    let currentTarget = pathA;
+    const opened = [];
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: {
+        ids: ['a-root', 'b-root', 'other-root'], current: 'other-root', byId: {
+          'a-root': session('a-root', pathA),
+          'b-root': session('b-root', pathB),
+          'other-root': session('other-root', '/managed/other')
+        }
+      },
+      workspaces: { items: [
+        { workspaceId: 'workspace-a', title: 'A', path: pathA, sessionIds: ['a-root'] },
+        { workspaceId: 'workspace-b', title: 'B', path: pathB, sessionIds: ['b-root'] }
+      ] }
+    };
+    const services = {
+      whaledockShellPreferences: preference({ contentViewMode: 'content', contentViewHintSeen: true }),
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: currentTarget }) } },
+      sessions: { open(id) { opened.push(id); } }
+    };
+    const harness = loadBundle(services);
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(opened, ['a-root']);
+
+    currentTarget = pathB;
+    state.sessions = { ...state.sessions, current: 'b-root' };
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(opened, ['a-root']);
+
+    currentTarget = pathA;
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(opened, ['a-root', 'a-root']);
+  });
+
+  await test('偏好订阅离开再返回内容态会清旧锁，复用已知会话而不再 connect', async () => {
+    const target = '/managed/短视频创作台';
+    const pref = preference({ contentViewMode: 'content', contentViewHintSeen: true });
+    const events = [];
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: {
+        ids: ['target-root', 'other-root'], current: 'other-root', byId: {
+          'target-root': session('target-root', target),
+          'other-root': session('other-root', '/managed/other')
+        }
+      },
+      workspaces: { items: [{
+        workspaceId: 'workspace-target', title: '短视频创作台', path: target,
+        sessionIds: ['target-root']
+      }] }
+    };
+    const services = {
+      whaledockShellPreferences: pref,
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: target }) } },
+      workspaces: { connectWorkspace(id) { events.push(`connect:${id}`); return 'must-not-connect'; } },
+      sessions: { open(id) { events.push(`open:${id}`); } }
+    };
+    const harness = loadBundle(services);
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(events, ['open:target-root']);
+
+    await pref.write({ contentViewMode: 'sessions' });
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    await pref.write({ contentViewMode: 'content' });
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(events, ['open:target-root', 'open:target-root']);
+  });
+
+  await test('未登记但当前根会话已在目标路径时只 ensure，不新建或切换会话', async () => {
+    const target = '/managed/短视频创作台';
+    const events = [];
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: {
+        ids: ['same-path-root'], current: 'same-path-root',
+        byId: { 'same-path-root': session('same-path-root', target, { blank: true }) }
+      },
+      workspaces: { items: [] }
+    };
+    const services = {
+      whaledockShellPreferences: preference({ contentViewMode: 'content', contentViewHintSeen: true }),
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: target }) } },
+      workspaces: {
+        async create(input) { events.push(`ensure:${input.path}`); return { workspaceId: 'managed-ws' }; },
+        async connectWorkspace(id) { events.push(`connect:${id}`); return 'must-not-connect'; }
+      },
+      sessions: { open(id) { events.push(`open:${id}`); } }
+    };
+    const harness = loadBundle(services);
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(events, [`ensure:${target}`]);
+    assert.doesNotMatch(textOf(tree), /不匹配|无法确认|正在连到/u);
+  });
+
+  await test('同路径子代理不算已对齐，自动回到该工作区根会话', async () => {
+    const target = '/managed/短视频创作台';
+    const opened = [];
+    const connected = [];
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: {
+        ids: ['target-root', 'target-child'], current: 'target-child', byId: {
+          'target-root': session('target-root', target, { updatedAt: 4 }),
+          'target-child': session('target-child', target, { origin: 'subagent', updatedAt: 5 })
+        }
+      },
+      workspaces: { items: [{
+        workspaceId: 'workspace-target', title: '短视频创作台', path: target,
+        sessionIds: ['target-root', 'target-child']
+      }] }
+    };
+    const services = {
+      whaledockShellPreferences: preference({ contentViewMode: 'content', contentViewHintSeen: true }),
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: target }) } },
+      workspaces: { connectWorkspace(id) { connected.push(id); return 'must-not-connect'; } },
+      sessions: { open(id) {
+        opened.push(id);
+        state.sessions = { ...state.sessions, current: id };
+      } }
+    };
+    const harness = loadBundle(services);
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(opened, ['target-root']);
+    assert.deepEqual(connected, []);
+    assert.equal(state.sessions.current, 'target-root');
+    assert.doesNotMatch(textOf(tree), /不匹配|无法确认|正在连到/u);
+  });
+
+  await test('workspace 错挂其他 cwd 的根会话时绝不 open 错会话，而是 connect 目标路径', async () => {
+    const target = '/managed/a';
+    const opened = [];
+    const connected = [];
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: {
+        ids: ['wrong-root'], current: 'wrong-root',
+        byId: { 'wrong-root': session('wrong-root', '/managed/b') }
+      },
+      workspaces: { items: [{
+        workspaceId: 'workspace-a', title: '内容 A', path: target,
+        sessionIds: ['wrong-root']
+      }] }
+    };
+    const services = {
+      whaledockShellPreferences: preference({ contentViewMode: 'content', contentViewHintSeen: true }),
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: target }) } },
+      workspaces: { connectWorkspace(id) {
+        connected.push(id);
+        return 'correct-root';
+      } },
+      sessions: { open(id) {
+        opened.push(id);
+        state.sessions = {
+          ids: ['correct-root', 'wrong-root'], current: id, byId: {
+            'correct-root': session('correct-root', target, { blank: true }),
+            'wrong-root': state.sessions.byId['wrong-root']
+          }
+        };
+      } }
+    };
+    const harness = loadBundle(services);
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(connected, ['workspace-a']);
+    assert.deepEqual(opened, ['correct-root']);
+    assert.equal(opened.includes('wrong-root'), false);
+    assert.equal(state.sessions.current, 'correct-root');
+    assert.doesNotMatch(textOf(tree), /不匹配|无法确认|正在连到/u);
+  });
+
+  await test('从对话记录切回创作文件自动打开同路径代表会话且不新建空会话', async () => {
+    const opened = [];
+    const connected = [];
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: {
+        ids: ['target-a', 'other-b', 'other-c'], current: 'other-b', byId: {
+          'target-a': session('target-a', '/managed/a', { updatedAt: 4 }),
+          'other-b': session('other-b', '/managed/b', { updatedAt: 3 }),
+          'other-c': session('other-c', '/managed/c', { updatedAt: 2 })
+        }
+      },
+      workspaces: { items: [{
+        workspaceId: 'workspace-a', title: '内容 A', path: '/managed/a', sessionIds: ['target-a']
+      }] }
+    };
+    const services = {
+      whaledockShellPreferences: preference({ contentViewMode: 'sessions', contentViewHintSeen: true }),
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: '/managed/a' }) } },
+      workspaces: { connectWorkspace(id) { connected.push(id); return 'must-not-connect'; } },
+      sessions: { open(id) { opened.push(id); state.sessions = { ...state.sessions, current: id }; } }
+    };
+    const harness = loadBundle(services);
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    button(tree, '创作文件').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(opened, ['target-a']);
+    assert.deepEqual(connected, []);
+    button(tree, '对话记录').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    state.sessions = { ...state.sessions, current: 'other-c' };
+    tree = harness.renderer.render(harness.AppFrame, props);
+    button(tree, '创作文件').props.onClick();
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(opened, ['target-a', 'target-a']);
+    assert.deepEqual(connected, []);
+    assert.doesNotMatch(textOf(tree), /不匹配|无法确认/u);
+  });
+
+  await test('兜底预检三按钮回到内容对话后，跨过 main tick 瞬态自动重做为匹配态', async () => {
+    const project = contentProject('0', '兜底项目', '选题', {
+      actions: [{ id: 'write-script', label: '写脚本', hint: '发送给当前会话' }]
+    });
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: {
+        ids: ['target-a', 'other-b'], current: 'target-a', byId: {
+          'target-a': session('target-a', '/managed/a'),
+          'other-b': session('other-b', '/managed/b')
+        }
+      },
+      workspaces: { items: [{
+        workspaceId: 'workspace-a', title: '内容 A', path: '/managed/a', sessionIds: ['target-a']
+      }] }
+    };
+    let allowOpen = false;
+    let prepares = 0;
+    const alignedPrepareTransientCodes = ['workspace-unavailable', 'operation-stale'];
+    const workspaceFiles = { async execute(operation, input) {
+      if (operation === 'catalog.read') return catalog([project]);
+      if (operation === 'overview.read') return overview(project, []);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'project.action.prepare') {
+        prepares += 1;
+        if (state.sessions.current === 'target-a'
+            && alignedPrepareTransientCodes.length > 0) {
+          return { requestToken: null, state: 'rejected',
+            code: alignedPrepareTransientCodes.shift(), result: null };
+        }
+        return fulfilled({ kind: 'preflight', preflightToken: `preflight-opaque-${prepares}`,
+          targetLabel: state.sessions.current, workspaceLabel: '内容 A',
+          workspaceMatch: state.sessions.current === 'target-a' ? 'match' : 'mismatch',
+          targetRunning: false, eventTracking: 'ready',
+          expiresAt: new Date(Date.now() + 60_000).toISOString() });
+      }
+      throw new Error(operation);
+    } };
+    const services = {
+      whaledockShellPreferences: preference({ contentViewMode: 'content', contentViewHintSeen: true }),
+      whaledockWorkspaceFiles: workspaceFiles,
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: '/managed/a' }) } },
+      sessions: { open(id) {
+        if (!allowOpen) throw new Error('service unavailable');
+        state.sessions = { ...state.sessions, current: id };
+      } }
+    };
+    const harness = loadBundle(services);
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    state.sessions = { ...state.sessions, current: 'other-b' };
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /右边的对话现在不在这条内容的文件夹里/u);
+    button(tree, '写脚本').props.onClick();
+    tree = await settle(harness, props);
+    for (const label of ['先回到这条内容的对话再发', '仍然发到现在的对话', '取消']) {
+      assert.equal(findAll(tree, (node) => node.type === 'button' && textOf(node) === label).length, 1);
+    }
+    assert.match(textOf(tree), /右边的对话不在这条内容的文件夹里/u);
+    allowOpen = true;
+    button(tree, '先回到这条内容的对话再发').props.onClick();
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    tree = await fireTimers(harness, 120, props);
+    tree = await settle(harness, props);
+    tree = await fireTimers(harness, 120, props);
+    tree = await settle(harness, props);
+    assert.equal(prepares, 4);
+    assert.match(textOf(tree), /工作区匹配/u);
+    assert.equal(button(tree, '确认发送').props.disabled, false);
+    assert.doesNotMatch(textOf(tree), /先回到这条内容的对话再发|仍然发到现在的对话/u);
+  });
+
+  await test('预检点“先回到”后必须等 selection store 落稳才做第二次预检', async () => {
+    const project = contentProject('1', '延迟落稳项目', '选题', {
+      actions: [{ id: 'write-script', label: '写脚本', hint: '发送给当前会话' }]
+    });
+    const target = '/managed/a';
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: {
+        ids: ['target-a', 'other-b'], current: 'target-a', byId: {
+          'target-a': session('target-a', target),
+          'other-b': session('other-b', '/managed/b')
+        }
+      },
+      workspaces: { items: [{
+        workspaceId: 'workspace-a', title: '内容 A', path: target, sessionIds: ['target-a']
+      }] }
+    };
+    let prepares = 0;
+    const opened = [];
+    const workspaceFiles = { async execute(operation, input) {
+      if (operation === 'catalog.read') return catalog([project]);
+      if (operation === 'overview.read') return overview(project, []);
+      if (operation === 'receipts.read') return fulfilled({ kind: 'receipts',
+        projectToken: input.projectToken, receipts: [] });
+      if (operation === 'project.action.prepare') {
+        prepares += 1;
+        return fulfilled({ kind: 'preflight', preflightToken: `preflight-delayed-${prepares}`,
+          targetLabel: state.sessions.current, workspaceLabel: '内容 A',
+          workspaceMatch: state.sessions.current === 'target-a' ? 'match' : 'mismatch',
+          targetRunning: false, eventTracking: 'ready',
+          expiresAt: new Date(Date.now() + 60_000).toISOString() });
+      }
+      throw new Error(operation);
+    } };
+    const services = {
+      whaledockShellPreferences: preference({ contentViewMode: 'content', contentViewHintSeen: true }),
+      whaledockWorkspaceFiles: workspaceFiles,
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: target }) } },
+      sessions: { open(id) { opened.push(id); } }
+    };
+    const harness = loadBundle(services);
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    state.sessions = { ...state.sessions, current: 'other-b' };
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    button(tree, '写脚本').props.onClick();
+    tree = await settle(harness, props);
+    assert.equal(prepares, 1);
+    button(tree, '先回到这条内容的对话再发').props.onClick();
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(opened, ['target-a']);
+    assert.equal(prepares, 1);
+    assert.doesNotMatch(textOf(tree), /工作区匹配/u);
+
+    state.sessions = { ...state.sessions, current: 'target-a' };
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.equal(prepares, 2);
+    assert.match(textOf(tree), /工作区匹配/u);
+    assert.equal(button(tree, '确认发送').props.disabled, false);
+  });
+
+  await test('已知会话被移除后明确对齐不重开 stale id，而是 connect 一个新根会话', async () => {
+    const target = '/managed/a';
+    const opened = [];
+    const connected = [];
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: {
+        ids: ['target-a', 'other-b'], current: 'other-b', byId: {
+          'target-a': session('target-a', target),
+          'other-b': session('other-b', '/managed/b')
+        }
+      },
+      workspaces: { items: [{
+        workspaceId: 'workspace-a', title: '内容 A', path: target, sessionIds: ['target-a']
+      }] }
+    };
+    const services = {
+      whaledockShellPreferences: preference({ contentViewMode: 'content', contentViewHintSeen: true }),
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: target }) } },
+      workspaces: { connectWorkspace(id) {
+        connected.push(id);
+        return 'fresh-target';
+      } },
+      sessions: { open(id) {
+        opened.push(id);
+        if (id === 'target-a') {
+          state.sessions = { ...state.sessions, current: id };
+        } else if (id === 'fresh-target') {
+          state.sessions = {
+            ids: ['fresh-target', 'other-b'], current: 'fresh-target', byId: {
+              'fresh-target': session('fresh-target', target, { blank: true }),
+              'other-b': state.sessions.byId['other-b']
+            }
+          };
+        }
+      } }
+    };
+    const harness = loadBundle(services);
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(opened, ['target-a']);
+
+    state.sessions = {
+      ids: ['other-b'], current: 'other-b', byId: { 'other-b': state.sessions.byId['other-b'] }
+    };
+    state.workspaces = { items: [{
+      workspaceId: 'workspace-a', title: '内容 A', path: target, sessionIds: []
+    }] };
+    tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    button(tree, '回到这条内容的对话').props.onClick();
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(opened, ['target-a', 'fresh-target']);
+    assert.deepEqual(connected, ['workspace-a']);
+    assert.equal(state.sessions.current, 'fresh-target');
+  });
+
+  await test('新 connect 的空会话超时未落稳时只重开同一 id，不再 connect 制造第二个空会话', async () => {
+    const target = '/managed/a';
+    const events = [];
+    const state = {
+      panels: { sidebar: 280, details: 0, narrow: false, narrowExpanded: false },
+      sessions: {
+        ids: ['other-b'], current: 'other-b',
+        byId: { 'other-b': session('other-b', '/managed/b') }
+      },
+      workspaces: { items: [] }
+    };
+    const services = {
+      whaledockShellPreferences: preference({ contentViewMode: 'content', contentViewHintSeen: true }),
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: target }) } },
+      workspaces: {
+        async create(input) { events.push(`ensure:${input.path}`); return { workspaceId: 'workspace-a' }; },
+        async connectWorkspace(id) { events.push(`connect:${id}`); return 'pending-blank'; }
+      },
+      sessions: { open(id) { events.push(`open:${id}`); } }
+    };
+    const harness = loadBundle(services);
+    const props = uiProps(state, harness.integration, []);
+    let tree = harness.renderer.render(harness.AppFrame, props);
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(events, [
+      `ensure:${target}`, 'connect:workspace-a', 'open:pending-blank'
+    ]);
+
+    tree = await fireTimers(harness, 1500, props);
+    tree = await settle(harness, props);
+    assert.match(textOf(tree), /暂时无法打开这条内容的对话/u);
+    button(tree, '回到这条内容的对话').props.onClick();
+    tree = await settle(harness, props);
+    tree = await settle(harness, props);
+    assert.deepEqual(events, [
+      `ensure:${target}`, 'connect:workspace-a',
+      'open:pending-blank', 'open:pending-blank'
+    ]);
+
+    tree = await fireTimers(harness, 1500, props);
+    tree = await settle(harness, props);
+    assert.equal(events.filter((event) => event === 'connect:workspace-a').length, 1);
   });
 
   await test('创作文件｜对话记录说清流程，对话记录模式隐藏但不卸载当前内容', async () => {
@@ -736,7 +1598,9 @@ async function main() {
     assert.equal(classNode(tree, 'wd10-detailRail').props.hidden, true);
     assert.match(textOf(tree),
       /左边选对话记录，右边继续和 AI 沟通；切回“创作文件”推进内容/u);
-    assert(findAll(tree, (node) => node.type === 'button' && node.props.className === 'wd10-workspaceChoice').length > 0);
+    assert.equal(findAll(tree, (node) => (
+      node.type === 'button' && node.props.className === 'wd10-workspaceChoice'
+    )).length, 0);
     assert.equal(harness.renderer.unmounts.includes('CreatorSidebar'), false);
     assert.equal(harness.renderer.fiberIds('CreatorDetail')[0], creatorDetailFiber);
     assert.equal(harness.renderer.fiberIds('TaskReceiptStrip')[0], receiptFiber);
@@ -1156,11 +2020,15 @@ async function main() {
       sessions: { ids: ['a'], current: 'a', byId: { a: session('a', '/projects/a') } },
       workspaces: { items: [] }
     };
+    let targetCwd = '/projects/a';
     const harness = loadBundle({ whaledockShellPreferences: pref,
-      whaledockWorkspaceFiles: workspaceFiles, sessions: { open() {} } });
+      whaledockWorkspaceFiles: workspaceFiles,
+      connection: { hostDescription: { getSnapshot: () => ({ cwd: targetCwd }) } },
+      sessions: { open() {} } });
     const props = uiProps(state, harness.integration, []);
     let tree = harness.renderer.render(harness.AppFrame, props);
     assert.match(textOf(tree), /正在读取/u);
+    targetCwd = '/projects/b';
     state.sessions = { ids: ['b'], current: 'b', byId: { b: session('b', '/projects/b') } };
     tree = harness.renderer.render(harness.AppFrame, props);
     assert.doesNotMatch(textOf(tree), /旧工作区卡/u);
@@ -1537,7 +2405,7 @@ async function main() {
       '完整正文只约束页内降级，不应伪造 native 不可用');
   });
 
-  await test('拍摄页 A→B→A 与 workspace 变化立即清旧视图并丢弃迟到响应', async () => {
+  await test('拍摄页 A→B→A 丢弃迟到响应，右栏切走仍保留权威内容文件视图', async () => {
     const projectA = contentProject('4', '口播稿 A', '拍摄', { canShoot: true });
     const projectB = contentProject('5', '口播稿 B', '拍摄', { canShoot: true });
     const delayedHistoryA = deferred();
@@ -1621,8 +2489,9 @@ async function main() {
       }
     };
     tree = harness.renderer.render(harness.AppFrame, props);
-    assert.doesNotMatch(textOf(tree), /A 最新口播正文|A 最新收工记录/u,
-      'workspace identity 变化必须在新读取前清空旧口播稿和记录');
+    assert.match(textOf(tree), /A 最新口播正文|A 最新收工记录/u,
+      '右栏切走不得清空工作台权威文件的最后成功视图');
+    assert.match(textOf(tree), /正在连到这条内容的对话|右边的对话现在不在这条内容的文件夹里/u);
   });
 
   await test('拍摄 native outcome-unknown 锁重试，operation-stale 清空并刷新内容库', async () => {
@@ -1894,7 +2763,7 @@ async function main() {
       '本地固化不得伪造 agent receipt');
   });
 
-  await test('复盘页 A→B→A 与 workspace 变化立即清旧视图并丢弃迟到响应', async () => {
+  await test('复盘页 A→B→A 丢弃迟到响应，右栏切走仍保留权威复盘视图', async () => {
     const projectA = contentProject('4', '复盘 A', '复盘');
     const projectB = contentProject('5', '复盘 B', '复盘');
     const delayedTacticsA = deferred();
@@ -1973,8 +2842,9 @@ async function main() {
       }
     };
     tree = harness.renderer.render(harness.AppFrame, props);
-    assert.doesNotMatch(textOf(tree), /A 最新复盘正文|A 最新打法/u,
-      'workspace identity 变化必须在新读取前清空旧复盘与打法墙');
+    assert.match(textOf(tree), /A 最新复盘正文|A 最新打法/u,
+      '右栏切走不得清空工作台权威文件的最后成功复盘视图');
+    assert.match(textOf(tree), /正在连到这条内容的对话|右边的对话现在不在这条内容的文件夹里/u);
   });
 
   await test('复盘 solidify outcome-unknown 保留旧视图并锁写，stale 清空且刷新', async () => {
@@ -3438,9 +4308,10 @@ async function main() {
     mismatch = true;
     button(tree, '写脚本').props.onClick();
     tree = await settle(harness, props);
-    assert.match(textOf(tree), /工作区不匹配/u);
-    button(tree, '仍然发').props.onClick();
-    button(tree, '仍然发').props.onClick();
+    assert.match(textOf(tree), /右边的对话不在这条内容的文件夹里/u);
+    assert.match(textOf(tree), /先回到这条内容的对话再发/u);
+    button(tree, '仍然发到现在的对话').props.onClick();
+    button(tree, '仍然发到现在的对话').props.onClick();
     tree = await settle(harness, props);
     assert.equal(submits, 2);
     assert.deepEqual(overrides, [false, true]);

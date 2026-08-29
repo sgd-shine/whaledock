@@ -31,6 +31,12 @@ function rpcSession(secret, clientNonce, hostInstanceId) {
   return bridgeHmac(secret, 'rpc-session', clientNonce, hostInstanceId);
 }
 
+function deliveryTargetRef(secret, hostInstanceId, rawSessionId) {
+  return `delivery-target-${createHmac('sha256', secret)
+    .update(`whaledock-delivery-target-v1\0${hostInstanceId}\0${rawSessionId}`)
+    .digest('hex')}`;
+}
+
 function projectIdForCwd(cwd) {
   let normalized = cwd.replace(/\\/g, '/');
   while (normalized.length > 1 && normalized.endsWith('/')
@@ -286,7 +292,7 @@ async function main() {
     vm.runInNewContext(source, sandbox, { filename: 'context-poc/client.js' });
     assert.equal(definition.id, '@whaledock/context-bridge-poc');
     const plugin = definition.factory(clientImport);
-    assert.deepEqual(Array.from(plugin.inject), ['connection', 'sessions']);
+    assert.deepEqual(Array.from(plugin.inject), ['connection', 'sessions', 'workspaces']);
 
     const calls = [];
     let current = 'raw-session-a';
@@ -910,6 +916,98 @@ async function main() {
       }
     });
 
+    await test('deliveryTargetRef 仅由受认证 resolve 返回，同 Host/raw 稳定且跨绑定轮换', async () => {
+      let rpcHandler = null;
+      hostPlugin.apply({
+        connection: { rpc: { handle(_channel, handler) { rpcHandler = handler; } } },
+        systemPrompt: { context() {} },
+        on() {}
+      });
+      const clientNonce = '6d'.repeat(32);
+      const hello = await rpcHandler('handshake', handshakeRequest(clientNonce));
+      const hostInstanceId = hello.value.hostInstanceId;
+      const authToken = rpcSession(BRIDGE_TOKEN, clientNonce, hostInstanceId);
+      const controllerId = 'controller-deliveryref1';
+      const pageInstanceId = 'page-deliveryref00001';
+      const select = async (currentSessionId, selectionRevision, managed = true) => {
+        const registered = await rpcHandler('selection/register', selectionRequest({
+          contract: CONTRACT,
+          controllerId,
+          pageInstanceId,
+          selectionRevision,
+          currentSessionId,
+          managed
+        }));
+        assert.equal(registered.ok, true);
+        assert.equal(Object.prototype.hasOwnProperty.call(
+          registered.value, 'deliveryTargetRef'
+        ), false, '页面注册回包不得暴露 main 内部 target ref');
+        return rpcHandler('selection/resolve', {
+          contract: CONTRACT, controllerId, authToken
+        });
+      };
+
+      const rawA = 'delivery-raw-session-a';
+      const first = await select(rawA, 1);
+      const expectedA = deliveryTargetRef(BRIDGE_TOKEN, hostInstanceId, rawA);
+      assert.equal(first.value.state, 'selected');
+      assert.equal(first.value.deliveryTargetRef, expectedA);
+      assert.match(first.value.deliveryTargetRef, /^delivery-target-[a-f0-9]{64}$/);
+      assert.equal(JSON.stringify(first).includes(rawA), false, 'raw session 不得出 dsh');
+
+      const sameRawNewPageLease = await select(rawA, 2);
+      assert.notEqual(sameRawNewPageLease.value.sessionRef, first.value.sessionRef,
+        '页面 selection lease 更新仍轮换原有随机 sessionRef');
+      assert.equal(sameRawNewPageLease.value.deliveryTargetRef, expectedA,
+        '同一 Host/raw 的投递绑定必须稳定');
+
+      const rawB = 'delivery-raw-session-b';
+      const otherRaw = await select(rawB, 3);
+      assert.equal(otherRaw.value.deliveryTargetRef,
+        deliveryTargetRef(BRIDGE_TOKEN, hostInstanceId, rawB));
+      assert.notEqual(otherRaw.value.deliveryTargetRef, expectedA,
+        '不同 raw 不得共享投递绑定');
+
+      const noSelection = await select(null, 4);
+      assert.equal(noSelection.value.state, 'none');
+      assert.equal(Object.prototype.hasOwnProperty.call(
+        noSelection.value, 'deliveryTargetRef'
+      ), false, '无选中时不得提供 target ref');
+
+      let secondHandler = null;
+      hostPlugin.apply({
+        connection: { rpc: { handle(_channel, handler) { secondHandler = handler; } } },
+        systemPrompt: { context() {} },
+        on() {}
+      });
+      const secondNonce = '6e'.repeat(32);
+      const secondHello = await secondHandler('handshake', handshakeRequest(secondNonce));
+      const secondAuth = rpcSession(
+        BRIDGE_TOKEN, secondNonce, secondHello.value.hostInstanceId
+      );
+      const secondRegistration = selectionRequest({
+        contract: CONTRACT,
+        controllerId: 'controller-deliveryref2',
+        pageInstanceId: 'page-deliveryref00002',
+        selectionRevision: 1,
+        currentSessionId: rawA,
+        managed: true
+      });
+      assert.equal((await secondHandler(
+        'selection/register', secondRegistration
+      )).value.state, 'selected');
+      const secondHost = await secondHandler('selection/resolve', {
+        contract: CONTRACT,
+        controllerId: secondRegistration.controllerId,
+        authToken: secondAuth
+      });
+      assert.equal(secondHost.value.deliveryTargetRef, deliveryTargetRef(
+        BRIDGE_TOKEN, secondHello.value.hostInstanceId, rawA
+      ));
+      assert.notEqual(secondHost.value.deliveryTargetRef, expectedA,
+        'hostInstanceId 轮换必须切断旧 Host 绑定');
+    });
+
     await test('无效鉴权不耗限速，endpoint 桶互相隔离且零 token 不可命中 padding', async () => {
       let rpcHandler = null;
       hostPlugin.apply({
@@ -1156,7 +1254,7 @@ async function main() {
       })).ok, false);
     });
 
-    await test('workspace/files 同项目闭环不泄露路径，mismatch/cancel/越权全部 fail-closed', async () => {
+    await test('workspace/files 同项目闭环不泄露路径，错位仅四项投递进入 main preflight', async () => {
       let rpcHandler = null;
       const workspaceCwd = '/Users/fixture/WhaleDock-Content';
       const otherCwd = '/Users/fixture/Other-Project';
@@ -1193,6 +1291,8 @@ async function main() {
         authToken
       });
       assert.match(resolved.value.sessionRef, /^session-[a-f0-9]{64}$/);
+      assert.equal(resolved.value.deliveryTargetRef,
+        deliveryTargetRef(BRIDGE_TOKEN, hostInstanceId, rawSessionId));
       const stage = await rpcHandler('context/stage', {
         controllerId: registration.controllerId,
         pageInstanceId: registration.pageInstanceId,
@@ -1247,7 +1347,8 @@ async function main() {
       for (const input of [
         { Absolute_Path: '/private/forbidden.md' },
         { Front_Matter: { status: 'done' } },
-        { Hash: 'ab'.repeat(32) }
+        { Hash: 'ab'.repeat(32) },
+        { Delivery_Target_Ref: resolved.value.deliveryTargetRef }
       ]) {
         assert.equal((await rpcHandler('workspace/files/request', {
           ...pageAuth, operation: 'catalog.read', input
@@ -1394,11 +1495,60 @@ async function main() {
         code: 'workspace-mismatch',
         deadlineMs: null
       });
-      const afterMismatch = await rpcHandler('workspace/files/read', {
+      const mutationMismatch = await rpcHandler('workspace/files/request', {
+        ...pageAuth,
+        operation: 'topic.choose',
+        input: { projectToken: 'project-safe', option: 'fixture' }
+      });
+      assert.equal(mutationMismatch.value.code, 'workspace-mismatch',
+        '非投递 mutation 仍必须 fail-closed');
+
+      const deliveryOperations = [
+        'project.action.prepare', 'project.action.submit',
+        'block.action.prepare', 'block.action.submit'
+      ];
+      const deliveryQueued = [];
+      for (const operation of deliveryOperations) {
+        const queuedDelivery = await rpcHandler('workspace/files/request', {
+          ...pageAuth,
+          operation,
+          input: { projectToken: 'project-safe', actionId: 'fixture-action' }
+        });
+        assert.deepEqual(Object.keys(queuedDelivery.value).sort(), [
+          'accepted', 'code', 'deadlineMs', 'requestToken', 'state'
+        ], '页面可见 operation 回包形状不得增加内部 target ref');
+        assert.equal(queuedDelivery.value.accepted, true,
+          `${operation} 必须进入 main 既有 preflight/override 链`);
+        assert.equal(JSON.stringify(queuedDelivery).includes('delivery-target-'), false,
+          '页面 RPC 回包不得暴露内部 target ref');
+        deliveryQueued.push(queuedDelivery.value.requestToken);
+      }
+      const deliveryRead = await rpcHandler('workspace/files/read', {
         contract: CONTRACT, hostInstanceId, limit: 4, authToken
       });
-      assert.deepEqual(afterMismatch.value.requests, [],
-        '工作区 mismatch 必须零入队');
+      assert.deepEqual(deliveryRead.value.requests.map((item) => item.operation),
+        deliveryOperations);
+      assert.deepEqual(deliveryRead.value.requests.map((item) => item.requestToken),
+        deliveryQueued);
+      for (const deliveryRequest of deliveryRead.value.requests) {
+        assert.equal(deliveryRequest.deliveryTargetRef,
+          resolved.value.deliveryTargetRef,
+        'Host→main 队列项必须绑定当前选中 raw 的 deterministic opaque ref');
+        assert.match(deliveryRequest.deliveryTargetRef,
+          /^delivery-target-[a-f0-9]{64}$/);
+      }
+      const deliveryReadText = JSON.stringify(deliveryRead);
+      assert.equal(deliveryReadText.includes(rawSessionId), false);
+      assert.equal(deliveryReadText.includes(resolved.value.sessionRef), false);
+      const claimedMismatchDelivery = await rpcHandler('workspace/files/claim', {
+        contract: CONTRACT,
+        hostInstanceId,
+        requestToken: deliveryRead.value.requests[0].requestToken,
+        requestSeq: deliveryRead.value.requests[0].requestSeq,
+        authToken
+      });
+      assert.equal(claimedMismatchDelivery.value.claimed, true,
+        '错位投递进入 main 后不得被 Host sweep 再次淘汰');
       const coreAfter = await rpcHandler('events/read', {
         contract: CONTRACT, hostInstanceId, afterEventSeq: 0, authToken
       });

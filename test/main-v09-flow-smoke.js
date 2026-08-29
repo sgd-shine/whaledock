@@ -234,8 +234,12 @@ async function run() {
     );
     assert.match(prepare, /adapter\.listTargets\(\)/);
     assert.match(prepare, /adapter\.inspectTarget\(target\.targetToken\)/);
+    assert.match(prepare, /adapter\.resolveTarget\(deliveryTargetRef\)/,
+      '内容态必须优先解析 Host 签发的当前会话');
     assert.match(prepare, /deliveryWorkspaceFacts\(inspected\.cwd, workspace\.cwd\)/);
     assert.match(prepare, /deliveryReceiptService\.createPreflight\(/);
+    assert.match(prepare, /targetToken: inspected\.targetToken/,
+      '普通列表与精确当前会话必须统一冻结已经 inspect 的目标');
 
     const frozen = sourceBlock(
       mainSource, 'async function findFrozenPromptTarget',
@@ -243,13 +247,18 @@ async function run() {
     );
     assert.match(frozen, /inspected\.sessionRef === sessionRef/);
     assert.match(frozen, /adapter\.revalidateTarget\(matches\[0\]\.targetToken\)/);
+    assert.match(frozen, /resolved\.sessionRef !== sessionRef/);
+    assert.match(frozen, /adapter\.revalidateTarget\(resolved\.targetToken\)/);
 
     const submit = sourceBlock(
       mainSource, 'async function submitPreparedVideoPrompt',
       'function currentVideoRuntime'
     );
     assert.match(submit, /deliveryReceiptService\.consumePreflight\(/);
-    assert.match(submit, /findFrozenPromptTarget\(adapter, consumed\.delivery\.sessionRef\)/);
+    assert.match(submit,
+      /findFrozenPromptTarget\([\s\S]*?adapter,[\s\S]*?consumed\.delivery\.sessionRef,[\s\S]*?deliveryTargetRef[\s\S]*?\)/);
+    assert.match(submit, /frozenDeliveryTargetRef !== deliveryTargetRef/,
+      '确认时必须先验证当前 Host 目标仍是预检目标');
     assert.match(submit, /currentFacts\.targetKey !== previousFacts\.targetKey/);
     assert.match(submit, /currentFacts\.workspaceKey !== previousFacts\.workspaceKey/);
     assert.match(submit, /currentFacts\.targetIdentity !== previousFacts\.targetIdentity/);
@@ -285,6 +294,44 @@ async function run() {
       < backendSubmit.indexOf("call('session.prompt'"));
     assert.match(backendSubmit, /if \(!deliveryRegistered\)/);
     assert.equal(count(backendSubmit, /call\('session\.prompt'/g), 1);
+  });
+
+  await check('精确投递目标可包含 blank 根会话，提交前必须再解析同一冻结身份', async () => {
+    const deliveryTargetRef = `delivery-target-${'d'.repeat(64)}`;
+    const sessionRef = `session-${'a'.repeat(64)}`;
+    const calls = [];
+    const exact = {
+      async resolveTarget(value) {
+        calls.push(['resolve', value]);
+        return { targetToken: 'exact-token', sessionRef, label: '当前会话', cwd: '/video' };
+      },
+      async listTargets() {
+        calls.push(['list']);
+        throw new Error('精确路径不得回退全局 latest');
+      },
+      revalidateTarget(token) {
+        calls.push(['revalidate', token]);
+        return { targetToken: token, sessionRef, label: '当前会话', cwd: '/video' };
+      }
+    };
+    assert.deepEqual(
+      await main.findFrozenPromptTarget(exact, sessionRef, deliveryTargetRef),
+      { targetToken: 'exact-token', sessionRef, label: '当前会话', cwd: '/video' }
+    );
+    assert.deepEqual(calls, [
+      ['resolve', deliveryTargetRef], ['revalidate', 'exact-token']
+    ]);
+    await assert.rejects(
+      main.findFrozenPromptTarget({
+        ...exact,
+        async resolveTarget() {
+          return { targetToken: 'changed', sessionRef: `session-${'b'.repeat(64)}` };
+        }
+      }, sessionRef, deliveryTargetRef),
+      /目标会话已变化/
+    );
+    assert.equal(main.videoDeliveryTargetRefValue(deliveryTargetRef), deliveryTargetRef);
+    assert.equal(main.videoDeliveryTargetRefValue(`delivery-target-${'g'.repeat(64)}`), null);
   });
 
   await check('watcher 落地后刷新卡片，shell state 不下发任何原始投递引用', async () => {
