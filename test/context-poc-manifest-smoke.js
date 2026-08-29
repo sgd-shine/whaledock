@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
 const manifest = require('../scripts/context-poc-manifest');
 const packagedVerifier = require('../scripts/verify-packaged-app-runtime');
 
@@ -115,6 +116,69 @@ function main() {
         digest: '0'.repeat(64)
       }), /BASELINE_DIGEST/);
       assert.throws(() => manifest.parseArgs(['--write']), /MANIFEST_ARGS/);
+    });
+
+    test('成品 Resources 模式精确回读、支持空格路径且拒绝伪 trust root', () => {
+      const resources = path.join(tmp, 'packaged Resources with spaces');
+      copySource(path.join(resources, 'context-poc'));
+      const baseline = manifest.readBaseline();
+      const receipt = manifest.verifyPackagedResources(resources);
+      assert.equal(receipt.files, 15);
+      assert.equal(receipt.totalBytes, baseline.totalBytes);
+      assert.equal(receipt.digest, baseline.digest);
+
+      const cli = spawnSync(process.execPath, [
+        path.join(__dirname, '..', 'scripts', 'context-poc-manifest.js'),
+        `--resources=${resources}`
+      ], { encoding: 'utf8' });
+      assert.equal(cli.status, 0, cli.stderr);
+      assert.equal(
+        cli.stdout.trim(),
+        `CONTEXT_POC_RESOURCES_VERIFIED files=15 bytes=${baseline.totalBytes} digest=${baseline.digest}`
+      );
+
+      const extra = path.join(tmp, 'packaged-extra');
+      copySource(path.join(extra, 'context-poc'));
+      fs.writeFileSync(path.join(extra, 'context-poc', 'unexpected.txt'), 'reject');
+      assert.throws(() => manifest.verifyPackagedResources(extra), /MANIFEST_TREE/);
+
+      const missing = path.join(tmp, 'packaged-missing');
+      copySource(path.join(missing, 'context-poc'));
+      fs.rmSync(fileAt(path.join(missing, 'context-poc'), 'plugin/lib/client.js'));
+      assert.throws(() => manifest.verifyPackagedResources(missing), /MANIFEST_TREE/);
+
+      const changed = path.join(tmp, 'packaged-changed');
+      copySource(path.join(changed, 'context-poc'));
+      fs.appendFileSync(
+        fileAt(path.join(changed, 'context-poc'), 'plugin/lib/client.js'),
+        Buffer.from([0x00])
+      );
+      assert.throws(() => manifest.verifyPackagedResources(changed), /BASELINE_MISMATCH/);
+
+      const linked = path.join(tmp, 'packaged-linked');
+      copySource(path.join(linked, 'context-poc'));
+      const linkedFile = fileAt(path.join(linked, 'context-poc'), 'plugin/lib/client.js');
+      fs.rmSync(linkedFile);
+      fs.symlinkSync(fileAt(manifest.CONTEXT_POC_ROOT, 'plugin/lib/client.js'), linkedFile);
+      assert.throws(() => manifest.verifyPackagedResources(linked), /MANIFEST_SYMLINK/);
+
+      const forgedBaseline = path.join(tmp, 'forged-baseline.json');
+      fs.copyFileSync(manifest.BASELINE_PATH, forgedBaseline);
+      assert.throws(() => manifest.parseArgs([
+        `--resources=${resources}`, `--baseline=${forgedBaseline}`
+      ]), /committed baseline/);
+      assert.throws(() => manifest.parseArgs([
+        `--baseline=${forgedBaseline}`, `--resources=${resources}`
+      ]), /committed baseline/);
+      assert.throws(() => manifest.parseArgs([
+        `--resources=${resources}`, '--root=context-poc'
+      ]), /committed baseline/);
+      assert.throws(() => manifest.parseArgs([
+        `--resources=${resources}`, `--resources=${resources}`
+      ]), /必须单独指定一次/);
+      assert.throws(() => manifest.parseArgs([
+        '--print', `--resources=${resources}`
+      ]), /必须单独指定一次/);
     });
 
     test('成品 verifier 从 app.asar 基线对账 Resources exact tree', () => {
