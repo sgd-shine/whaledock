@@ -4,7 +4,7 @@
 
 ## 项目状态一句话
 
-v0.9.0 已公开发布：发送前对账目标会话 cwd 与当前工作区，投递后在原卡片显示匿名事件回执，并常显工作区与三层概念引导。正式 tag 指向 `main@80009fed`，[main CI 32634983004](https://github.com/sgd-shine/whaledock/actions/runs/32634983004) 三平台全绿，[Release run 32635087823](https://github.com/sgd-shine/whaledock/actions/runs/32635087823) attempt 2 成功且 8 项资产已公开；官方 macOS arm64 成品已完成静态安装回读，钥匙串确认后的 GUI/真实会话仍为 `NEEDS-HUMAN`。v0.9 x64 在 Apple Silicon + Rosetta 只完成临时安装、静态回读和进程拉起，受同一钥匙串人工门阻挡而没有 `SMOKE_OK` 或正常退出，不能写成 Rosetta 功能通过或 Intel 真机。默认 dsh 仍精确锁定 `0.1.1-rc.2`，根 App 运行时依赖仍只有飞书低层 SDK。macOS 本地验证、三平台 CI、Windows/Intel 产物、受控 UI 证据与 SGD 人工验收必须分开报告；尤其不能把 fixture、CI 或 watcher 回读写成 Windows/Intel 真机或真实上游模型已通过。
+v0.10.0 已公开发布：同屏创作台把左侧内容、中间创作流与右侧 AI 执行收在一屏，结果回到原内容；受管 dsh 使用 `userData/context-poc/v1/dsh-home`，绝不读写、迁移或清理 `~/.dsh`。发版 PR [#24](https://github.com/sgd-shine/whaledock/pull/24) 以 `main@1afcaa58` 合入，[main CI 33266635690](https://github.com/sgd-shine/whaledock/actions/runs/33266635690) 三平台全绿，[Release run 33266723269](https://github.com/sgd-shine/whaledock/actions/runs/33266723269) attempt 2 成功，[公开 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.10.0) 为非 draft、非 prerelease且含 8 项资产。本地正式版基线为 **860 PASS / 44 个 ALL PASS**。官方 macOS arm64 成品已安装并成功拉起，版本/架构、Developer ID、Hardened Runtime、严格验签、Gatekeeper `Notarized Developer ID`、context-poc 15 文件 digest 与 dsh/App runtime 双合规均已回读；DMG 有离线公证票据，安装后裸 App 本体没有独立 ticket，不得混写。Windows 仍是未签名、未真机验证的实验性支持；x64 云构建/公证与历史 Rosetta 抽查不是 Intel 真机；正式 GUI、真实模型、钥匙串/TCC 与系统 App 界面仍为独立 `NEEDS-HUMAN`。
 
 ## 常用命令
 
@@ -42,9 +42,9 @@ npm run dist:win          # Windows x64 NSIS Setup + portable
 - **Windows `.cmd/.bat` 必须经 shell**：Node 针对 CVE-2024-27980 收紧了启动行为。只对已解析为 `.cmd/.bat` 的命令使用 `shell:true`；Windows spawn 保持 `windowsHide:true`，避免黑色控制台闪现。
 - **Windows 要清理整棵进程树**：不能只杀父 PID。温和阶段用 `taskkill /PID <pid> /T`，4 秒后仍未退才用 `/T /F`；计划由纯函数 `killPlan` 生成、薄执行器执行。SGD 真机若发现残留，第一动作是收集日志与父子进程信息，不做猜测性大改。
 - **Windows 便携版开机自启依赖 exe 路径**：登录项必须指向 `PORTABLE_EXECUTABLE_FILE`；移动 exe 后启动时对账并自愈。关闭自启要真实移除登录项。系统拒绝时如实回报，不能只保存配置就宣称成功。
-- **Windows 产物未签名且未真机验证**：SmartScreen 的「更多信息 → 仍要运行」是当前预期摩擦，不得通过关闭系统安全功能绕过。v0.2 按“实验性支持（未真机验证）”发布；CI/构建成功不能写成 Windows dsh 或半自动更新真机通过。
+- **Windows 产物未签名且未真机验证**：SmartScreen 的「更多信息 → 仍要运行」是当前预期摩擦，不得通过关闭系统安全功能绕过。v0.10.0 继续按“实验性支持（未真机验证）”发布；CI/构建成功不能写成 Windows dsh 或半自动更新真机通过。
 - **macOS 正式 Release 与本地构建不是同一证据**：v0.6.0 起的公开 macOS 成品使用 Developer ID、Hardened Runtime 与 Apple 公证；本地/PR 构建仍可为 ad-hoc。登录项和 Gatekeeper 必须回读当次成品的真实状态，不得沿用旧版或本地构建结论。
-- **构建裸 `.app` 会伪装成重复安装**：electron-builder 的 `release/mac*` staging bundle 会被系统应用列表索引。`beforePack` 必须先写 no-index 标记，`afterAllArtifactBuild` 再由 `scripts/macos-build-visibility.js` 注销并移入 `.app-archives.noindex/*.app-bundle`；每个架构只保留一个滚动裸包归档，历史版本由 dmg/zip/校验和保留。不得把隐藏归档写成正式安装。收尾用该脚本 `--check` 与 `mdfind 'kMDItemCFBundleIdentifier == "com.sgd.whaledock"'` 回读，后者应只剩 `/Applications/WhaleDock.app`。
+- **构建裸 `.app` 会伪装成重复安装**：electron-builder 的 `release/mac*` staging bundle 会被系统应用列表索引。`beforePack` 必须先写 no-index 标记，`afterAllArtifactBuild` 再由 `scripts/macos-build-visibility.js` 注销并移入 `.app-archives.noindex/*.app-bundle`；每个架构只保留一个滚动裸包归档，历史版本由 dmg/zip/校验和保留。不得把隐藏归档写成正式安装。收尾须将三类证据分开：文件系统直接盘点 `/Applications` 中的正式安装；`mdfind` 的 Spotlight 索引结果；LaunchServices/系统「应用程序」列表。Spotlight 整体未索引 `/Applications` 时，空结果不能写成唯一安装；外置 no-index 证据归档的 LaunchServices 残留也不等于第二个正式安装，但必须如实报告并交系统 UI 人工确认。
 - **内置 runtime 必须原生构建**：各平台 runner 现场运行 bundle；x64/arm64 不复用 `vendor/dsh-runtime/`。Electron 的 `execPath/resourcesPath` 由 main 注入 backend；`lib/` 不得为此 require Electron。
 - **两条运行时合规身份不得混合**：`THIRD_PARTY_NOTICES.md` 与根 `licenses/` 只描述内置 dsh runtime；飞书 SDK 及根 App 生产闭包只由 `compliance/app-runtime/` 的 inventory/NOTICE/licenses 描述，并作为 `extraResources` 随包。最终 lock 后两条 verifier 都必须覆盖每种安装载体。
 - **内置引擎是末级兜底**：默认仍先尊重用户自定义命令、系统 dsh、系统 npx；只有 `preferBundled=true` 时才把内置引擎提前。不要把「免装 Node」误写成强制忽略系统环境。
@@ -58,12 +58,12 @@ npm run dist:win          # Windows x64 NSIS Setup + portable
 
 ## 当前验收边界
 
-- macOS arm64：安装版全量真机验收；
-- macOS x64：v0.9 已在 Apple Silicon + Rosetta 完成临时安装、静态回读与进程拉起，但被钥匙串人工门挡住，没有 `SMOKE_OK` 或正常退出；这两项保持 `NEEDS-HUMAN`。未做 Intel 真机，必须单独标明环境；
-- macOS 系统应用可见性：`/Applications/WhaleDock.app` 是唯一可发现的主 App；构建归档与历史版本不计作安装，也不得出现在系统 App 界面；
-- Windows：GitHub Actions 只能证明构建/自动化；v0.2 按实验性、未真机验证口径发布，Setup、便携版、内置 dsh、托盘、快捷键、进程清理、开机自启与半自动更新仍列为发布后待补证；
-- 更新：macOS 可用本地假 Release/fetch 注入验证提醒；不得把假数据验证写成线上 Release 已验证；
-- 发布：SGD 已明确批准并完成本轮 v0.9.0 正式发布；本轮使用既有 Developer ID/公证链完成全载体成品回读，精确审批值只在 publish 重跑窗口存在且已删除。后续 Release 仍必须重新完成同一闭环，不得复用本次审批值。
+- macOS arm64：官方 v0.10.0 已完成公开成品下载、安装、进程级启动与版本/架构/签名/Gatekeeper/context-poc/双合规静态回读；完整正式 GUI、钥匙串/TCC 与真实模型仍是人工验收，不由启动日志或静态证据代替；
+- macOS x64：v0.10.0 已有云端构建、Developer ID、Hardened Runtime 与公证证据，但这不是 Intel 真机。历史 v0.9 在 Apple Silicon + Rosetta 只完成临时安装、静态回读与进程拉起，没有 `SMOKE_OK` 或正常退出；
+- macOS 系统应用可见性：文件系统盘点确认 `/Applications` 只有一个正式 `WhaleDock.app`。Spotlight 当前对整个 `/Applications` 无索引结果，外置证据归档在 LaunchServices 仍残留 1 项；两者不能写成“系统唯一可发现”，系统 App 界面保持 `NEEDS-HUMAN`；
+- Windows：GitHub Actions 只证明 v0.10.0 构建、解包与自动合规回读；未签名且按“实验性支持（未真机验证）”发布，Setup、便携版、内置 dsh、托盘、快捷键、进程清理、开机自启与半自动更新仍待真机；
+- 更新：历史版的真实线上提醒与本地假 Release/fetch 注入必须分开；不得用假数据、公开 Release 存在或进程拉起代替当次真实 GUI 点击证据；
+- 发布：v0.10.0 已经 PR #24、main CI、注解 tag、Release run attempt 2、8 项公开资产与官方 arm64 安装回读闭环。精确审批值只在本次 publish 重跑窗口存在且已删除；后续 Release 必须重做闭环，不得复用。
 
 完整双平台人工清单见 `docs/开发方案-v0.2-2026-08-15.md` 第 8 节和当前 `HANDOFF.md`。
 
