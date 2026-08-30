@@ -1,35 +1,25 @@
-# HANDOFF.md — WhaleDock v0.10+ 当前交接
+# HANDOFF.md — WhaleDock v0.10.0 发布收口与 v0.11 当前交接
 
-更新：2026-08-29 · v0.10 Batch 10、1b、1c 已合 main；最终 main arm64 alpha 已重建并安装；公开稳定版仍为 v0.9.1
+更新：2026-08-30 · v0.10.0 已公开发布；官方 macOS arm64 公共成品已安装回读，下一功能批次为 v0.11
 
-## v0.10+ 当前执行线
+## v0.10.0 已公开发布与本机收口
 
-- 合并状态：基础线 PR [#19](https://github.com/sgd-shine/whaledock/pull/19)、Batch 10 PR [#20](https://github.com/sgd-shine/whaledock/pull/20) 及其 Windows CI 修复 PR [#21](https://github.com/sgd-shine/whaledock/pull/21)、Batch 1b PR [#22](https://github.com/sgd-shine/whaledock/pull/22) 均已进入 main。Batch 1c 独立 PR [#23](https://github.com/sgd-shine/whaledock/pull/23) 以 merge commit `5ca193a7ff67752f49f915f8c250e0c85be3e712` 合入，不与发版 PR 混合。
-- 自动证据：Batch 1c 最终 head 的 [PR CI 33240914493](https://github.com/sgd-shine/whaledock/actions/runs/33240914493) 与合并后的 [main CI 33240982250](https://github.com/sgd-shine/whaledock/actions/runs/33240982250) 均为 macOS、Ubuntu、Windows 全绿。本地最终为 layout **59/59 PASS**、全仓 **856 PASS / 44 个 ALL PASS**，末行 `ALL PASS`。
-- 备份与版本边界：远端 `backup/v010-alpha2-c0dc75a` 精确指向 `c0dc75a`；应用身份仍是 `0.10.0-alpha.2`，没有正式 tag、没有 v0.10 Release。
-- 后续功能从 main 新开独立分支，不回到 v0.9.x；旧 worktree/已合分支只在 v0.11 清理项中登记，本批不删。
-- v0.9.1 只作为公开稳定/恢复入口；本地 alpha 使用独立 preview builder 与 `release-preview/`，没有 tag、没有 Release。
-- Batch 1 已完成固定资产清单、受管页面认证/重载重签、官方 SidebarRoot/三栏对齐、Host↔main 偏好协议与 core journal 隔离、官方草稿填充链、迟到 align/fillDraft 失效和可见降级；真实 rc.2 持久性证据保持有效。
-- Batch 2 已将 `ui-layout` / `ui-conversation` 收口为一条可复现 refork 命令：锁定 rc.2 npm 上游、网络前验 lock/patch、拒绝 redirect/超时/超限、严格解析 ustar 和 zero-fuzz unified patch，并校验终态摘要、差异预算与并发回滚。布局 fork 为 `42+/5-`，对话 fork 为 `19+/3-`；`--check` 从 `lib/config` 读取生产版本且不写工作树。
-- Batch 3.0 已完成内容卡与回执、概览、脚本、发布、复盘、拍摄六段能力回迁。原生拍摄现场支持全文分页、提词、重来/完成/缺口、二阶段收工、两份 owned 文件独占写入与历史读回；browserOnly 保留原生会话并提供 64 KiB 手动页内提词，零工作区读取、零 RPC、零写入。
-- Batch 10 已完成界面去冗余，Batch 1b 已补齐首次说明与工作流可理解性；Batch 1c 进一步消除了新手第一脚的手工“对齐”概念。内容态只认工作台当前工作区，首次进入、从会话态返回或目标路径变化会自动复用/创建一个根会话；只有用户自己把右栏切走或服务异常时才出现人话兜底。
-- Batch 1c 的精确目标采用 HMAC 派生 opaque delivery ref；prepare/submit 前后均解析并冻结精确会话，只有四个投递 operation 允许显式 mismatch override。公开 operation 名称、输入/输出、`workspaceMatch` 和回执 override 语义未改，browserOnly 仍零工作区读写/RPC。
-- Batch 1c layout 为 **59/59 PASS**；alpha.2 全仓 smoke 为 **856 PASS / 44 个 ALL PASS**，末行 `ALL PASS`。refork、context manifest、双合规 verifier、`git diff --check` 均通过；代码与只读审查无 P0/P1/P2。
-- 可信静态资产与可变 dsh 数据已经拆根：摘要绑定、只读的 asset root 可跨启动复用；稳定数据根为 `userData/context-poc/v1/dsh-home`，必须跨后端/App 重启和工作区切换保留 sessions、settings、credentials、attachments、storages 与 presets。退出和启动 sweep 都不得触达数据根。
-- 受管 v0.10 不读取、不写入、不迁移、不清理 `~/.dsh`，也不自动导入旧数据；设置页明确提示首次使用可能需要重新配置模型。该隔离边界是产品合同，不得写成历史数据丢失或已迁移。
-- 当前固定基线为 **15 文件 / 810,828 B**，digest `16ffc4198355b93a1950965eece991d4b615d5005f63b3ab2da6933038496fb1`。根 App 源码 runtime 为 52 包 / 830 文件，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`；修改后 fork 与内置 dsh runtime 继续使用两条独立合规身份。
-- 真实 rc.2 双冷启动为 `RC2_PERSISTENCE_PASS`：Host 握手×2、HTTP×2、会话/cwd 恢复、home/asset root 复用、settings/credentials 哈希不变，收尾后回环端口关闭。
-- Batch 1c 最终 main arm64 alpha 成品的 app-runtime 回读为 `52 packages / 449 files`、tree `b363e6c80bca9296e566e0accae30143e6ce02dc53a660ec706bf8c9cfac1d02`、compliance `bff3775b9f87f605a9a71a907895ee1e159e5ff15e198fd3ddc00826ac59ec06`，内置 dsh 合规回读 `copies=1`。Developer ID `wang jie (CS4NK76DA5)`、Hardened Runtime 与严格验签通过；安装版和构建归档 `app.asar` 同为 `fa8fd13de1f1870ca5b59606e84f1f8cd300d07a15ba1ac4cd5a162eb5c6fbeb`，Spotlight 与 `/Applications` 顶层都只发现 `/Applications/WhaleDock.app`。
-- 最终 no-index 归档 App / dsh runtime 为 `615,724 / 300,776 KiB`，安装位置实际分配为 `601,356 / 286,532 KiB`；`app.asar` `19,856,711 B`。ZIP 为 `193,768,735 B`、SHA-256 `f989ba24073493ac10efa75116685e85964357b946a1389bcdcefbc0d06094d2`；DMG 为 `175,736,069 B`、SHA-256 `1b48581d6b1f061e17dcb4c4a85b9be9e7e4eb4fb346f99e528cb2b8da55498d`。两包完整性通过；Gatekeeper 为 `Unnotarized Developer ID`，没有公证或 stapled ticket；旧安装与上一份预览产物已可恢复地归档到本批 no-index 备份目录。
-- 源码态真实指针视频已走完拍摄、二次收工、两文件写回和历史读回；安装态回读 alpha.2/arm64、内置 rc.2、4 张内容卡与 3/3 拍摄全文。证据分别位于 `WhaleDock-evidence.noindex/v0.10-batch9/source-preview/` 与 `installed-alpha2/`。
-- TCC 边界：安装态沿用 macOS 受保护文稿目录 cwd 时，自动验收不代用户授权；本轮只改用专用非受保护测试工作区完成运行验证。这不是产品绕过权限，也不是原目录 TCC 已通过。
-- 后续功能开发统一基于 alpha.2，不再回到 v0.9.x 或 alpha.1。Batch 1c 独立 PR、三平台 PR/main CI 与最终 main arm64 alpha 重建安装均已完成；当前只交给 SGD 跑 4 步卡。SGD 未明确回复“过”，不得开始 v0.10.0 发版、不得打 tag 或创建 Release。Windows/Intel 真机、真实模型和人工可见体验仍是独立证据门。
+- 合并与自动证据：发版 PR [#24](https://github.com/sgd-shine/whaledock/pull/24) 以 merge commit `1afcaa58d48029b2ae0322db8cd0a449a737b9c0` 进入 main；[PR CI 33266553784](https://github.com/sgd-shine/whaledock/actions/runs/33266553784) 与 [main CI 33266635690](https://github.com/sgd-shine/whaledock/actions/runs/33266635690) 均为 macOS、Ubuntu、Windows 全绿。正式版本地 smoke 为 **860 PASS / 44 个 ALL PASS**，末行 `ALL PASS`。
+- tag 与发布：注解 tag `v0.10.0` 的 tag object `5162cc18991d8657585f4d880dc50ecfb76c5c21` 解引用到上述 merge commit。[Release run 33266723269](https://github.com/sgd-shine/whaledock/actions/runs/33266723269) attempt 1 只在空审批门按设计 fail-closed，未提前创建 Release；attempt 2 的 [publish job 99215920691](https://github.com/sgd-shine/whaledock/actions/runs/33266723269/job/99215920691) 成功。
+- 公开状态：[v0.10.0 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.10.0) 已回读为 `releases/latest`、非 draft、非 prerelease，共 8 项资产。精确审批变量已删除，仓库变量数量回读为 0。
+- 公开资产字节数：`WhaleDock-0.10.0-arm64.dmg` 176,876,415 B、`WhaleDock-0.10.0-arm64-mac.zip` 195,135,040 B、`WhaleDock-0.10.0-x64.dmg` 181,740,649 B、`WhaleDock-0.10.0-x64-mac.zip` 200,050,685 B、`WhaleDock-Setup-0.10.0.exe` 152,967,945 B、`WhaleDock-0.10.0-portable.exe` 152,780,107 B，另有 `SHA256SUMS-mac.txt` 376 B 与 `SHA256SUMS-win.txt` 191 B。
+- macOS 发布链：arm64/x64 四项 Apple submission 均为 `Accepted`，两份 DMG 均完成 staple/validate，挂载 App 由 Gatekeeper 接受。DMG 有公证票据；安装后的裸 App 没有独立 stapled ticket，但 Gatekeeper 接受，必须继续分列报告。
+- 正式本机成品：官方 arm64 公共 DMG 已从公开 Release 重新下载，安装到 `/Applications/WhaleDock.app` 并完成启动；版本/arm64、Developer ID、Hardened Runtime、Gatekeeper、固定 context **15 文件 / 810,828 B** 与 digest `16ffc4198355b93a1950965eece991d4b615d5005f63b3ab2da6933038496fb1`、内置 dsh 与根 App 两条成品合规链均通过。App / dsh runtime 占用为 `602,740 / 286,668 KiB`，`app.asar` SHA-256 为 `959947422e04f65fc237c7978471f2b62b541ae97bc92b731fcd4e2de1cf8e6f`。
+- 数据与版本合同：受管数据根仍是 `userData/context-poc/v1/dsh-home`，跨后端/App 重启与工作区切换保留会话、设置、凭据、附件、存储和预设；`~/.dsh` 不读、不写、不迁移、不清理，也不自动导入，首次使用可能需要重新配置模型。布局/对话 refork 差异仍为 `42+/5-`、`19+/3-`，两条运行时合规身份继续分开。
+- 更新提醒：SGD 已在官方 v0.9.1 中亲手点击「立即检查」并回复通过；日志于 `2026-08-30T06:11:52.320Z` 回读发现新版本 `0.10.0`。提示框截图没有留存，不得写成已有截图证据。
+- 唯一安装边界：`/Applications` 文件系统顶层只有一个正式 `WhaleDock.app`；当前整个 `/Applications` 无法由 `mdls` 建立索引，LaunchServices 仍保留一条外置 no-index 证据归档登记，注销返回 `-10814`。因此 Spotlight/LaunchServices 完全清零未成立，系统 App 界面的唯一可见性保持 **NEEDS-HUMAN**。
 
-## SGD 人工验收与 Batch 2 门
+## 已完成的人工作业与仍存边界
 
-- 先用最终 main 的本地 `0.10.0-alpha.2` 安装版走 4 步卡：首次进入右栏自动就位；示例卡预检为「工作区匹配」并确认一次；New Session 往返后仍匹配或按人话按钮返回；全屏拍摄完成后能读回本地记录。
-- SGD 卡住时只需记具体步骤；只有明确回复“过”，Batch 2 才可开工。当前 **NEEDS-HUMAN**，源码态程序化点击、smoke、PR CI 与本地静态安装回读都不能代替。
-- Batch 2 才负责 `0.10.0` 版本、正式 builder/Release workflow、tag、公证、八项公开资产与官方成品回读。本批没有这些事实。
+- Batch 1c 的四步 alpha 卡已由 SGD 回复通过；v0.9.1 到 v0.10.0 的线上更新提醒也已由 SGD 亲手点击通过。二者都不能外推成真实模型或正式版完整手感通过。
+- Windows 仍只有 CI、公开资产与自动校验，安装器未签名且未做真机。macOS x64 的签名、公证与成品校验不等于 Intel 真机；历史 Apple Silicon + Rosetta 证据也不能代替。
+- 正式 v0.10.0 尚未用真实模型完成整条创作链；完整视觉、滚动、长时间操作、真实会话与整体手感仍待人工。系统 App 界面唯一可见性也因上述索引边界保持 **NEEDS-HUMAN**。
+- 后续功能从当前 main 新开独立 v0.11 分支；不得回到 v0.9.x，也不得在清理批次前擅自删除旧 worktree、已合并分支或 `docs/_to_delete/`。
 
 ## v0.11 下一批登记（本批不动）
 
@@ -38,13 +28,13 @@
 3. 视频工作台默认进入同屏台；旧驾驶舱入口移到设置「经典驾驶舱（旧）」。
 4. 将 `main.js` 的 21 个 context operation 抽到纯 Node 可加载的 `lib/context-workspace-ops.js`，由 smoke 直测。
 5. 统一「视频工作台」与「AI 工作台」的一词两义，先给 SGD 2–3 个候选名再定。
-6. 按 D6 清理两个 prunable worktree、已合并本地分支；`docs/_to_delete/` 由 SGD 自己移入废纸篓。
+6. 按 D6 清理两个 prunable worktree（`harness-desktop-v010-forward`、`whaledock-v0.2`）与三条已合并的 `codex/v010-*` 本地分支；`docs/_to_delete/`（含 `_audit-cowork-20260827/`、`_audit-cowork-20260829/`）由 SGD 自己移入废纸篓。
 
-## v0.9.1 已公开发布与恢复入口
+## v0.9.1 历史恢复与更新提醒基线
 
 - PR [#18](https://github.com/sgd-shine/whaledock/pull/18) 已合入 `main@670e32c1abd45f5cb355dfd6e6eeaa9ee18ff27c`；[main CI 32869008546](https://github.com/sgd-shine/whaledock/actions/runs/32869008546) 三平台全绿。
 - [Release run 32869263514](https://github.com/sgd-shine/whaledock/actions/runs/32869263514) attempt 2 成功；[v0.9.1 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.1) 为非 draft、非 prerelease，共 8 项资产。macOS arm64 DMG/ZIP 为 176,646,943 / 194,888,771 B，x64 为 181,493,987 / 199,804,430 B，Windows Setup/portable 为 152,772,664 / 152,584,811 B。
-- 官方 v0.9.1 arm64 此前已完成安装回读，并保留本地 ZIP/DMG 与 no-index App 恢复副本；当前 `/Applications/WhaleDock.app` 是本地 v0.10 alpha。系统仍只能发现这一个 WhaleDock App，旧正式版不得以并列裸 `.app` 留在索引范围内。
+- 官方 v0.9.1 arm64 此前已完成安装回读，并保留本地 ZIP/DMG 与 no-index App 恢复副本；它已用于真实点击「立即检查」并由日志确认发现 v0.10.0。当前 `/Applications/WhaleDock.app` 是官方 v0.10.0 arm64 正式版，v0.9.1 不再是公开稳定入口。
 
 ## v0.10 前置 P1 已合入历史
 

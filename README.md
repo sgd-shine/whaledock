@@ -6,17 +6,16 @@
 
 > ⚠️ 本项目是社区作品，与 DeepSeek 官方无关（Unofficial）。DeepSeek Harness 本体以 MIT 协议开源。本项目原名 Harness Desktop，自 v0.1.1 起更名为鲸坞 WhaleDock。
 
-## 当前状态（2026-08-29）
+## 当前状态（2026-08-30）
 
-- **公开稳定版是 v0.9.1**：tag 精确指向 `main@670e32c`；[main CI 32869008546](https://github.com/sgd-shine/whaledock/actions/runs/32869008546) 三平台全绿，[Release run 32869263514](https://github.com/sgd-shine/whaledock/actions/runs/32869263514) attempt 2 成功，[正式 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.1) 为非 draft、非 prerelease，共 8 项资产。v0.9.1 是稳定与恢复入口，不再是新功能开发线。
-- **新功能开发已经切到 v0.10+**：应用身份仍为 `0.10.0-alpha.2`。Batch 10、1b、1c 已进入 `main@5ca193a`；Batch 1c 独立 PR [#23](https://github.com/sgd-shine/whaledock/pull/23) 及合并后 main 的三平台 CI 全绿。本地预览包使用独立构建配置与 `release-preview/`，不会冒充正式 v0.10 Release。
-- v0.10 的原生页面保留官方会话侧栏，同时加入内容视图、多项目对齐、受控草稿填充、发送前上下文闸门、偏好持久化和桥不可用时的可见降级。受管页面只在鲸坞自行拉起、精确内置 dsh `0.1.1-rc.2` 且固定资产清单逐文件通过时启用；外部或无法证明的 dsh 继续使用原生会话，不接管发送。
-- v0.10 受管模式使用鲸坞自己的持久 dsh 数据目录，跨后端重启、App 重启与工作区切换保留会话、设置、凭据、附件、存储和预设。它不会读取、迁移、覆盖或清理 `~/.dsh`；旧环境数据不会自动导入，首次使用可能需要重新配置模型。
-- **v0.10 Batch 1 已完成受管上下文与持久数据根收口**：真实 rc.2 双冷启动回读了 Host/HTTP、会话与 cwd 恢复、同一持久 home/asset root 复用，设置与凭据文件保持不变，退出后端口已关闭。
-- **v0.10 Batch 2 已完成可复现 refork 与双合规闭环**：两个 dsh UI fork 均由锁定的 rc.2 上游 tarball 和精确 patch 重建，布局 fork 差异为 `42+/5-`，对话 fork 为 `19+/3-`；未知版本在网络前拒绝，下载、tar、patch、差异预算与原子更新均有 fail-closed 守门。
-- **v0.10 创作链与首次路径已经接通**：真实内容卡与任务回执、概览决策、脚本块提案、发布检查单、复盘打法库、原生拍摄现场与浏览器页内提词均已接通。Batch 1c 让内容态只认工作台当前工作区：首次进入或从「对话记录」回来时，右栏会自动复用或打开对应会话，不再要求新用户理解或点击“对齐”；异常时才显示一句人话和明确按钮。统一 `npm run smoke` 实跑 **856 PASS / 44 个 ALL PASS**，layout **59/59 PASS**；当前 context 基线为 **15 个文件 / 810,828 B**，digest `16ffc4198355b93a1950965eece991d4b615d5005f63b3ab2da6933038496fb1`。
-- **最终 main 的 arm64 alpha.2 已成为本机开发安装，但仍只是本地证据**：Developer ID Application + Hardened Runtime 与严格验签通过，回读根 App runtime `52 packages / 449 files`、单份内置 dsh 合规材料；Spotlight 只发现 `/Applications/WhaleDock.app`。ZIP / DMG 为 `193,768,735 B` / `175,736,069 B`，归档 App / 内置 dsh runtime 为 `615,724 / 300,776 KiB`，`app.asar` 为 `19,856,711 B`。Gatekeeper 明确回读 `Unnotarized Developer ID`，没有公证或 stapled ticket。
-- 安装态沿用 macOS 受保护文稿目录作为 cwd 时，自动验收不代用户授予 TCC 文件访问权限；已有运行验证使用专用、非受保护测试工作区。这不代表文稿目录权限已通过。v0.10 仍未发布；当前只等待 SGD 4 步卡回复“过”，之后才允许开始版本切换、tag、公证与公开 Release。Windows/Intel 真机、真实模型与人工体验仍是独立证据门。
+- **公开稳定版是 [v0.10.0](https://github.com/sgd-shine/whaledock/releases/tag/v0.10.0)**：发版改动由 [PR #24](https://github.com/sgd-shine/whaledock/pull/24) 以 merge commit `1afcaa58` 进入 `main`，合并后 [main CI 33266635690](https://github.com/sgd-shine/whaledock/actions/runs/33266635690) 三平台全绿；[Release run 33266723269](https://github.com/sgd-shine/whaledock/actions/runs/33266723269) attempt 2 成功，公开 Release 为非 draft、非 prerelease，共 8 项资产（6 个安装产物 + 2 份校验和）。
+- **同屏创作台已进入正式版**：左边选内容、中间推进概览/脚本/拍摄/发布/复盘，右边交给 AI 执行，结果回到原内容。首次进入和从「对话记录」返回时会自动复用或打开对应会话；异常时才显示人话说明与可执行按钮。
+- **受管 dsh 数据与用户旧环境完全分开**：v0.10.0 使用鲸坞自己的 `userData/context-poc/v1/dsh-home`，跨后端、App 重启和工作区切换保留会话等数据；绝不读取、写入、迁移、覆盖或清理 `~/.dsh`。旧数据不会自动导入，首次进入 AI 工作台可能需要重新配置一次模型。
+- **发版前本地门全过**：统一 `npm run smoke` 实跑 **860 PASS / 44 个 ALL PASS**，context-poc 基线为 **15 个文件 / 810,828 B**，digest `16ffc4198355b93a1950965eece991d4b615d5005f63b3ab2da6933038496fb1`；两个 dsh UI fork 可从锁定的 `0.1.1-rc.2` 上游材料与精确 patch 重现。
+- **官方 macOS arm64 成品已安装并成功拉起**：回读日志为 `[2026-08-30T07:51:27.824Z] [app] 鲸坞 WhaleDock v0.10.0 启动 (darwin/arm64)`；安装体版本/架构、Developer ID Application、Hardened Runtime、严格验签与 Gatekeeper `Notarized Developer ID` 均通过。`Resources/context-poc` 精确回读上述 15 文件 digest；内置 dsh 与根 App runtime 两条成品合规 verifier 均通过，App runtime 为 `52 packages / 449 files`。
+- **公证票据证据分开记录**：公开 arm64 DMG 通过 `stapler validate`，有离线公证票据；拖入 `/Applications` 后的裸 `.app` 本体没有独立 stapled ticket，但 Gatekeeper 仍接受为 `Notarized Developer ID`。二者不互相代替。
+- **安装可见性尚有人工门**：文件系统直接回读 `/Applications` 只有一个正式 `WhaleDock.app`；但 Spotlight 当前对整个 `/Applications` 都没有索引结果，不能据此宣称“Spotlight 唯一”，LaunchServices 还对外置证据归档保留 1 项残留登记。系统「应用程序」界面仍需 SGD 亲手确认，记为 `NEEDS-HUMAN`。
+- **证据边界不变**：Windows x64 仍是未签名、未真机验证的实验性支持；x64 macOS 的云端构建/签名/公证和历史 Rosetta 抽查都不是 Intel 真机证据。正式 v0.10.0 的完整 GUI 手感、真实模型、钥匙串/TCC 及其他人工项仍需分别验收；源码 smoke、CI、安装与进程级启动不替代这些证据。
 
 ## v0.2 带来了什么
 
@@ -204,7 +203,7 @@ v0.5 给鲸坞加了两件可以完全自定义的东西，**都不需要写代�
 | 电脑 | 下载文件 | 安装方式 |
 | --- | --- | --- |
 | Apple Silicon Mac | `WhaleDock-<版本>-arm64.dmg` | 打开 dmg，拖入「应用程序」 |
-| Intel Mac | `WhaleDock-<版本>-x64.dmg` | 打开 dmg，拖入「应用程序」；v0.9 在 Apple Silicon + Rosetta 仅抽查到钥匙串人工门，未完成 `SMOKE_OK`/正常退出，也未做 Intel 真机 |
+| Intel Mac | `WhaleDock-<版本>-x64.dmg` | 打开 dmg，拖入「应用程序」；v0.10 x64 只有云端构建/签名/公证，历史 v0.9 在 Apple Silicon + Rosetta 也只部分抽查，始终没有 Intel 真机证据 |
 | Windows 10/11 x64 | `WhaleDock-Setup-<版本>.exe` | 双击，按当前用户安装 |
 | Windows 10/11 x64 便携使用 | `WhaleDock-<版本>-portable.exe` | 放到固定目录后直接双击；无需安装 |
 
@@ -316,7 +315,7 @@ npm run dist:win         # Windows x64 Setup + portable（建议在 Windows runn
 node scripts/macos-build-visibility.js --out-dir=release --check
 ```
 
-`npm run smoke` 是不依赖图形界面的纯 Node 测试集。当前 v0.4 源码态本地回读为 **201 PASS / ALL PASS**，新增覆盖配置/默认工作区、串行切换与 journal 恢复、受保护目录拒绝、安全图片落盘、OCR 路由、rc.6 prompt fail-closed 适配和 Electron 薄层信任边界。这是本地纯 Node 证据；v0.4 正式 tag 提交的 [main CI 31930571815](https://github.com/sgd-shine/whaledock/actions/runs/31930571815) 三平台全绿是另一类证据，两者不互相替代。
+`npm run smoke` 是不依赖图形界面的纯 Node 测试集。本次 v0.10.0 发版前本地回读为 **860 PASS / 44 个 ALL PASS**，末行 `ALL PASS`；合并后的 [main CI 33266635690](https://github.com/sgd-shine/whaledock/actions/runs/33266635690) 三平台全绿是另一类证据，两者不互相替代。v0.4 当时的源码态结果为 **201 PASS / ALL PASS**，保留为对应版本的历史记录。
 
 ## 常见问题
 
@@ -364,6 +363,7 @@ node scripts/macos-build-visibility.js --out-dir=release --check
 - **v0.7.0**：第一方视频驾驶舱、全宽对话现场、鲸坞全局色系快切、远程板块批次 1 骨架与电商客服示例包已公开发布；Windows/Intel 真机与 Windows 签名仍是独立边界。
 - **v0.8.0**：dsh 默认锁定升至 `0.1.1-rc.2`，飞书自建应用长连接与独立 app-runtime 合规链已完成并公开发布；正式 Release 共 8 项资产，官方 macOS arm64 成品已安装回读。飞书真租户/手机、Windows 真机与 Intel 真机仍待补证。
 - **v0.9.0**：体验流畅度批次 2/3 已实现、过最终三平台 CI 并公开发布，共 8 项资产；官方 macOS arm64 成品已完成静态安装回读，受控源码流程 MP4/GIF 已完成。钥匙串确认后的成品 GUI、真实 dsh/模型、cwd mismatch、断线降级与 SGD 亲手体验仍为 `NEEDS-HUMAN`。
+- **v0.10.0**：同屏创作台、首次路径自动对齐与鲸坞自有 dsh 数据根已进入正式版；三平台 CI、签名/公证、8 项公开资产和官方 macOS arm64 安装回读已完成。Windows/Intel 真机、真实模型、完整正式 GUI 手感与系统 App 界面唯一性仍分别保留为 `NEEDS-HUMAN`。
 - **v1.0**：macOS 签名/公证已在 v0.6.0 提前完成；v1.0 的范围不再把它当作未完前置项。Windows 签名与双平台真机覆盖仍需独立决策和证据。
 
 ## License
