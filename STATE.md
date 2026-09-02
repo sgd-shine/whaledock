@@ -1,10 +1,17 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-08-30（v0.10.0 已公开发布并成为 `releases/latest`；官方 macOS arm64 公共成品已重新下载、安装、启动并完成静态回读）
+更新：2026-09-02（v0.10.0 仍是公开稳定版；v0.11 项目工作台批次 1–4 已完成源码开发与隔离 UI 复验，尚未打包或发布）
 
 ## 阶段结论
 
 **v0.10.0 已公开发布并成为当前稳定版。发版 PR [#24](https://github.com/sgd-shine/whaledock/pull/24) 已合入 `main@1afcaa58`，三平台 CI、注解 tag、签名/公证、8 项公开资产与官方 macOS arm64 公共成品安装回读均已闭环；v0.9.1 线上更新提醒的人类结果与日志已回读，但提示截图缺失。Windows/Intel 真机、真实模型、正式版完整交互手感和系统 App 界面唯一可见性仍保持独立证据边界。**
+
+**v0.11 当前开发态：分支 `claude/v011-project-workbench` 已按 SGD 对 Q1–Q5 的拍板完成批次 1–4 源码；批次 5 仍是单独授权候选。全量回归为 1007 PASS / 55 个 ALL PASS 标记，context 固定包为 15 文件 / 998,730 B、digest `4120ef87ecf588829de06b9424c1f7f89d9526148504fb43609a9c5a749db8b5`。该结论是 macOS arm64 隔离源码态，不是 v0.11 安装包、CI、签名、公证或 Release。**
+
+- v0.11 已实现项目一等对象、控制室、1:1 会话绑定、三预设窗格、项目根限定的产物回流、模板落地、经典驾驶舱让位、快捷键切项目和旧配置 durable-once 迁移；页面不接收绝对路径，受管 dsh 继续只用 `userData/context-poc/v1/dsh-home`。
+- 1200×768 隔离源码 App 中，双栏/左叠右单/四宫格均真实点按；响应式重排后中栏 538px、单窗 508px、模板 482px，测点均无隐藏横向 overflow，右侧原生对话常驻。截图位于已排除的 `docs/验收证据-v0.11-项目工作台-2026-09-02/`。
+- `app-runtime:verify` 保持 52 包 / 830 文件、closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`；根依赖与 lockfile 未扩张。当前源码版本仍为 `0.10.0`，因为本批未获版本、打包或发布授权。
+- 仍需 SGD：安装 alpha 双项目/need 黄灯五分钟卡、真实 Agent 产物回流、真实 v0.10 数据升级。Windows/Intel、真实模型、钥匙串/TCC 与系统 App 界面继续单列；终端窗格未开始。
 
 - 发版 PR [#24](https://github.com/sgd-shine/whaledock/pull/24) 以 merge commit `1afcaa58d48029b2ae0322db8cd0a449a737b9c0` 进入 main；[PR CI 33266553784](https://github.com/sgd-shine/whaledock/actions/runs/33266553784) 与 [main CI 33266635690](https://github.com/sgd-shine/whaledock/actions/runs/33266635690) 均为 macOS、Ubuntu、Windows 全绿。
 - 注解 tag `v0.10.0` 的 tag object 为 `5162cc18991d8657585f4d880dc50ecfb76c5c21`，解引用到上述 merge commit。[Release run 33266723269](https://github.com/sgd-shine/whaledock/actions/runs/33266723269) attempt 1 只在空审批门按设计 fail-closed，没有提前创建 Release；attempt 2 的 [publish job 99215920691](https://github.com/sgd-shine/whaledock/actions/runs/33266723269/job/99215920691) 成功。

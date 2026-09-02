@@ -48,6 +48,7 @@ const sceneStage = el('scene-stage');
 
 let state = {
   current: null, packages: [], skipped: [], defaultLabel: '默认工作台', busy: false,
+  classicMode: false,
   cockpit: null, workspace: { label: '当前工作区', available: false }, deliveries: [],
   contextPoc: null
 };
@@ -1188,6 +1189,7 @@ function renderCockpit() {
   const cockpit = state.cockpit && typeof state.cockpit === 'object' ? state.cockpit : null;
   const available = Boolean(cockpit && cockpit.kind === 'video');
   const active = Boolean(available && cockpit.mode === 'cockpit');
+  document.body.classList.toggle('classic-mode', state.classicMode === true);
   document.body.classList.toggle('cockpit-available', available);
   document.body.classList.toggle('cockpit-active', active);
   document.body.classList.toggle('chat-open', active && cockpit.chatOpen === true);
@@ -1347,6 +1349,7 @@ function applyState(next) {
     skipped: Array.isArray(next.skipped) ? next.skipped : [],
     defaultLabel: next.defaultLabel || '默认工作台',
     busy: next.busy === true,
+    classicMode: next.classicMode === true,
     cockpit: next.cockpit && typeof next.cockpit === 'object' ? next.cockpit : null,
     workspace: next.workspace && typeof next.workspace === 'object'
       ? next.workspace : { label: '当前工作区', available: false },

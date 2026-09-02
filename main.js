@@ -32,6 +32,29 @@ const remoteSecureStore = require('./lib/remote-secure-store');
 const deliveryReceipts = require('./lib/delivery-receipts');
 const contextBridgeModel = require('./lib/context-bridge');
 const contextFileRpc = require('./lib/context-file-rpc');
+const contextWorkspaceOps = require('./lib/context-workspace-ops');
+const projectRegistry = require('./lib/projects');
+const projectOperationModel = require('./lib/project-ops');
+const controlRoomModel = require('./lib/control-room');
+const projectLayout = require('./lib/project-layout');
+const projectArtifacts = require('./lib/project-artifacts');
+const projectMigration = require('./lib/project-migration');
+const projectTemplates = require('./lib/project-templates');
+const projectRootRef = require('./lib/project-root-ref');
+const projectBootstrapTicket = require('./lib/project-bootstrap-ticket');
+const {
+  contextPocExact,
+  contextPocValidId,
+  contextPocWorkspaceFileInputValue,
+  contextPocWorkspaceFileRequestValue,
+  contextPocWorkspaceFileReadResponseValue,
+  contextPocWorkspaceFileClaimValue,
+  contextPocWorkspaceFileRootAuthorizationValue,
+  contextPocWorkspaceFileSettleValue,
+  contextPocUtf8Clip,
+  contextPocWorkspaceOperationError,
+  contextPocWorkspaceFileOperations
+} = contextWorkspaceOps;
 const log = require('./lib/log');
 const update = require('./lib/update');
 
@@ -74,6 +97,21 @@ let contextPocBridgeRuntime = null;
 let contextPocBridgeGeneration = 0;
 let contextPocPreferences = null;
 let contextPocWorkspaceFiles = null;
+let projectStore = null;
+let projectStoreUnsubscribe = null;
+let activeRegistryProjectId = null;
+let activeRegistryProjectGeneration = 0;
+let controlRoomNeedCount = null;
+const projectArtifactScans = new Map();
+const projectArtifactPreviewWindows = new Set();
+const VERIFIED_PROJECT_ARTIFACT = Symbol('verified-project-artifact');
+const PROJECT_SWITCH_COMMAND_TTL_MS = 9000;
+const PROJECT_PANE_PREVIEW_TEXT_BYTES = 6 * 1024;
+const PROJECT_PANE_PREVIEW_IMAGE_BYTES = 6 * 1024;
+const PROJECT_PANE_PREVIEW_TOTAL_BYTES = 8 * 1024;
+const PROJECT_PANE_PREVIEW_LIMIT = 8;
+let projectSwitchCommandSeq = 0;
+let pendingProjectSwitchCommand = null;
 const reportContextPocAvailability = createContextPocAvailabilityReporter((message) => {
   log.line('context', message);
 });
@@ -906,6 +944,7 @@ const VIDEO_PUBLISH_LIGHTS = Object.freeze({
 const VIDEO_TACTIC_TOPIC_PREFIX = 'tactic-';
 let cockpitNativeMode = false;
 let cockpitChatOpen = false;
+let classicCockpitEnabled = false;
 let videoWorkspaceRuntime = null;
 let videoWorkspaceEpoch = 0;
 let videoSelectedToken = null;
@@ -1119,7 +1158,7 @@ function refreshWorkspaceSurfaces() {
   if (app && typeof app.isReady === 'function' && app.isReady()) createAppMenu();
   refreshTrayMenu();
   const active = currentWorkbench();
-  if (active && active.cockpit === 'video') startVideoWorkspaceMonitor();
+  if (classicCockpitEnabled && active && active.cockpit === 'video') startVideoWorkspaceMonitor();
   else stopVideoWorkspaceMonitor();
 }
 
@@ -2516,12 +2555,20 @@ const WORKBENCH_INSTALL_LIMITS = Object.freeze({
 let workbenchCache = null;
 const WORKBENCH_REMEMBERED_LIMIT = 64;
 
-// 主 dsh 视图的唯一布局函数。经典台和「经典侧栏（旧）」精确沿用 v0.6 的 132px 左栏；
-// 视频驾驶舱把完整 dsh 作为航道下方的全宽「对话现场」。现场模式只隐藏视图，
-// 不 destroy/reload，因此切回对话时会话、滚动位置和未发送草稿都还在。
+// 主 dsh 视图的唯一布局函数。默认项目工作台占满主窗；只有从设置显式进入
+// 经典模式后，经典台和「经典侧栏（旧）」才沿用 v0.6 的 132px 左栏。
+// 视频驾驶舱把完整 dsh 作为航道下方的全宽「对话现场」。现场模式只隐藏
+// 视图，不 destroy/reload，因此切回对话时会话、滚动位置和草稿都还在。
 function mainViewLayout(options = {}) {
   const width = Number.isSafeInteger(options.width) && options.width >= 0 ? options.width : 0;
   const height = Number.isSafeInteger(options.height) && options.height >= 0 ? options.height : 0;
+  if (options.classicMode !== true) {
+    return {
+      mode: 'projects',
+      visible: true,
+      bounds: { x: 0, y: 0, width, height }
+    };
+  }
   const cockpitActive = options.cockpit === 'video' && options.cockpitMode === 'cockpit';
   if (!cockpitActive) {
     const rail = Math.max(0, Math.min(SHELL_RAIL_WIDTH, width - 320));
@@ -2864,18 +2911,158 @@ function videoProposalRevisionToken(
   );
 }
 
-function videoWorkspaceRoot() {
+function canonicalRegistryProjectFolder(projectId, supplied = {}) {
+  if (typeof projectId !== 'string' || !/^proj_[a-f0-9]{32}$/.test(projectId)) {
+    throw new TypeError('active registry project invalid');
+  }
+  const store = supplied.projectStore || requireProjectStore();
+  const project = store.get(projectId);
+  if (!project || project.kind !== 'user') {
+    const error = new Error('活动项目不可用');
+    error.code = 'ERR_PROJECT_NOT_FOUND';
+    throw error;
+  }
+  const folder = store.folderOf(projectId);
+  const defaultUserData = MAIN_HELPER_TEST && typeof store.filePath === 'string'
+    ? path.dirname(path.dirname(store.filePath)) : null;
+  const canonical = projectRegistry.canonicalProjectFolder(folder, {
+    ...(supplied.fsImpl ? { fsImpl: supplied.fsImpl } : {}),
+    ...(supplied.platform ? { platform: supplied.platform } : {}),
+    ...(supplied.pathImpl ? { pathImpl: supplied.pathImpl } : {}),
+    forbiddenRoots: supplied.forbiddenRoots || projectProtectedRoots(
+      supplied.userData === undefined
+        ? (defaultUserData || app.getPath('userData')) : supplied.userData
+    )
+  });
+  return Object.freeze({
+    project,
+    root: canonical.path
+  });
+}
+
+function canonicalRegistryProjectLocation(projectId, supplied = {}) {
+  const resolved = canonicalRegistryProjectFolder(projectId, supplied);
+  if (resolved.project.boundSession === null) {
+    const error = new Error('活动项目未绑定会话');
+    error.code = 'ERR_PROJECT_SESSION_BOUND';
+    throw error;
+  }
+  return Object.freeze({ ...resolved, generation: activeRegistryProjectGeneration });
+}
+
+function activeRegistryProjectLocation(supplied = {}) {
+  if (classicCockpitEnabled || activeRegistryProjectId === null) return null;
+  try { return canonicalRegistryProjectLocation(activeRegistryProjectId, supplied); }
+  catch (_error) { return null; }
+}
+
+function activateRegistryProject(projectId, supplied = {}) {
+  // 先完成 registry + canonical + binding 回读，成功后才改内存权威根。
+  canonicalRegistryProjectLocation(projectId, supplied);
+  const changed = activeRegistryProjectId !== projectId;
+  activeRegistryProjectId = projectId;
+  if (activeRegistryProjectGeneration >= Number.MAX_SAFE_INTEGER) {
+    activeRegistryProjectId = null;
+    throw new Error('active registry project generation exhausted');
+  }
+  activeRegistryProjectGeneration += 1;
+  const stop = supplied.stopMonitor || stopVideoWorkspaceMonitor;
+  if (typeof stop === 'function') stop();
+  return Object.freeze({ projectId, generation: activeRegistryProjectGeneration, changed });
+}
+
+function clearActiveRegistryProject(supplied = {}) {
+  const changed = activeRegistryProjectId !== null;
+  activeRegistryProjectId = null;
+  if (activeRegistryProjectGeneration < Number.MAX_SAFE_INTEGER) {
+    activeRegistryProjectGeneration += 1;
+  }
+  const stop = supplied.stopMonitor || stopVideoWorkspaceMonitor;
+  if (changed && typeof stop === 'function') stop();
+  return changed;
+}
+
+function handleProjectOpenOutcomeUnknown(projectId, _cause, supplied = {}) {
+  const activeId = Object.prototype.hasOwnProperty.call(supplied, 'activeProjectId')
+    ? supplied.activeProjectId : activeRegistryProjectId;
+  if (activeId !== projectId) return false;
+  const clear = supplied.clearActive || clearActiveRegistryProject;
+  const push = supplied.pushState || pushShellState;
+  // 激活已经开始，不能恢复旧 root。只有失败 id 仍是当前权威项目时
+  // 才撤销它；随后立即让 UI 丢弃旧项目表面。
+  clear();
+  push();
+  return true;
+}
+
+function videoWorkspaceLocation(supplied = {}) {
+  if (!classicCockpitEnabled) {
+    const location = activeRegistryProjectLocation(supplied);
+    if (!location || location.project.templateId === null) return null;
+    try {
+      const source = managedProjectTemplateSource(location.project.templateId,
+        supplied.packages ? { packages: supplied.packages } : {});
+      return source.pkg.cockpit === 'video'
+        ? Object.freeze({ ...location, workbench: source.pkg }) : null;
+    } catch (_error) { return null; }
+  }
   const active = currentWorkbench();
   if (!active || active.cockpit !== 'video') return null;
   const surface = currentWorkspaceSurface();
   if (surface.busy || !surface.current || !surface.current.effectivePath) return null;
   try {
-    return workspaces.canonicalWorkspace(surface.current.effectivePath, {
-      forbiddenRoots: forbiddenWorkspaceRoots()
-    }).path;
+    const canonical = workspaces.canonicalWorkspace(surface.current.effectivePath, {
+      forbiddenRoots: supplied.forbiddenRoots || forbiddenWorkspaceRoots()
+    });
+    return Object.freeze({
+      project: null,
+      root: canonical.path,
+      generation: surface.generation,
+      workbench: active
+    });
   } catch (error) {
     log.line('video', `驾驶舱工作区不可用：${error && error.code || 'unknown'}`);
     return null;
+  }
+}
+
+function videoWorkspaceRoot(supplied = {}) {
+  const location = videoWorkspaceLocation(supplied);
+  return location ? location.root : null;
+}
+
+function activateOpenedRegistryProject(projectId, supplied = {}) {
+  const clear = supplied.clearActive || clearActiveRegistryProject;
+  const logger = supplied.logger || ((scope, message) => log.line(scope, message));
+  try {
+    const activated = activateRegistryProject(projectId, supplied);
+    const location = videoWorkspaceLocation(supplied);
+    if (location) {
+      const start = supplied.startMonitor || startVideoWorkspaceMonitor;
+      const snapshot = start(supplied);
+      if (!snapshot || snapshot.status !== 'ready') {
+        const error = new Error('项目视频工作区未就绪');
+        error.code = 'ERR_PROJECT_VIDEO_RUNTIME';
+        throw error;
+      }
+    }
+    const wake = supplied.wakeBridge || wakeContextPocBridge;
+    try {
+      const pending = wake();
+      if (pending && typeof pending.catch === 'function') {
+        pending.catch((error) => logger(
+          'context', `project restage failed code=${error && error.code || 'unknown'}`
+        ));
+      }
+    } catch (error) {
+      logger('context', `project restage failed code=${error && error.code || 'unknown'}`);
+    }
+    return activated;
+  } catch (error) {
+    // 开启新根失败时必须丢掉旧项目权威根，不得回退读取
+    // config.workdir；日志只记稳定 code，不记目录。
+    try { clear(supplied); } catch (_clearError) { /* best effort fail-closed */ }
+    throw error;
   }
 }
 
@@ -3682,7 +3869,7 @@ function refreshVideoWorkspaceSnapshot() {
       runtime.detachedState = false;
     }
     if (!videoWorkspaceRuntime || videoWorkspaceRuntime !== runtime || runtime.closed) return null;
-    const active = currentWorkbench();
+    const active = runtime.workbench || currentWorkbench();
     const projectTokens = new Map();
     const cardByPath = new Map();
     const cards = scanned.items.map((item) => {
@@ -3774,16 +3961,16 @@ function stopVideoWorkspaceMonitor() {
   }
 }
 
-function startVideoWorkspaceMonitor() {
-  const root = videoWorkspaceRoot();
-  if (!root) {
+function startVideoWorkspaceMonitor(supplied = {}) {
+  const location = videoWorkspaceLocation(supplied);
+  const root = location && location.root;
+  if (!location || !root) {
     stopVideoWorkspaceMonitor();
     return null;
   }
-  const surface = currentWorkspaceSurface();
   if (videoWorkspaceRuntime && !videoWorkspaceRuntime.closed
       && videoWorkspaceRuntime.root === root
-      && videoWorkspaceRuntime.generation === surface.generation) {
+      && videoWorkspaceRuntime.generation === location.generation) {
     refreshVideoWorkspaceSnapshot();
     return videoWorkspaceRuntime.snapshot;
   }
@@ -3819,7 +4006,10 @@ function startVideoWorkspaceMonitor() {
   }
   const runtime = {
     root,
-    generation: surface.generation,
+    generation: location.generation,
+    // 项目模式的动作必须跟随 registry template，不能借用
+    // config.workbenchId 中可能存留的经典工作台。
+    workbench: location.workbench,
     epoch: videoWorkspaceEpoch,
     rootIdentity,
     rootIdentityKey,
@@ -3861,13 +4051,17 @@ function startVideoWorkspaceMonitor() {
 }
 
 function currentVideoWorkspaceSnapshot() {
-  const root = videoWorkspaceRoot();
-  if (!root) return {
+  const location = videoWorkspaceLocation();
+  const root = location && location.root;
+  if (!location || !root) return {
     kind: 'video-workspace', status: 'unavailable', generation: 0, watcher: 'stopped',
     text: '当前没有可用的视频工作区。', route: [], today: [], projects: [],
     ordinaryCount: 0, issues: [], truncated: false, selectedToken: null, proposal: null
   };
-  if (!videoWorkspaceRuntime || videoWorkspaceRuntime.root !== root) startVideoWorkspaceMonitor();
+  if (!videoWorkspaceRuntime || videoWorkspaceRuntime.root !== root
+      || videoWorkspaceRuntime.generation !== location.generation) {
+    startVideoWorkspaceMonitor();
+  }
   return videoWorkspaceRuntime && videoWorkspaceRuntime.snapshot
     ? videoWorkspaceRuntime.snapshot : refreshVideoWorkspaceSnapshot();
 }
@@ -3906,6 +4100,7 @@ function shellStateSnapshot(extra = {}) {
       state: backendState
     }),
     deliveries: deliveryReceiptSurface(),
+    classicMode: classicCockpitEnabled,
     packages: listed.packages.map(workbenchRow),
     skipped: listed.skipped.map((item) => ({ id: String(item.id).slice(0, 120), reason: item.reason })),
     current: active ? {
@@ -3916,7 +4111,7 @@ function shellStateSnapshot(extra = {}) {
       onboarding: active.onboarding,
       hasAgentPreset: Boolean(active.agentPreset)
     } : null,
-    cockpit: active && active.cockpit === 'video' ? {
+    cockpit: classicCockpitEnabled && active && active.cockpit === 'video' ? {
       kind: 'video',
       mode: cockpitNativeMode ? 'native' : 'cockpit',
       chatOpen: cockpitChatOpen,
@@ -3950,7 +4145,7 @@ function refreshWorkbenchSurfaces(extra = {}) {
   pushShellState(extra);
   layoutMainWindow();
   const active = currentWorkbench();
-  if (active && active.cockpit === 'video') startVideoWorkspaceMonitor();
+  if (classicCockpitEnabled && active && active.cockpit === 'video') startVideoWorkspaceMonitor();
   else stopVideoWorkspaceMonitor();
 }
 
@@ -4057,6 +4252,7 @@ async function applyWorkbench(workbenchId, options = {}) {
       text: reason ? `这个工作台没加载：${reason}。已经留在原来的工作台。` : '找不到这个工作台，已经留在原来的工作台。'
     };
   }
+  classicCockpitEnabled = true;
   const previous = config.get('workbenchId') || null;
   if (previous === wanted) { refreshWorkbenchSurfaces(); return { kind: 'ok' }; }
 
@@ -5860,7 +6056,7 @@ async function submitVideoProjectAction(value, internalContext = null) {
   const deliveryTargetRef = videoDeliveryTargetRefFromInternalContext(internalContext);
   const request = dispatch.request;
   const { runtime, record } = readVideoDocumentByToken(request.projectToken);
-  const active = currentWorkbench();
+  const active = runtime.workbench || currentWorkbench();
   const allowed = active && active.actions.find((action) => action.id === request.actionId);
   if (!allowed) return { state: 'error', text: '这个动作不属于当前工作台，没有发送。' };
   const card = videoWorkspaceRuntime.snapshot.projects.find((item) => (
@@ -6888,6 +7084,8 @@ function registerShootingIpc() {
 const CONTEXT_POC_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 const CONTEXT_POC_TOKEN_RE = /^[a-f0-9]{64}$/;
 const CONTEXT_POC_SESSION_REF_RE = /^session-[a-f0-9]{64}$/;
+const CONTEXT_POC_SESSION_BINDING_REF_RE = /^session-binding-[a-f0-9]{64}$/;
+const CONTEXT_POC_SESSION_ROOT_REF_RE = /^session-root-[a-f0-9]{64}$/;
 const CONTEXT_POC_DELIVERY_TARGET_REF_RE = /^delivery-target-[a-f0-9]{64}$/;
 const CONTEXT_POC_PROJECT_ID_RE = /^wdp1_[a-f0-9]{32}$/;
 const CONTEXT_POC_PROJECT_REVISION_RE = /^[a-f0-9]{64}$/;
@@ -6900,15 +7098,12 @@ const CONTEXT_POC_WORKSPACE_FILES_CAPABILITY = 'workspace-files-v1';
 const CONTEXT_POC_WORKSPACE_FILE_PENDING_MS = 10000;
 const CONTEXT_POC_WORKSPACE_FILE_EXECUTION_MARGIN_MS = 750;
 const CONTEXT_POC_MAX_WORKSPACE_FILE_READ_BATCH = 4;
+const CONTEXT_POC_LEGACY_WORKSPACE_FILE_OPERATIONS =
+  contextWorkspaceOps.CONTEXT_POC_WORKSPACE_FILE_OPERATIONS;
+const CONTEXT_POC_PROJECT_OPERATIONS = projectOperationModel.PROJECT_OPERATION_NAMES;
 const CONTEXT_POC_WORKSPACE_FILE_OPERATIONS = new Set([
-  'catalog.read', 'document.read', 'overview.read', 'topic.choose',
-  'block.action.prepare', 'block.action.submit',
-  'proposal.read', 'proposal.decide', 'proposal.undo',
-  'publish.read', 'publish.create', 'publish.update',
-  'review.tactics.read', 'review.solidify',
-  'shoot.open', 'shoot.history.read',
-  'project.action.prepare', 'project.action.submit',
-  'receipts.read', 'receipts.ack', 'receipts.open'
+  ...CONTEXT_POC_LEGACY_WORKSPACE_FILE_OPERATIONS,
+  ...CONTEXT_POC_PROJECT_OPERATIONS
 ]);
 const CONTEXT_POC_WORKSPACE_FILE_DELIVERY_OPERATIONS = new Set([
   'block.action.prepare', 'block.action.submit',
@@ -6917,7 +7112,9 @@ const CONTEXT_POC_WORKSPACE_FILE_DELIVERY_OPERATIONS = new Set([
 const CONTEXT_POC_WORKSPACE_FILE_REJECT_CODES = new Set([
   'workspace-unavailable', 'workspace-mismatch', 'operation-invalid',
   'operation-timeout', 'operation-failed', 'operation-stale',
-  'outcome-unknown', 'busy'
+  'outcome-unknown', 'busy', 'cancelled',
+  'project-not-found', 'project-folder-invalid', 'project-protected',
+  'project-duplicate-folder', 'project-limit'
 ]);
 const CONTEXT_POC_EVENT_TYPES = new Set([
   'ack', 'turn-start', 'turn-miss', 'delivery', 'turn-end'
@@ -6933,1340 +7130,8 @@ const CONTEXT_POC_PROPOSAL_SUBMISSIONS = new Set([
   'sending', 'accepted', 'rejected', 'unknown', 'error'
 ]);
 
-function contextPocExact(value, required, optional = []) {
-  if (!isPlainObject(value)) return false;
-  const allowed = new Set([...required, ...optional]);
-  return required.every((key) => Object.prototype.hasOwnProperty.call(value, key))
-    && Object.keys(value).every((key) => allowed.has(key));
-}
-
-function contextPocValidId(value) {
-  return typeof value === 'string' && CONTEXT_POC_ID_RE.test(value);
-}
-
-function contextPocWorkspaceFileInputValue(value) {
-  if (!isPlainObject(value)) return null;
-  try {
-    const serialized = JSON.stringify(value);
-    if (Buffer.byteLength(serialized, 'utf8') > contextFileRpc.DEFAULT_LIMITS.maxInputBytes) {
-      return null;
-    }
-    const cloned = JSON.parse(serialized);
-    return isPlainObject(cloned) ? Object.freeze(cloned) : null;
-  } catch (_error) { return null; }
-}
-
-function contextPocWorkspaceFileRequestValue(value) {
-  if (!contextPocExact(value, [
-    'requestToken', 'requestSeq', 'controllerId', 'pageInstanceId',
-    'selectionRevision', 'projectId', 'projectRevision', 'contextRevision',
-    'operation', 'input', 'issuedAtMs', 'deadlineMs'
-  ], ['deliveryTargetRef']) || !CONTEXT_POC_TOKEN_RE.test(String(value.requestToken || ''))
-      || !Number.isSafeInteger(value.requestSeq) || value.requestSeq < 1
-      || !contextPocValidId(value.controllerId) || !contextPocValidId(value.pageInstanceId)
-      || !Number.isSafeInteger(value.selectionRevision) || value.selectionRevision < 1
-      || !CONTEXT_POC_PROJECT_ID_RE.test(String(value.projectId || ''))
-      || !(value.projectRevision === null
-        || CONTEXT_POC_PROJECT_REVISION_RE.test(String(value.projectRevision || '')))
-      || !Number.isSafeInteger(value.contextRevision) || value.contextRevision < 1
-      || !CONTEXT_POC_WORKSPACE_FILE_OPERATIONS.has(value.operation)
-      || !Number.isSafeInteger(value.issuedAtMs) || value.issuedAtMs < 0
-      || !Number.isSafeInteger(value.deadlineMs)
-      || value.deadlineMs !== value.issuedAtMs + CONTEXT_POC_WORKSPACE_FILE_PENDING_MS) return null;
-  const deliveryOperation = CONTEXT_POC_WORKSPACE_FILE_DELIVERY_OPERATIONS.has(value.operation);
-  if (deliveryOperation
-    ? !CONTEXT_POC_DELIVERY_TARGET_REF_RE.test(String(value.deliveryTargetRef || ''))
-    : Object.prototype.hasOwnProperty.call(value, 'deliveryTargetRef')) return null;
-  const input = contextPocWorkspaceFileInputValue(value.input);
-  return input ? Object.freeze({ ...value, input }) : null;
-}
-
-function contextPocWorkspaceFileReadResponseValue(value, runtime) {
-  if (!contextPocExact(value, ['contract', 'hostInstanceId', 'requests'])
-      || value.contract !== contextBridgeModel.CONTRACT_VERSION
-      || !runtime || !runtime.handshake
-      || value.hostInstanceId !== runtime.handshake.hostInstanceId
-      || !Array.isArray(value.requests)
-      || value.requests.length > CONTEXT_POC_MAX_WORKSPACE_FILE_READ_BATCH) return null;
-  const requests = value.requests.map(contextPocWorkspaceFileRequestValue);
-  if (requests.some((request) => request === null)
-      || new Set(requests.map((request) => request.requestToken)).size !== requests.length
-      || new Set(requests.map((request) => request.requestSeq)).size !== requests.length) return null;
-  return Object.freeze({
-    contract: value.contract,
-    hostInstanceId: value.hostInstanceId,
-    requests: Object.freeze(requests)
-  });
-}
-
-function contextPocWorkspaceFileClaimValue(value) {
-  if (contextPocExact(value, ['claimed', 'code']) && value.claimed === false
-      && ['operation-stale', 'already-running', 'already-settled'].includes(value.code)) {
-    return Object.freeze({ claimed: false, code: value.code });
-  }
-  if (!contextPocExact(value, [
-    'claimed', 'code', 'claimToken', 'runningDeadlineMs'
-  ]) || value.claimed !== true || value.code !== null
-      || !CONTEXT_POC_TOKEN_RE.test(String(value.claimToken || ''))
-      || !Number.isSafeInteger(value.runningDeadlineMs) || value.runningDeadlineMs < 0) return null;
-  return Object.freeze({ ...value });
-}
-
-function contextPocWorkspaceFileSettleValue(value) {
-  if (!contextPocExact(value, ['settled', 'code']) || typeof value.settled !== 'boolean'
-      || (value.settled ? value.code !== null : value.code !== 'operation-stale')) return null;
-  return Object.freeze({ settled: value.settled, code: value.code });
-}
-
-function contextPocWorkspaceFilePageInput(value, maximumLimit) {
-  if (!isPlainObject(value)
-      || Object.keys(value).some((key) => key !== 'cursor' && key !== 'limit')) {
-    throw new Error('文件页请求字段无效');
-  }
-  const cursor = value.cursor === undefined ? 0 : value.cursor;
-  const limit = value.limit === undefined ? maximumLimit : value.limit;
-  if (!Number.isSafeInteger(cursor) || cursor < 0
-      || !Number.isSafeInteger(limit) || limit < 1 || limit > maximumLimit) {
-    throw new Error('文件页游标或上限无效');
-  }
-  return Object.freeze({ cursor, limit });
-}
-
-function contextPocWorkspaceFileProjectInput(value) {
-  if (!isPlainObject(value)
-      || Object.keys(value).some((key) => !['projectToken', 'cursor', 'limit'].includes(key))
-      || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)) {
-    throw new Error('项目文档请求无效');
-  }
-  return Object.freeze({
-    projectToken: value.projectToken,
-    ...contextPocWorkspaceFilePageInput({ cursor: value.cursor, limit: value.limit }, 2)
-  });
-}
-
-function contextPocWorkspaceFileOverviewInput(value) {
-  if (!contextPocExact(value, ['projectToken', 'cursor', 'limit'])
-      || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)) {
-    throw new Error('项目概览请求无效');
-  }
-  const page = contextPocWorkspaceFilePageInput({
-    cursor: value.cursor,
-    limit: value.limit
-  }, 4);
-  if (page.cursor > 64) throw new Error('项目概览游标无效');
-  return Object.freeze({ projectToken: value.projectToken, ...page });
-}
-
-function contextPocWorkspaceFileTopicInput(value) {
-  if (!contextPocExact(value, ['projectToken', 'field', 'value'])
-      || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
-      || !['angle', 'hook'].includes(value.field)
-      || typeof value.value !== 'string' || !value.value
-      || value.value.length > 240
-      || /[\u0000-\u001f\u007f]/.test(value.value)) {
-    throw new Error('选题拍板请求无效');
-  }
-  return Object.freeze({
-    projectToken: value.projectToken,
-    field: value.field,
-    value: value.value
-  });
-}
-
-function contextPocWorkspaceFileActionPrepareInput(value) {
-  return Object.freeze(videoProjectActionRequest(value));
-}
-
-function contextPocWorkspaceFileActionSubmitInput(value) {
-  if (!contextPocExact(value, [
-    'projectToken', 'actionId', 'preflightToken', 'override'
-  ])) throw new Error('项目动作提交请求无效');
-  const dispatch = videoProjectDispatchRequest(value);
-  if (!dispatch.confirmation) throw new Error('项目动作提交缺少预检');
-  return Object.freeze({
-    ...dispatch.request,
-    preflightToken: dispatch.confirmation.preflightToken,
-    override: dispatch.confirmation.override
-  });
-}
-
-function contextPocWorkspaceFileBlockPrepareInput(value) {
-  return Object.freeze(videoBlockActionRequest(value));
-}
-
-function contextPocWorkspaceFileBlockSubmitInput(value) {
-  if (!contextPocExact(value, [
-    'projectToken', 'blockToken', 'action', 'preflightToken', 'override'
-  ])) throw new Error('内容块动作提交请求无效');
-  const dispatch = videoBlockDispatchRequest(value);
-  if (!dispatch.confirmation) throw new Error('内容块动作提交缺少预检');
-  return Object.freeze({
-    ...dispatch.request,
-    preflightToken: dispatch.confirmation.preflightToken,
-    override: dispatch.confirmation.override
-  });
-}
-
-function contextPocWorkspaceFileProposalReadInput(value) {
-  if (!contextPocExact(value, ['contentRef'])
-      || typeof value.contentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)) {
-    throw new Error('建议卡读取请求无效');
-  }
-  return Object.freeze({ contentRef: value.contentRef });
-}
-
-function contextPocWorkspaceFileProposalDecisionInput(value) {
-  if (!isPlainObject(value) || !['adopt', 'reject'].includes(value.decision)
-      || !contextPocExact(value, value.decision === 'adopt'
-        ? ['contentRef', 'proposalToken', 'decision', 'proposalRevisionToken']
-        : ['contentRef', 'proposalToken', 'decision'])
-      || typeof value.contentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)) {
-    throw new Error('建议卡决策请求无效');
-  }
-  const decision = videoProposalDecisionRequest({
-    proposalToken: value.proposalToken,
-    decision: value.decision,
-    ...(value.decision === 'adopt'
-      ? { proposalRevisionToken: value.proposalRevisionToken } : {})
-  });
-  return Object.freeze({
-    contentRef: value.contentRef,
-    proposalToken: decision.proposalToken,
-    decision: decision.decision,
-    ...(decision.decision === 'adopt'
-      ? { proposalRevisionToken: decision.proposalRevisionToken } : {})
-  });
-}
-
-function contextPocWorkspaceFileProposalUndoInput(value) {
-  if (!contextPocExact(value, ['contentRef', 'revisionToken'])
-      || typeof value.contentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)) {
-    throw new Error('建议撤销请求无效');
-  }
-  const undo = videoUndoRequest({ revisionToken: value.revisionToken });
-  return Object.freeze({ contentRef: value.contentRef, revisionToken: undo.revisionToken });
-}
-
-function contextPocWorkspaceFilePublishInput(value) {
-  if (!contextPocExact(value, ['contentRef', 'projectToken'])
-      || typeof value.contentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
-      || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)) {
-    throw new Error('发布页内容身份无效');
-  }
-  return Object.freeze({
-    contentRef: value.contentRef,
-    projectToken: value.projectToken
-  });
-}
-
-function contextPocWorkspaceFilePublishUpdateInput(value) {
-  if (!isPlainObject(value) || !['light', 'ai-disclosure'].includes(value.type)) {
-    throw new Error('发布页写回请求无效');
-  }
-  contextPocWorkspaceFilePublishInput({
-    contentRef: value.contentRef,
-    projectToken: value.projectToken
-  });
-  if (value.type === 'light') {
-    if (!contextPocExact(value, [
-      'contentRef', 'projectToken', 'type', 'lightId', 'checked'
-    ]) || !Object.prototype.hasOwnProperty.call(VIDEO_PUBLISH_LIGHTS, value.lightId)
-        || typeof value.checked !== 'boolean') {
-      throw new Error('发布灯写回请求无效');
-    }
-    return Object.freeze({
-      contentRef: value.contentRef,
-      projectToken: value.projectToken,
-      type: 'light', lightId: value.lightId, checked: value.checked
-    });
-  }
-  if (!contextPocExact(value, [
-    'contentRef', 'projectToken', 'type', 'value'
-  ]) || !['unknown', 'ai', 'not-ai'].includes(value.value)) {
-    throw new Error('AI 内容状态写回请求无效');
-  }
-  return Object.freeze({
-    contentRef: value.contentRef,
-    projectToken: value.projectToken,
-    type: 'ai-disclosure', value: value.value
-  });
-}
-
-function contextPocWorkspaceFileReviewIdentityInput(value) {
-  if (!contextPocExact(value, ['contentRef', 'projectToken'])
-      || typeof value.contentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
-      || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)) {
-    throw new Error('复盘页内容身份无效');
-  }
-  return Object.freeze({
-    contentRef: value.contentRef,
-    projectToken: value.projectToken
-  });
-}
-
-function contextPocWorkspaceFileTacticsInput(value) {
-  if (!contextPocExact(value, [
-    'contentRef', 'projectToken', 'cursor', 'limit', 'collectionToken'
-  ])) throw new Error('打法库分页请求无效');
-  contextPocWorkspaceFileReviewIdentityInput({
-    contentRef: value.contentRef,
-    projectToken: value.projectToken
-  });
-  if (!Number.isSafeInteger(value.cursor) || value.cursor < 0 || value.cursor > 512
-      || !Number.isSafeInteger(value.limit) || value.limit < 1 || value.limit > 4
-      || (value.cursor === 0 && value.collectionToken !== null)
-      || (value.cursor > 0 && !/^collection-[a-f0-9]{24}$/.test(
-        String(value.collectionToken || '')
-      ))) {
-    throw new Error('打法库分页身份无效');
-  }
-  return Object.freeze({ ...value });
-}
-
-function contextPocWorkspaceFileShootIdentityInput(value) {
-  if (!contextPocExact(value, ['contentRef', 'projectToken'])
-      || typeof value.contentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
-      || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)) {
-    throw new Error('拍摄页内容身份无效');
-  }
-  return Object.freeze({
-    contentRef: value.contentRef,
-    projectToken: value.projectToken
-  });
-}
-
-function contextPocWorkspaceFileShootHistoryInput(value) {
-  if (!contextPocExact(value, [
-    'contentRef', 'projectToken', 'cursor', 'limit', 'collectionToken'
-  ])) throw new Error('拍摄历史分页请求无效');
-  contextPocWorkspaceFileShootIdentityInput({
-    contentRef: value.contentRef,
-    projectToken: value.projectToken
-  });
-  if (!Number.isSafeInteger(value.cursor) || value.cursor < 0 || value.cursor > 512
-      || !Number.isSafeInteger(value.limit) || value.limit < 1 || value.limit > 4
-      || (value.cursor === 0 && value.collectionToken !== null)
-      || (value.cursor > 0 && !/^collection-[a-f0-9]{24}$/.test(
-        String(value.collectionToken || '')
-      ))) {
-    throw new Error('拍摄历史分页身份无效');
-  }
-  return Object.freeze({ ...value });
-}
-
-function contextPocWorkspaceFileReceiptsInput(value) {
-  if (!contextPocExact(value, ['projectToken', 'limit'])) {
-    throw new Error('投递回执请求无效');
-  }
-  videoDocumentRequest({ projectToken: value.projectToken });
-  if (!Number.isSafeInteger(value.limit) || value.limit < 1 || value.limit > 6) {
-    throw new Error('投递回执上限无效');
-  }
-  return Object.freeze({ projectToken: value.projectToken, limit: value.limit });
-}
-
-function contextPocWorkspaceWorkflow(value) {
-  if (value && value.publish && value.publish.published === true) {
-    return Object.freeze({ status: 'published', label: '已发布' });
-  }
-  const stage = value && value.stage;
-  if (stage === 'inspiration') return Object.freeze({ status: 'inspiration', label: '灵感' });
-  if (stage === 'topic') return Object.freeze({ status: 'topic', label: '选题' });
-  if (stage === 'script') return Object.freeze({ status: 'script', label: '写稿' });
-  if (stage === 'shoot' || stage === 'edit') {
-    return Object.freeze({ status: 'shoot', label: '拍摄' });
-  }
-  if (stage === 'publish') return Object.freeze({ status: 'unpublished', label: '待发布' });
-  return Object.freeze({ status: 'uncategorized', label: '未分类' });
-}
-
-function contextPocWorkspaceCatalogCard(value) {
-  if (!isPlainObject(value) || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
-      || typeof value.contentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)) {
-    throw new Error('内容卡投影无效');
-  }
-  const cleanList = (items) => (Array.isArray(items) ? items : [])
-    .map((item) => safeText(item, '', 64)).filter(Boolean).slice(0, 3);
-  const publish = isPlainObject(value.publish) ? Object.freeze({
-    ready: value.publish.ready === true,
-    published: value.publish.published === true,
-    aiDisclosure: ['unknown', 'ai', 'not-ai'].includes(value.publish.aiDisclosure)
-      ? value.publish.aiDisclosure : 'unknown'
-  }) : null;
-  const workflow = contextPocWorkspaceWorkflow({ stage: value.stage, publish });
-  const actions = (Array.isArray(value.actions) ? value.actions : []).slice(0, 4).map((action) => {
-    if (!isPlainObject(action)
-        || typeof action.id !== 'string' || !/^[a-z][a-z0-9_-]{0,63}$/.test(action.id)) {
-      throw new Error('内容卡动作投影无效');
-    }
-    return Object.freeze({
-      id: action.id,
-      label: safeText(action.label, '继续', 32),
-      hint: safeText(action.hint, '', 100)
-    });
-  });
-  return Object.freeze({
-    projectToken: value.projectToken,
-    contentRef: value.contentRef,
-    title: safeText(value.title, '未命名项目', 120),
-    stage: Object.prototype.hasOwnProperty.call(VIDEO_STAGE_LABELS, value.stage)
-      ? value.stage : null,
-    stageLabel: safeText(value.stageLabel, '未分类', 24),
-    status: safeText(value.status, '', 48) || null,
-    updated: safeText(value.updated, '', 64) || null,
-    decision: safeText(value.decision, '', 160) || null,
-    angle: safeText(value.angle, '', 240) || null,
-    hook: safeText(value.hook, '', 240) || null,
-    angleOptions: cleanList(value.angles),
-    hookOptions: cleanList(value.hooks),
-    canShoot: value.canShoot === true,
-    publish,
-    workflowStatus: workflow.status,
-    workflowLabel: workflow.label,
-    actions: Object.freeze(actions)
-  });
-}
-
-function contextPocWorkspaceCatalogResult(value) {
-  if (!contextPocExact(value, [
-    'kind', 'generation', 'projectCount', 'cursor', 'nextCursor', 'projects'
-  ]) || value.kind !== 'catalog'
-      || !Number.isSafeInteger(value.generation) || value.generation < 0
-      || !Number.isSafeInteger(value.projectCount) || value.projectCount < 0
-      || !Number.isSafeInteger(value.cursor) || value.cursor < 0
-      || !(value.nextCursor === null
-        || (Number.isSafeInteger(value.nextCursor) && value.nextCursor > value.cursor))
-      || !Array.isArray(value.projects) || value.projects.length > 4) {
-    throw new Error('内容库投影无效');
-  }
-  return Object.freeze({
-    kind: 'catalog', generation: value.generation,
-    projectCount: value.projectCount, cursor: value.cursor,
-    nextCursor: value.nextCursor,
-    projects: Object.freeze(value.projects.map(contextPocWorkspaceCatalogCard))
-  });
-}
-
-function contextPocWorkspaceDocumentResult(value) {
-  if (!contextPocExact(value, [
-    'kind', 'projectToken', 'title', 'stage', 'stageLabel', 'blockCount',
-    'cursor', 'nextCursor', 'truncated', 'blocks'
-  ]) || value.kind !== 'document'
-      || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
-      || !Number.isSafeInteger(value.blockCount) || value.blockCount < 0
-      || !Number.isSafeInteger(value.cursor) || value.cursor < 0
-      || !(value.nextCursor === null
-        || (Number.isSafeInteger(value.nextCursor) && value.nextCursor > value.cursor))
-      || typeof value.truncated !== 'boolean'
-      || !Array.isArray(value.blocks) || value.blocks.length > 2) {
-    throw new Error('文档投影无效');
-  }
-  const blocks = value.blocks.map((block) => {
-    if (!contextPocExact(block, [
-      'blockToken', 'kind', 'text', 'textTruncated', 'startLine', 'endLine'
-    ]) || typeof block.blockToken !== 'string'
-        || !/^block-[a-f0-9]{24}$/.test(block.blockToken)
-        || typeof block.kind !== 'string' || !/^[a-z][a-z-]{0,31}$/.test(block.kind)
-        || typeof block.text !== 'string' || Buffer.byteLength(block.text, 'utf8') > 2048
-        || typeof block.textTruncated !== 'boolean'
-        || !Number.isSafeInteger(block.startLine) || block.startLine < 1
-        || !Number.isSafeInteger(block.endLine) || block.endLine < block.startLine) {
-      throw new Error('文档块投影无效');
-    }
-    return Object.freeze({ ...block });
-  });
-  return Object.freeze({
-    kind: 'document', projectToken: value.projectToken,
-    title: safeText(value.title, '未命名文档', 120),
-    stage: Object.prototype.hasOwnProperty.call(VIDEO_STAGE_LABELS, value.stage)
-      ? value.stage : null,
-    stageLabel: safeText(value.stageLabel, '未分类', 24),
-    blockCount: value.blockCount,
-    cursor: value.cursor,
-    nextCursor: value.nextCursor,
-    truncated: value.truncated,
-    blocks: Object.freeze(blocks)
-  });
-}
-
-function contextPocWorkspaceOverviewResult(value) {
-  if (!contextPocExact(value, [
-    'kind', 'contentRef', 'projectToken', 'title', 'stage', 'stageLabel',
-    'status', 'updated', 'decision', 'angle', 'hook', 'candidateCount',
-    'cursor', 'nextCursor', 'candidates'
-  ]) || value.kind !== 'overview'
-      || typeof value.contentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
-      || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
-      || !Number.isSafeInteger(value.candidateCount)
-      || value.candidateCount < 0 || value.candidateCount > 64
-      || !Number.isSafeInteger(value.cursor) || value.cursor < 0 || value.cursor > 64
-      || !Array.isArray(value.candidates) || value.candidates.length > 4
-      || value.cursor + value.candidates.length > value.candidateCount) {
-    throw new Error('项目概览投影无效');
-  }
-  const expectedNext = value.cursor + value.candidates.length < value.candidateCount
-    ? value.cursor + value.candidates.length : null;
-  if (value.nextCursor !== expectedNext) throw new Error('项目概览分页投影无效');
-  const candidates = value.candidates.map((candidate) => {
-    if (!contextPocExact(candidate, ['field', 'value', 'selected'])
-        || !['angle', 'hook'].includes(candidate.field)
-        || typeof candidate.value !== 'string' || !candidate.value.trim()
-        || candidate.value.length > 240
-        || /[\u0000-\u001f\u007f]/.test(candidate.value)
-        || typeof candidate.selected !== 'boolean') {
-      throw new Error('项目概览候选投影无效');
-    }
-    return Object.freeze({
-      field: candidate.field,
-      value: candidate.value,
-      selected: candidate.selected
-    });
-  });
-  const nullableText = (input, maximum) => (
-    input === null ? null : safeText(input, '', maximum) || null
-  );
-  return Object.freeze({
-    kind: 'overview',
-    contentRef: value.contentRef,
-    projectToken: value.projectToken,
-    title: safeText(value.title, '未命名项目', 120),
-    stage: Object.prototype.hasOwnProperty.call(VIDEO_STAGE_LABELS, value.stage)
-      ? value.stage : null,
-    stageLabel: safeText(value.stageLabel, '未分类', 24),
-    status: nullableText(value.status, 48),
-    updated: nullableText(value.updated, 64),
-    decision: nullableText(value.decision, 160),
-    angle: nullableText(value.angle, 240),
-    hook: nullableText(value.hook, 240),
-    candidateCount: value.candidateCount,
-    cursor: value.cursor,
-    nextCursor: value.nextCursor,
-    candidates: Object.freeze(candidates)
-  });
-}
-
-function contextPocWorkspaceMutationResult(value) {
-  if (!contextPocExact(value, [
-    'kind', 'changed', 'contentRef', 'projectToken', 'field', 'value',
-    'updated', 'message'
-  ])
-      || value.kind !== 'mutation' || value.changed !== true
-      || typeof value.contentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
-      || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
-      || !['angle', 'hook'].includes(value.field)
-      || typeof value.value !== 'string' || !value.value.trim()
-      || value.value.length > 240 || /[\u0000-\u001f\u007f]/.test(value.value)
-      || typeof value.updated !== 'string' || !value.updated
-      || value.updated.length > 64 || /[\u0000-\u001f\u007f]/.test(value.updated)
-      || typeof value.message !== 'string' || !value.message
-      || [...value.message].length > 160) throw new Error('写回结果投影无效');
-  return Object.freeze({ ...value });
-}
-
-function contextPocWorkspaceSafeMessage(value, fallback) {
-  return safeText(value, fallback, 160);
-}
-
-function contextPocWorkspaceIsoTime(value) {
-  return typeof value === 'string'
-    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
-    && Number.isFinite(Date.parse(value));
-}
-
-function contextPocWorkspaceActionPrepareResult(value) {
-  if (contextPocExact(value, ['state', 'text']) && value.state === 'error') {
-    return Object.freeze({
-      state: 'error',
-      message: contextPocWorkspaceSafeMessage(value.text, '无法完成投递预检。')
-    });
-  }
-  if (!contextPocExact(value, [
-    'kind', 'preflightToken', 'targetLabel', 'workspaceLabel', 'workspaceMatch',
-    'targetRunning', 'eventTracking', 'expiresAt'
-  ]) || value.kind !== 'preflight' || !deliveryToken(value.preflightToken)
-      || !['match', 'mismatch', 'unknown'].includes(value.workspaceMatch)
-      || typeof value.targetRunning !== 'boolean'
-      || !['ready', 'unavailable'].includes(value.eventTracking)
-      || !contextPocWorkspaceIsoTime(value.expiresAt)) {
-    throw new Error('项目动作预检投影无效');
-  }
-  return Object.freeze({
-    kind: 'preflight',
-    preflightToken: value.preflightToken,
-    targetLabel: safeText(value.targetLabel, '目标会话', 96),
-    workspaceLabel: safeText(value.workspaceLabel, '当前工作区', 96),
-    workspaceMatch: value.workspaceMatch,
-    targetRunning: value.targetRunning,
-    eventTracking: value.eventTracking,
-    expiresAt: value.expiresAt
-  });
-}
-
-function contextPocWorkspaceActionSubmitResult(value) {
-  if (contextPocExact(value, ['state', 'text']) && value.state === 'error') {
-    return Object.freeze({
-      state: 'error',
-      message: contextPocWorkspaceSafeMessage(value.text, '投递没有完成。')
-    });
-  }
-  const hasReceipt = isPlainObject(value)
-    && Object.prototype.hasOwnProperty.call(value, 'receiptId');
-  if (!contextPocExact(value, hasReceipt
-    ? ['state', 'reason', 'target', 'receiptId']
-    : ['state', 'reason', 'target'])
-      || !['accepted', 'rejected', 'unknown'].includes(value.state)
-      || typeof value.reason !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(value.reason)
-      || typeof value.target !== 'string'
-      || (hasReceipt && !deliveryToken(value.receiptId))) {
-    throw new Error('项目动作提交投影无效');
-  }
-  return Object.freeze({
-    state: value.state,
-    reason: value.reason,
-    target: safeText(value.target, '目标会话', 96),
-    ...(hasReceipt ? { receiptId: value.receiptId } : {})
-  });
-}
-
-function contextPocWorkspaceBlockIdentity(value) {
-  return Boolean(isPlainObject(value)
-    && typeof value.contentRef === 'string'
-    && /^content-[a-f0-9]{24}$/.test(value.contentRef)
-    && typeof value.projectToken === 'string'
-    && /^project-[a-f0-9]{24}$/.test(value.projectToken)
-    && typeof value.blockToken === 'string'
-    && /^block-[a-f0-9]{24}$/.test(value.blockToken)
-    && Object.prototype.hasOwnProperty.call(VIDEO_BLOCK_INTENTS, value.action));
-}
-
-function contextPocWorkspaceBlockPrepareResult(value) {
-  if (!contextPocExact(value, [
-    'kind', 'contentRef', 'projectToken', 'blockToken', 'action', 'state',
-    'preflightToken', 'targetLabel', 'workspaceLabel', 'workspaceMatch',
-    'targetRunning', 'eventTracking', 'expiresAt', 'message'
-  ]) || value.kind !== 'preflight' || !contextPocWorkspaceBlockIdentity(value)
-      || !['ready', 'error'].includes(value.state)) {
-    throw new Error('内容块动作预检投影无效');
-  }
-  if (value.state === 'error') {
-    if (![value.preflightToken, value.targetLabel, value.workspaceLabel,
-      value.workspaceMatch, value.targetRunning, value.eventTracking,
-      value.expiresAt].every((item) => item === null)
-        || typeof value.message !== 'string' || !value.message) {
-      throw new Error('内容块动作失败投影无效');
-    }
-    return Object.freeze({
-      ...value,
-      message: contextPocWorkspaceSafeMessage(value.message, '无法完成内容块动作预检。')
-    });
-  }
-  if (!deliveryToken(value.preflightToken)
-      || typeof value.targetLabel !== 'string'
-      || typeof value.workspaceLabel !== 'string'
-      || !['match', 'mismatch', 'unknown'].includes(value.workspaceMatch)
-      || typeof value.targetRunning !== 'boolean'
-      || !['ready', 'unavailable'].includes(value.eventTracking)
-      || !contextPocWorkspaceIsoTime(value.expiresAt)
-      || value.message !== null) {
-    throw new Error('内容块动作预检投影无效');
-  }
-  return Object.freeze({
-    ...value,
-    targetLabel: safeText(value.targetLabel, '目标会话', 96),
-    workspaceLabel: safeText(value.workspaceLabel, '当前工作区', 96)
-  });
-}
-
-function contextPocWorkspaceBlockSubmitResult(value) {
-  if (!contextPocExact(value, [
-    'kind', 'contentRef', 'projectToken', 'blockToken', 'action', 'state',
-    'reason', 'target', 'receiptId', 'message'
-  ]) || value.kind !== 'submission' || !contextPocWorkspaceBlockIdentity(value)
-      || !['accepted', 'rejected', 'unknown', 'error'].includes(value.state)) {
-    throw new Error('内容块动作提交投影无效');
-  }
-  if (value.state === 'error') {
-    if (![value.reason, value.target, value.receiptId].every((item) => item === null)
-        || typeof value.message !== 'string' || !value.message) {
-      throw new Error('内容块动作失败投影无效');
-    }
-    return Object.freeze({
-      ...value,
-      message: contextPocWorkspaceSafeMessage(value.message, '内容块动作没有发送。')
-    });
-  }
-  if (typeof value.reason !== 'string'
-      || !/^[a-z][a-z0-9-]{0,63}$/.test(value.reason)
-      || typeof value.target !== 'string'
-      || !(value.receiptId === null || deliveryToken(value.receiptId))
-      || value.message !== null) {
-    throw new Error('内容块动作提交投影无效');
-  }
-  return Object.freeze({
-    ...value,
-    target: safeText(value.target, '目标会话', 96)
-  });
-}
-
-function contextPocWorkspaceProposalResult(value) {
-  if (!contextPocExact(value, [
-    'kind', 'contentRef', 'projectToken', 'status', 'reason', 'proposalToken',
-    'proposalRevisionToken', 'revisionToken', 'title', 'intentLabel',
-    'before', 'beforeTruncated', 'after', 'afterTruncated', 'canAdopt',
-    'canReject', 'canUndo', 'submitted', 'target'
-  ]) || value.kind !== 'proposal'
-      || typeof value.contentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
-      || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
-      || !(value.status === null || CONTEXT_POC_PROPOSAL_STATUSES.has(value.status))
-      || !(value.reason === null || CONTEXT_POC_PROPOSAL_REASONS.has(value.reason))
-      || !(value.proposalToken === null
-        || (typeof value.proposalToken === 'string'
-          && /^proposal-[A-Za-z0-9_-]{1,80}$/.test(value.proposalToken)))
-      || !(value.proposalRevisionToken === null
-        || (typeof value.proposalRevisionToken === 'string'
-          && /^proposal-revision-[a-f0-9]{24}$/.test(value.proposalRevisionToken)))
-      || !(value.revisionToken === null
-        || (typeof value.revisionToken === 'string'
-          && /^revision-[a-f0-9]{24}$/.test(value.revisionToken)))
-      || !(value.title === null || typeof value.title === 'string')
-      || !(value.intentLabel === null || typeof value.intentLabel === 'string')
-      || !(value.before === null || (typeof value.before === 'string'
-        && Buffer.byteLength(value.before, 'utf8') <= 1600))
-      || typeof value.beforeTruncated !== 'boolean'
-      || !(value.after === null || (typeof value.after === 'string'
-        && Buffer.byteLength(value.after, 'utf8') <= 1600))
-      || typeof value.afterTruncated !== 'boolean'
-      || ![value.canAdopt, value.canReject, value.canUndo]
-        .every((item) => typeof item === 'boolean')
-      || !(value.submitted === null
-        || CONTEXT_POC_PROPOSAL_SUBMISSIONS.has(value.submitted))
-      || !(value.target === null || typeof value.target === 'string')) {
-    throw new Error('建议卡投影无效');
-  }
-  if ((value.before === null && value.beforeTruncated)
-      || (value.after === null && value.afterTruncated)) {
-    throw new Error('建议卡截断标记无效');
-  }
-  if (value.status === null) {
-    if (![value.reason, value.proposalToken, value.proposalRevisionToken,
-      value.revisionToken, value.title, value.intentLabel, value.before,
-      value.after, value.submitted, value.target].every((item) => item === null)
-        || value.beforeTruncated || value.afterTruncated
-        || value.canAdopt || value.canReject || value.canUndo) {
-      throw new Error('空建议卡投影无效');
-    }
-  } else if (['adopted', 'conflict'].includes(value.status)) {
-    if (value.proposalToken !== null || value.proposalRevisionToken !== null
-        || !value.revisionToken || value.canAdopt || value.canReject
-        || value.canUndo !== (value.status === 'adopted')) {
-      throw new Error('撤销建议卡投影无效');
-    }
-  } else if (!value.proposalToken || value.revisionToken !== null
-      || value.canUndo || !value.canReject) {
-    throw new Error('待决建议卡投影无效');
-  } else if (value.status === 'ready') {
-    const comparisonTruncated = value.beforeTruncated || value.afterTruncated;
-    if (comparisonTruncated
-      ? (value.canAdopt || value.proposalRevisionToken !== null)
-      : (!value.canAdopt || !value.proposalRevisionToken)) {
-      throw new Error('可采用建议的完整可见性与 revision 不一致');
-    }
-  } else if (value.canAdopt || value.proposalRevisionToken !== null) {
-    throw new Error('非 ready 建议不得下发采用能力');
-  }
-  return Object.freeze({
-    ...value,
-    title: value.title === null ? null : safeText(value.title, '未命名文档', 120),
-    intentLabel: value.intentLabel === null ? null : safeText(value.intentLabel, '', 64) || null,
-    target: value.target === null ? null : safeText(value.target, '目标会话', 96)
-  });
-}
-
-function contextPocWorkspaceProposalDecisionResult(value) {
-  if (!contextPocExact(value, [
-    'kind', 'contentRef', 'projectToken', 'decision', 'changed',
-    'revisionToken', 'message'
-  ]) || value.kind !== 'decision'
-      || typeof value.contentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
-      || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
-      || !['adopt', 'reject'].includes(value.decision)
-      || value.changed !== (value.decision === 'adopt')
-      || !(value.revisionToken === null
-        || (typeof value.revisionToken === 'string'
-          && /^revision-[a-f0-9]{24}$/.test(value.revisionToken)))
-      || (value.decision === 'adopt') !== (value.revisionToken !== null)
-      || typeof value.message !== 'string' || !value.message) {
-    throw new Error('建议决策结果投影无效');
-  }
-  return Object.freeze({
-    ...value,
-    message: contextPocWorkspaceSafeMessage(value.message, '建议决策已完成。')
-  });
-}
-
-function contextPocWorkspaceProposalUndoResult(value) {
-  if (!contextPocExact(value, [
-    'kind', 'contentRef', 'projectToken', 'changed', 'message'
-  ]) || value.kind !== 'undo' || value.changed !== true
-      || typeof value.contentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
-      || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
-      || typeof value.message !== 'string' || !value.message) {
-    throw new Error('建议撤销结果投影无效');
-  }
-  return Object.freeze({
-    ...value,
-    message: contextPocWorkspaceSafeMessage(value.message, '已撤销上一次采用。')
-  });
-}
-
-function contextPocWorkspacePublishChecklist(value) {
-  if (!contextPocExact(value, [
-    'structureValid', 'ready', 'published', 'aiDisclosure', 'lights'
-  ]) || ![value.structureValid, value.ready, value.published]
-    .every((item) => typeof item === 'boolean')
-      || !['unknown', 'ai', 'not-ai'].includes(value.aiDisclosure)
-      || !Array.isArray(value.lights)
-      || value.lights.length !== Object.keys(VIDEO_PUBLISH_LIGHTS).length) {
-    throw new Error('发布检查单投影无效');
-  }
-  const expected = Object.entries(VIDEO_PUBLISH_LIGHTS);
-  const lights = value.lights.map((light, index) => {
-    if (!contextPocExact(light, ['id', 'label', 'available', 'checked', 'satisfied'])
-        || light.id !== expected[index][0]
-        || light.label !== expected[index][1]
-        || ![light.available, light.checked, light.satisfied]
-          .every((item) => typeof item === 'boolean')) {
-      throw new Error('发布检查灯顺序或投影无效');
-    }
-    return Object.freeze({ ...light });
-  });
-  const byId = new Map(lights.map((light) => [light.id, light]));
-  const allKnownMarkersAvailable = lights.every((light) => light.available);
-  const basicReady = ['cover', 'title', 'topics', 'timing', 'pinned-comment']
-    .every((id) => byId.get(id).available && byId.get(id).checked);
-  const disclosureReady = value.aiDisclosure === 'not-ai'
-    || (value.aiDisclosure === 'ai'
-      && byId.get('ai-label').available && byId.get('ai-label').checked);
-  const ready = value.structureValid && basicReady && disclosureReady;
-  const published = ready
-    && byId.get('published').available && byId.get('published').checked;
-  for (const id of ['cover', 'title', 'topics', 'timing', 'pinned-comment']) {
-    if (byId.get(id).satisfied !== (byId.get(id).available && byId.get(id).checked)) {
-      throw new Error('发布前置灯满足态无效');
-    }
-  }
-  if ((value.structureValid && !allKnownMarkersAvailable) || value.ready !== ready
-      || value.published !== published
-      || byId.get('ai-label').satisfied !== disclosureReady
-      || byId.get('published').satisfied !== published) {
-    throw new Error('发布检查单状态机投影无效');
-  }
-  return Object.freeze({
-    structureValid: value.structureValid,
-    ready: value.ready,
-    published: value.published,
-    aiDisclosure: value.aiDisclosure,
-    lights: Object.freeze(lights)
-  });
-}
-
-function contextPocWorkspacePublishSurface(value) {
-  if (!contextPocExact(value, [
-    'kind', 'contentRef', 'projectToken', 'title', 'stage', 'stageLabel',
-    'updated', 'canCreate', 'checklist'
-  ]) || value.kind !== 'publish'
-      || typeof value.contentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
-      || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
-      || !(value.stage === null
-        || Object.prototype.hasOwnProperty.call(VIDEO_STAGE_LABELS, value.stage))
-      || typeof value.canCreate !== 'boolean'
-      || value.canCreate !== ['script', 'shoot', 'edit'].includes(value.stage)
-      || !(value.updated === null || (typeof value.updated === 'string'
-        && value.updated.length <= 64
-        && !/[\u0000-\u001f\u007f]/.test(value.updated)))
-      || (value.stage === 'publish') !== isPlainObject(value.checklist)) {
-    throw new Error('发布页投影无效');
-  }
-  const surface = Object.freeze({
-    kind: 'publish',
-    contentRef: value.contentRef,
-    projectToken: value.projectToken,
-    title: safeText(value.title, '未命名项目', 120),
-    stage: value.stage,
-    stageLabel: safeText(value.stageLabel, '未分类', 24),
-    updated: value.updated,
-    canCreate: value.canCreate,
-    checklist: value.checklist === null
-      ? null : contextPocWorkspacePublishChecklist(value.checklist)
-  });
-  if (Buffer.byteLength(JSON.stringify(surface), 'utf8') > 5600) {
-    throw new Error('发布页投影超过安全上限');
-  }
-  return surface;
-}
-
-function contextPocWorkspacePublishCreateResult(value) {
-  if (!contextPocExact(value, [
-    'kind', 'created', 'sourceContentRef', 'sourceProjectToken', 'surface', 'message'
-  ]) || value.kind !== 'publish-create' || typeof value.created !== 'boolean'
-      || typeof value.sourceContentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.sourceContentRef)
-      || typeof value.sourceProjectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.sourceProjectToken)
-      || typeof value.message !== 'string' || !value.message) {
-    throw new Error('发布检查单创建结果无效');
-  }
-  const surface = contextPocWorkspacePublishSurface(value.surface);
-  if (surface.stage !== 'publish' || !surface.checklist
-      || surface.contentRef === value.sourceContentRef) {
-    throw new Error('发布检查单创建身份无效');
-  }
-  const result = Object.freeze({
-    kind: 'publish-create',
-    created: value.created,
-    sourceContentRef: value.sourceContentRef,
-    sourceProjectToken: value.sourceProjectToken,
-    surface,
-    message: contextPocWorkspaceSafeMessage(value.message, '发布检查单已准备。')
-  });
-  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 5600) {
-    throw new Error('发布检查单创建结果超过安全上限');
-  }
-  return result;
-}
-
-function contextPocWorkspacePublishMutationResult(value) {
-  if (!contextPocExact(value, ['kind', 'changed', 'surface', 'message'])
-      || value.kind !== 'publish-mutation' || value.changed !== true
-      || typeof value.message !== 'string' || !value.message) {
-    throw new Error('发布页写回结果无效');
-  }
-  const surface = contextPocWorkspacePublishSurface(value.surface);
-  if (surface.stage !== 'publish' || !surface.checklist) {
-    throw new Error('发布页写回身份无效');
-  }
-  const result = Object.freeze({
-    kind: 'publish-mutation', changed: true, surface,
-    message: contextPocWorkspaceSafeMessage(value.message, '发布检查单已写回。')
-  });
-  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 5600) {
-    throw new Error('发布页写回结果超过安全上限');
-  }
-  return result;
-}
-
-function contextPocWorkspaceTactic(value) {
-  if (!contextPocExact(value, [
-    'contentRef', 'projectToken', 'title', 'summary', 'summaryTruncated',
-    'sourceTitle', 'updated'
-  ]) || typeof value.contentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
-      || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
-      || typeof value.title !== 'string' || !value.title
-      || Array.from(value.title).length > 120
-      || /[\u0000-\u001f\u007f]/.test(value.title)
-      || !(value.summary === null || (typeof value.summary === 'string'
-        && value.summary
-        && Buffer.byteLength(value.summary, 'utf8') <= 240
-        && !/[\u0000-\u001f\u007f]/.test(value.summary)))
-      || typeof value.summaryTruncated !== 'boolean'
-      || (value.summary === null && value.summaryTruncated)
-      || !(value.sourceTitle === null || (typeof value.sourceTitle === 'string'
-        && value.sourceTitle && Array.from(value.sourceTitle).length <= 120
-        && !/[\u0000-\u001f\u007f]/.test(value.sourceTitle)))
-      || !(value.updated === null || (typeof value.updated === 'string'
-        && value.updated && value.updated.length <= 64
-        && !/[\u0000-\u001f\u007f]/.test(value.updated)))) {
-    throw new Error('打法卡投影无效');
-  }
-  return Object.freeze({ ...value });
-}
-
-function contextPocWorkspaceTacticsResult(value) {
-  if (!contextPocExact(value, [
-    'kind', 'contentRef', 'projectToken', 'collectionToken', 'itemCount',
-    'complete', 'cursor', 'nextCursor', 'tactics'
-  ]) || value.kind !== 'tactics'
-      || typeof value.contentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
-      || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
-      || typeof value.collectionToken !== 'string'
-      || !/^collection-[a-f0-9]{24}$/.test(value.collectionToken)
-      || !Number.isSafeInteger(value.itemCount)
-      || value.itemCount < 0 || value.itemCount > 512
-      || typeof value.complete !== 'boolean'
-      || !Number.isSafeInteger(value.cursor)
-      || value.cursor < 0 || value.cursor > value.itemCount
-      || !Array.isArray(value.tactics) || value.tactics.length > 4) {
-    throw new Error('打法库分页投影无效');
-  }
-  const tactics = value.tactics.map(contextPocWorkspaceTactic);
-  const next = value.cursor + tactics.length;
-  const expectedNextCursor = next < value.itemCount ? next : null;
-  if (value.nextCursor !== expectedNextCursor
-      || (expectedNextCursor !== null && tactics.length === 0)
-      || new Set(tactics.map((item) => item.contentRef)).size !== tactics.length
-      || new Set(tactics.map((item) => item.projectToken)).size !== tactics.length) {
-    throw new Error('打法库分页边界无效');
-  }
-  const result = Object.freeze({
-    kind: 'tactics', contentRef: value.contentRef,
-    projectToken: value.projectToken,
-    collectionToken: value.collectionToken,
-    itemCount: value.itemCount,
-    complete: value.complete,
-    cursor: value.cursor,
-    nextCursor: value.nextCursor,
-    tactics: Object.freeze(tactics)
-  });
-  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 5600) {
-    throw new Error('打法库分页投影超过安全上限');
-  }
-  return result;
-}
-
-function contextPocWorkspaceReviewSolidifyResult(value) {
-  if (!contextPocExact(value, [
-    'kind', 'created', 'sourceContentRef', 'sourceProjectToken', 'tactic', 'message'
-  ]) || value.kind !== 'review-solidify' || typeof value.created !== 'boolean'
-      || typeof value.sourceContentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.sourceContentRef)
-      || typeof value.sourceProjectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.sourceProjectToken)
-      || typeof value.message !== 'string' || !value.message
-      || Buffer.byteLength(value.message, 'utf8') > 240
-      || /[\u0000-\u001f\u007f]/.test(value.message)) {
-    throw new Error('复盘固化结果投影无效');
-  }
-  const tactic = contextPocWorkspaceTactic(value.tactic);
-  if (tactic.contentRef === value.sourceContentRef
-      || tactic.projectToken === value.sourceProjectToken) {
-    throw new Error('复盘固化结果身份无效');
-  }
-  const result = Object.freeze({
-    kind: 'review-solidify', created: value.created,
-    sourceContentRef: value.sourceContentRef,
-    sourceProjectToken: value.sourceProjectToken,
-    tactic,
-    message: value.message
-  });
-  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 5600) {
-    throw new Error('复盘固化结果超过安全上限');
-  }
-  return result;
-}
-
-function contextPocWorkspaceShootOpenResult(value) {
-  if (!contextPocExact(value, [
-    'kind', 'contentRef', 'projectToken', 'state', 'message'
-  ]) || value.kind !== 'shoot-open'
-      || typeof value.contentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
-      || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
-      || !['opened', 'focused', 'busy', 'unavailable'].includes(value.state)
-      || value.message !== shootingOpenMessage(value.state)
-      || Buffer.byteLength(value.message, 'utf8') > 240
-      || /[\u0000-\u001f\u007f]/.test(value.message)) {
-    throw new Error('拍摄现场打开结果无效');
-  }
-  const result = Object.freeze({ ...value });
-  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 5600) {
-    throw new Error('拍摄现场打开结果超过安全上限');
-  }
-  return result;
-}
-
-function contextPocWorkspaceShootHistoryRecord(value) {
-  if (!contextPocExact(value, [
-    'recordRef', 'title', 'confirmedCount', 'totalShots',
-    'missingCount', 'retakeCount', 'allConfirmed'
-  ]) || typeof value.recordRef !== 'string'
-      || !/^[a-f0-9]{24}$/.test(value.recordRef)
-      || typeof value.title !== 'string' || !value.title
-      || Buffer.byteLength(value.title, 'utf8') > 120
-      || /[\u0000-\u001f\u007f]/.test(value.title)
-      || !Number.isSafeInteger(value.confirmedCount)
-      || !Number.isSafeInteger(value.totalShots)
-      || !Number.isSafeInteger(value.missingCount)
-      || !Number.isSafeInteger(value.retakeCount)
-      || value.totalShots < 1 || value.totalShots > videoShooting.LIMITS.shots
-      || value.confirmedCount < 0 || value.confirmedCount > value.totalShots
-      || value.missingCount < 0 || value.missingCount > value.totalShots
-      || value.confirmedCount + value.missingCount !== value.totalShots
-      || value.retakeCount < 0 || value.retakeCount > 1_000_000_000
-      || typeof value.allConfirmed !== 'boolean'
-      || value.allConfirmed !== (value.missingCount === 0)) {
-    throw new Error('拍摄历史记录投影无效');
-  }
-  return Object.freeze({ ...value });
-}
-
-function contextPocWorkspaceShootHistoryResult(value) {
-  if (!contextPocExact(value, [
-    'kind', 'contentRef', 'projectToken', 'collectionToken', 'itemCount',
-    'complete', 'cursor', 'nextCursor', 'records'
-  ]) || value.kind !== 'shoot-history'
-      || typeof value.contentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(value.contentRef)
-      || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
-      || typeof value.collectionToken !== 'string'
-      || !/^collection-[a-f0-9]{24}$/.test(value.collectionToken)
-      || !Number.isSafeInteger(value.itemCount)
-      || value.itemCount < 0 || value.itemCount > 512
-      || typeof value.complete !== 'boolean'
-      || !Number.isSafeInteger(value.cursor)
-      || value.cursor < 0 || value.cursor > value.itemCount
-      || !Array.isArray(value.records) || value.records.length > 4) {
-    throw new Error('拍摄历史分页投影无效');
-  }
-  const records = value.records.map(contextPocWorkspaceShootHistoryRecord);
-  const next = value.cursor + records.length;
-  const expectedNextCursor = next < value.itemCount ? next : null;
-  if (value.nextCursor !== expectedNextCursor
-      || (expectedNextCursor !== null && records.length === 0)
-      || new Set(records.map((record) => record.recordRef)).size !== records.length) {
-    throw new Error('拍摄历史分页边界无效');
-  }
-  const result = Object.freeze({
-    kind: 'shoot-history', contentRef: value.contentRef,
-    projectToken: value.projectToken,
-    collectionToken: value.collectionToken,
-    itemCount: value.itemCount,
-    complete: value.complete,
-    cursor: value.cursor,
-    nextCursor: value.nextCursor,
-    records: Object.freeze(records)
-  });
-  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 5600) {
-    throw new Error('拍摄历史分页投影超过安全上限');
-  }
-  return result;
-}
-
-function contextPocWorkspaceReceipt(value) {
-  if (!isPlainObject(value) || !deliveryToken(value.receiptId)
-      || typeof value.targetLabel !== 'string'
-      || !['ready', 'unavailable'].includes(value.tracking)
-      || typeof value.trackingText !== 'string'
-      || typeof value.expectedStage !== 'string'
-      || !deliveryReceipts.DELIVERY_STATES.includes(value.status)
-      || typeof value.statusText !== 'string'
-      || !contextPocWorkspaceIsoTime(value.createdAt)
-      || !contextPocWorkspaceIsoTime(value.updatedAt)
-      || !(value.terminalAt === null
-        || contextPocWorkspaceIsoTime(value.terminalAt))
-      || !Number.isSafeInteger(value.elapsedMs) || value.elapsedMs < 0
-      || !(value.durationMs === null
-        || (Number.isSafeInteger(value.durationMs) && value.durationMs >= 0))
-      || !Number.isSafeInteger(value.resultCount) || value.resultCount < 0
-      || value.resultCount > 100
-      || (value.resultToken !== undefined && !deliveryToken(value.resultToken))
-      || (value.pulseAt !== undefined
-        && !contextPocWorkspaceIsoTime(value.pulseAt))
-      || (value.pulseId !== undefined && !deliveryToken(value.pulseId))
-      || ((value.resultCount === 1) !== (value.resultToken !== undefined))
-      || ((value.pulseAt !== undefined) !== (value.pulseId !== undefined))) {
-    throw new Error('投递回执投影无效');
-  }
-  return Object.freeze({
-    receiptId: value.receiptId,
-    targetLabel: safeText(value.targetLabel, '目标会话', 96),
-    tracking: value.tracking,
-    trackingText: safeText(value.trackingText, '', 96),
-    expectedStage: safeText(value.expectedStage, '', 96),
-    status: value.status,
-    statusText: safeText(value.statusText, '', 160),
-    createdAt: value.createdAt,
-    updatedAt: value.updatedAt,
-    terminalAt: value.terminalAt,
-    elapsedMs: value.elapsedMs,
-    durationMs: value.durationMs,
-    resultCount: value.resultCount,
-    ...(value.resultToken === undefined ? {} : { resultToken: value.resultToken }),
-    ...(value.pulseAt === undefined ? {} : { pulseAt: value.pulseAt }),
-    ...(value.pulseId === undefined ? {} : { pulseId: value.pulseId })
-  });
-}
-
-function contextPocWorkspaceReceiptsResult(value) {
-  if (!contextPocExact(value, ['kind', 'projectToken', 'receipts'])
-      || value.kind !== 'receipts'
-      || typeof value.projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(value.projectToken)
-      || !Array.isArray(value.receipts) || value.receipts.length > 6) {
-    throw new Error('投递回执列表投影无效');
-  }
-  return Object.freeze({
-    kind: 'receipts',
-    projectToken: value.projectToken,
-    receipts: Object.freeze(value.receipts.map(contextPocWorkspaceReceipt))
-  });
-}
-
-function contextPocWorkspaceReceiptAckResult(value) {
-  if (!contextPocExact(value, ['kind']) || !['ok', 'stale'].includes(value.kind)) {
-    throw new Error('投递回执确认投影无效');
-  }
-  return Object.freeze({ kind: value.kind });
-}
-
-function contextPocWorkspaceReceiptOpenResult(value) {
-  if (contextPocExact(value, ['kind']) && value.kind === 'ok') {
-    return Object.freeze({ kind: 'ok' });
-  }
-  if (contextPocExact(value, ['kind', 'text']) && value.kind === 'error') {
-    return Object.freeze({
-      kind: 'error',
-      message: contextPocWorkspaceSafeMessage(value.text, '无法打开这份结果。')
-    });
-  }
-  throw new Error('投递结果打开投影无效');
-}
-
-function contextPocWorkspaceOperationErrorCode(error) {
-  const code = error && error.code;
-  if (code === 'ERR_WORKSPACE_UNAVAILABLE') return 'workspace-unavailable';
-  if (['ERR_OPERATION_OUTCOME_UNKNOWN',
-    'ERR_VIDEO_RECOVERY_REQUIRED'].includes(code)) return 'outcome-unknown';
-  if (['ERR_WORKSPACE_BINDING_STALE', 'ERR_VIDEO_RUNTIME_STALE',
-    'ERR_VIDEO_ROOT_CHANGED', 'ERR_ROOT_CHANGED', 'ERR_ROOT_INVALID',
-    'ERR_ROOT_UNREADABLE', 'ERR_CAS_MISMATCH',
-    'ERR_PATH_CHANGED', 'ERR_PATH_NOT_FOUND', 'ERR_PATH_SYMLINK',
-    'ERR_PATH_OUTSIDE', 'ERR_PATH_NOT_FILE',
-    'ERR_CONTEXT_PROJECT_STALE'].includes(code)) return 'operation-stale';
-  return 'operation-failed';
-}
-
-function contextPocUtf8Clip(value, maximumBytes) {
-  const source = String(value || '')
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '�');
-  let bytes = 0;
-  let text = '';
-  for (const symbol of source) {
-    const size = Buffer.byteLength(symbol, 'utf8');
-    if (bytes + size > maximumBytes) break;
-    text += symbol;
-    bytes += size;
-  }
-  return Object.freeze({ text, truncated: text.length !== source.length });
-}
-
-function contextPocAssertWorkspaceOperationCurrent(context) {
-  if (!context || typeof context.assertCurrent !== 'function'
-      || context.assertCurrent() !== true) {
-    const error = new Error('文件 operation 工作区绑定已变化');
-    error.code = 'ERR_WORKSPACE_BINDING_STALE';
-    throw error;
-  }
-}
-
-function contextPocWorkspaceOperationError(code, message) {
-  const error = new Error(message);
-  error.code = code;
-  return error;
-}
-
-function contextPocWorkspaceProjectIdentity(snapshot, selector) {
-  const projects = Array.isArray(snapshot && snapshot.projects) ? snapshot.projects : [];
-  const matches = projects.filter((project) => isPlainObject(project)
-    && (selector.projectToken === undefined
-      || project.projectToken === selector.projectToken)
-    && (selector.contentRef === undefined || project.contentRef === selector.contentRef));
-  if (matches.length !== 1
-      || typeof matches[0].projectToken !== 'string'
-      || !/^project-[a-f0-9]{24}$/.test(matches[0].projectToken)
-      || typeof matches[0].contentRef !== 'string'
-      || !/^content-[a-f0-9]{24}$/.test(matches[0].contentRef)) {
-    throw contextPocWorkspaceOperationError(
-      'ERR_CONTEXT_PROJECT_STALE', '内容身份已变化，请重新选择'
-    );
-  }
-  return Object.freeze({
-    projectToken: matches[0].projectToken,
-    contentRef: matches[0].contentRef
-  });
-}
-
-function contextPocWorkspaceProposalProjection(identity, surface) {
-  if (!surface) {
-    return {
-      kind: 'proposal', ...identity,
-      status: null, reason: null,
-      proposalToken: null, proposalRevisionToken: null, revisionToken: null,
-      title: null, intentLabel: null,
-      before: null, beforeTruncated: false,
-      after: null, afterTruncated: false,
-      canAdopt: false, canReject: false, canUndo: false,
-      submitted: null, target: null
-    };
-  }
-  const status = CONTEXT_POC_PROPOSAL_STATUSES.has(surface.status)
-    ? surface.status : 'invalid';
-  const reason = CONTEXT_POC_PROPOSAL_REASONS.has(surface.reason)
-    ? surface.reason : (status === 'invalid' ? 'read-failed' : null);
-  const before = surface.before === null || surface.before === undefined
-    ? null : contextPocUtf8Clip(surface.before, 1600);
-  const after = surface.after === null || surface.after === undefined
-    ? null : contextPocUtf8Clip(surface.after, 1600);
-  const comparisonTruncated = Boolean(
-    (before && before.truncated) || (after && after.truncated)
-  );
-  return {
-    kind: 'proposal', ...identity,
-    status,
-    reason,
-    proposalToken: surface.proposalToken || null,
-    proposalRevisionToken: comparisonTruncated
-      ? null : (surface.proposalRevisionToken || null),
-    revisionToken: surface.revisionToken || null,
-    title: typeof surface.title === 'string' ? surface.title : null,
-    intentLabel: typeof surface.intentLabel === 'string' ? surface.intentLabel : null,
-    before: before ? before.text : null,
-    beforeTruncated: before ? before.truncated : false,
-    after: after ? after.text : null,
-    afterTruncated: after ? after.truncated : false,
-    canAdopt: surface.canAdopt === true && !comparisonTruncated,
-    canReject: surface.canReject === true,
-    canUndo: surface.canUndo === true,
-    submitted: surface.submitted === null || surface.submitted === undefined
-      ? null : surface.submitted,
-    target: typeof surface.target === 'string' ? surface.target : null
-  };
-}
-
-function contextPocWorkspaceFileOperations(options = {}) {
-  const catalog = options.catalog || (() => {
+contextWorkspaceOps.configureContextPocWorkspaceOperationDefaults({
+  catalog: () => {
     const snapshot = currentVideoWorkspaceSnapshot();
     if (!snapshot || snapshot.status !== 'ready') {
       const error = new Error('视频工作区不可用');
@@ -8274,9 +7139,9 @@ function contextPocWorkspaceFileOperations(options = {}) {
       throw error;
     }
     return snapshot;
-  });
-  const document = options.document || videoDocumentSurface;
-  const overview = options.overview || ((projectToken) => {
+  },
+  document: videoDocumentSurface,
+  overview: (projectToken) => {
     const { runtime, record, document: source } = readVideoDocumentByToken(projectToken);
     const fields = isPlainObject(source.fields) ? source.fields : {};
     return {
@@ -8293,20 +7158,20 @@ function contextPocWorkspaceFileOperations(options = {}) {
       angles: Array.isArray(fields.angles) ? fields.angles : [],
       hooks: Array.isArray(fields.hooks) ? fields.hooks : []
     };
-  });
-  const chooseTopic = options.chooseTopic || ((input) => runVideoSceneAction({
+  },
+  chooseTopic: (input) => runVideoSceneAction({
     action: 'choose-topic', ...input
-  }));
-  const projectAction = options.projectAction || submitVideoProjectAction;
-  const blockAction = options.blockAction || submitVideoBlockAction;
-  const proposalSurface = options.proposalSurface || ((contentRef) => {
+  }),
+  projectAction: submitVideoProjectAction,
+  blockAction: submitVideoBlockAction,
+  proposalSurface: (contentRef) => {
     const surface = videoProposalSurface(currentVideoRuntime(), contentRef);
     return surface ? { ...surface, contentRef } : null;
-  });
-  const proposalDecision = options.proposalDecision || decideVideoProposal;
-  const proposalUndo = options.proposalUndo || undoVideoProposal;
-  const publishSurface = options.publishSurface || videoPublishWorkspaceSurface;
-  const publishAction = options.publishAction || ((input) => runVideoSceneAction({
+  },
+  proposalDecision: decideVideoProposal,
+  proposalUndo: undoVideoProposal,
+  publishSurface: videoPublishWorkspaceSurface,
+  publishAction: (input) => runVideoSceneAction({
     action: input.type === 'create'
       ? 'create-publish-checklist'
       : (input.type === 'light' ? 'toggle-publish-light' : 'set-ai-disclosure'),
@@ -8314,30 +7179,23 @@ function contextPocWorkspaceFileOperations(options = {}) {
     ...(input.type === 'light'
       ? { lightId: input.lightId, checked: input.checked }
       : (input.type === 'ai-disclosure' ? { value: input.value } : {}))
-  }));
-  const tacticsCollection = options.tacticsCollection || (() => (
-    videoTacticCollection(currentVideoRuntime())
-  ));
-  const solidifyAction = options.solidifyAction || ((input) => runVideoSceneAction({
+  }),
+  tacticsCollection: () => videoTacticCollection(currentVideoRuntime()),
+  solidifyAction: (input) => runVideoSceneAction({
     action: 'solidify-tactic', projectToken: input.projectToken
-  }));
-  const tacticSurface = options.tacticSurface || ((tacticIdentity, sourceIdentity) => (
+  }),
+  tacticSurface: (tacticIdentity, sourceIdentity) => (
     videoTacticWorkspaceSurface(tacticIdentity, sourceIdentity)
-  ));
-  const shootSource = options.shootSource || readVideoDocumentByToken;
-  const shootOpenAction = options.shootOpenAction || ((input) => (
+  ),
+  shootSource: readVideoDocumentByToken,
+  shootOpenAction: (input) => (
     openShootingWindowForProject({ projectToken: input.projectToken })
-  ));
-  const shootHistoryCollection = options.shootHistoryCollection || (() => (
-    videoShootingHistoryCollection(currentVideoRuntime())
-  ));
-  const verifyProject = options.verifyProject || readVideoDocumentByToken;
-  const receiptSnapshot = options.receiptSnapshot || (() => (
-    deliveryReceiptService.snapshot({ owner: VIDEO_DELIVERY_OWNER })
-  ));
-  const receiptProjectBinding = options.receiptProjectBinding
-    || deliveryBindingProject;
-  const ackReceipt = options.ackReceipt || ((input) => {
+  ),
+  shootHistoryCollection: () => videoShootingHistoryCollection(currentVideoRuntime()),
+  verifyProject: readVideoDocumentByToken,
+  receiptSnapshot: () => deliveryReceiptService.snapshot({ owner: VIDEO_DELIVERY_OWNER }),
+  receiptProjectBinding: deliveryBindingProject,
+  ackReceipt: (input) => {
     const acknowledged = deliveryReceiptService.ackPulse({
       owner: VIDEO_DELIVERY_OWNER,
       receiptId: input.receiptId,
@@ -8345,1011 +7203,969 @@ function contextPocWorkspaceFileOperations(options = {}) {
     });
     if (acknowledged) pushShellState();
     return acknowledged;
+  },
+  openReceipt: openDeliveryResult,
+  videoProjectActionRequest,
+  videoProjectDispatchRequest,
+  videoDocumentRequest,
+  videoBlockActionRequest,
+  videoBlockDispatchRequest,
+  videoProposalDecisionRequest,
+  videoUndoRequest,
+  deliveryPulseRequest,
+  deliveryResultRequest,
+  videoContentRef,
+  videoProjectToken,
+  safeRelativePath: videoCockpit.safeRelativePath
+});
+
+function requireProjectStore() {
+  if (projectStore) return projectStore;
+  const error = new Error('项目注册表尚未初始化');
+  error.code = 'ERR_PROJECT_RUNTIME';
+  throw error;
+}
+
+// coordinator 在模块加载期创建，真实 store 要等 Electron userData 可用后才创建。
+// 这个薄 facade 让两个生命周期解耦，不会把 Electron 泄进 lib/。
+const projectStoreFacade = Object.freeze({
+  get revision() { return requireProjectStore().revision; },
+  list: (...args) => requireProjectStore().list(...args),
+  get: (...args) => requireProjectStore().get(...args),
+  create: (...args) => requireProjectStore().create(...args),
+  update: (...args) => requireProjectStore().update(...args),
+  remove: (...args) => requireProjectStore().remove(...args),
+  bindSession: (...args) => requireProjectStore().bindSession(...args),
+  reorder: (...args) => requireProjectStore().reorder(...args),
+  folderOf: (...args) => requireProjectStore().folderOf(...args),
+  folderExists: (...args) => requireProjectStore().folderExists(...args),
+  touchOpened: (...args) => requireProjectStore().touchOpened(...args)
+});
+
+function contextPocProjectSessionRootRef(runtime, projectId, supplied = {}) {
+  const state = supplied.backendState || (runtime && runtime.backendState);
+  const secret = supplied.secret || (state && state.contextBridgeAuthToken);
+  const hostInstanceId = supplied.hostInstanceId
+    || (runtime && runtime.handshake && runtime.handshake.hostInstanceId);
+  if (!runtime && !supplied.allowWithoutRuntime) {
+    throw new TypeError('project session root runtime invalid');
+  }
+  if (!supplied.allowWithoutRuntime && (!state || state.exited === true
+      || runtime.backendState !== state)) {
+    throw new TypeError('project session root runtime invalid');
+  }
+  const location = canonicalRegistryProjectFolder(projectId, supplied);
+  return projectRootRef.sessionRootRef(secret, hostInstanceId, location.root, {
+    ...(supplied.platform ? { platform: supplied.platform } : {}),
+    ...(supplied.pathImpl ? { pathImpl: supplied.pathImpl } : {})
   });
-  const openReceipt = options.openReceipt || openDeliveryResult;
-  const readBoundPublishSurface = async (identity) => {
-    const candidate = await publishSurface(identity.contentRef, identity.projectToken);
-    const surface = contextPocWorkspacePublishSurface(candidate);
-    if (surface.contentRef !== identity.contentRef
-        || surface.projectToken !== identity.projectToken) {
-      throw contextPocWorkspaceOperationError(
-        'ERR_CONTEXT_PROJECT_STALE', '发布页内容身份已变化'
-      );
+}
+
+function contextPocProjectBootstrapTicket(value, supplied = {}) {
+  const runtime = supplied.runtime === undefined ? contextPocBridgeRuntime : supplied.runtime;
+  const state = supplied.backendState || (runtime && runtime.backendState);
+  const binding = value && value.binding;
+  const page = runtime && (runtime.pageBinding || runtime.binding);
+  if (!runtime || !state || state.exited === true || runtime.backendState !== state
+      || !runtime.handshake || !binding || !page
+      || runtime.handshake.hostInstanceId !== binding.hostInstanceId
+      || page.controllerId !== binding.controllerId
+      || page.pageInstanceId !== binding.pageInstanceId
+      || page.selectionRevision !== binding.selectionRevision
+      || typeof state.contextBridgeAuthToken !== 'string'
+      || !CONTEXT_POC_TOKEN_RE.test(state.contextBridgeAuthToken)) {
+    throw new TypeError('project bootstrap runtime invalid');
+  }
+  const location = canonicalRegistryProjectFolder(value.projectId, supplied);
+  return projectBootstrapTicket.sealProjectBootstrapTicket({
+    secret: state.contextBridgeAuthToken,
+    hostInstanceId: binding.hostInstanceId,
+    controllerId: binding.controllerId,
+    pageInstanceId: binding.pageInstanceId,
+    selectionRevision: binding.selectionRevision,
+    projectId: value.projectId,
+    openToken: value.openToken,
+    root: location.root
+  }, {
+    ...(supplied.now ? { now: supplied.now } : {}),
+    ...(supplied.randomBytes ? { randomBytes: supplied.randomBytes } : {})
+  });
+}
+
+function opaqueContextRefEqual(left, right) {
+  if (typeof left !== 'string' || typeof right !== 'string'
+      || Buffer.byteLength(left, 'utf8') !== Buffer.byteLength(right, 'utf8')) return false;
+  return crypto.timingSafeEqual(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'));
+}
+
+function activeRegistryProjectBindingMatches(runtime, binding, supplied = {}) {
+  if (classicCockpitEnabled || activeRegistryProjectId === null
+      || !binding || binding.state !== 'selected'
+      || !CONTEXT_POC_SESSION_BINDING_REF_RE.test(String(binding.currentBindingRef || ''))
+      || !CONTEXT_POC_SESSION_ROOT_REF_RE.test(String(binding.sessionRootRef || ''))) return false;
+  try {
+    const location = canonicalRegistryProjectLocation(activeRegistryProjectId, supplied);
+    const expectedRootRef = contextPocProjectSessionRootRef(
+      runtime, activeRegistryProjectId, supplied
+    );
+    return opaqueContextRefEqual(location.project.boundSession, binding.currentBindingRef)
+      && opaqueContextRefEqual(expectedRootRef, binding.sessionRootRef);
+  } catch (_error) { return false; }
+}
+
+function reconcileActiveRegistryProjectBinding(runtime, binding, supplied = {}) {
+  if (classicCockpitEnabled || activeRegistryProjectId === null) {
+    return Object.freeze({ closed: false, code: null });
+  }
+  if (activeRegistryProjectBindingMatches(runtime, binding, supplied)) {
+    return Object.freeze({ closed: false, code: null });
+  }
+  const clear = supplied.clearActive || clearActiveRegistryProject;
+  const closed = clear(supplied) === true;
+  if (runtime && Array.isArray(runtime.resumeEffects)) runtime.resumeEffects = [];
+  return Object.freeze({ closed, code: 'workspace-mismatch' });
+}
+
+function projectArtifactFingerprintKey(value) {
+  const descriptor = projectLayout.validateArtifactDescriptor(value);
+  return JSON.stringify([
+    descriptor.window,
+    descriptor.path,
+    descriptor.kind,
+    descriptor.fingerprint.size,
+    descriptor.fingerprint.mtime,
+    descriptor.fingerprint.sha256,
+    descriptor.openMode || null
+  ]);
+}
+
+function verifiedProjectArtifactReadback(first, second) {
+  const read = (value) => {
+    if (!isPlainObject(value) || !isPlainObject(value.internal)
+        || Object.keys(value).length !== 2
+        || Object.keys(value.internal).length !== 1
+        || typeof value.internal.absolutePath !== 'string'
+        || !path.isAbsolute(value.internal.absolutePath)
+        || /[\u0000-\u001f\u007f]/.test(value.internal.absolutePath)) {
+      const error = new Error('产物安全读取结果无效');
+      error.code = projectArtifacts.ERROR_CODES.changed;
+      throw error;
     }
-    return surface;
+    return Object.freeze({
+      internal: Object.freeze({ absolutePath: value.internal.absolutePath }),
+      descriptor: projectLayout.validateArtifactDescriptor(value.descriptor)
+    });
   };
-  const reviewIdentity = (snapshot, selector) => {
-    const identity = contextPocWorkspaceProjectIdentity(snapshot, selector);
-    const projects = Array.isArray(snapshot && snapshot.projects) ? snapshot.projects : [];
-    const card = projects.find((project) => isPlainObject(project)
-      && project.contentRef === identity.contentRef
-      && project.projectToken === identity.projectToken);
-    if (!card || card.stage !== 'review') {
-      throw new Error('只能在复盘项目中读取或固化打法');
-    }
-    return identity;
-  };
-  const shootIdentity = (snapshot, selector) => {
-    const identity = contextPocWorkspaceProjectIdentity(snapshot, selector);
-    const projects = Array.isArray(snapshot && snapshot.projects) ? snapshot.projects : [];
-    const card = projects.find((project) => isPlainObject(project)
-      && project.contentRef === identity.contentRef
-      && project.projectToken === identity.projectToken);
-    if (!card || card.stage !== 'shoot') {
-      throw new Error('只能从真实口播稿打开拍摄现场或历史');
-    }
-    return identity;
-  };
-  const readBoundShootSource = async (identity) => {
-    const current = await shootSource(identity.projectToken);
-    const runtime = current && current.runtime;
-    const record = current && current.record;
-    const documentValue = current && current.document;
-    if (!runtime || !Number.isSafeInteger(runtime.epoch) || runtime.epoch < 0
-        || !record || !documentValue
-        || typeof record.relativePath !== 'string'
-        || typeof record.hash !== 'string'
-        || typeof documentValue.relativePath !== 'string'
-        || typeof documentValue.hash !== 'string'
-        || record.relativePath !== documentValue.relativePath
-        || record.hash !== documentValue.hash
-        || videoContentRef(runtime.epoch, record.relativePath) !== identity.contentRef
-        || videoProjectToken(runtime.epoch, record.relativePath, record.hash)
-          !== identity.projectToken) {
-      throw contextPocWorkspaceOperationError(
-        'ERR_CONTEXT_PROJECT_STALE', '拍摄来源身份已变化'
-      );
-    }
-    if (record.stage !== 'shoot' || documentValue.stage !== 'shoot'
-        || !record.relativePath.startsWith('03_口播稿/')) {
-      throw new Error('拍摄现场只接受 03_口播稿 中的真实口播稿');
-    }
-    return current;
-  };
+  const left = read(first);
+  const right = read(second);
+  if (left.internal.absolutePath !== right.internal.absolutePath
+      || projectArtifactFingerprintKey(left.descriptor)
+        !== projectArtifactFingerprintKey(right.descriptor)) {
+    const error = new Error('产物指纹回读不一致');
+    error.code = projectArtifacts.ERROR_CODES.changed;
+    throw error;
+  }
   return Object.freeze({
-    'catalog.read': Object.freeze({
-      validate: (input) => contextPocWorkspaceFilePageInput(input, 4),
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        const snapshot = catalog();
-        const projects = Array.isArray(snapshot.projects) ? snapshot.projects : [];
-        const page = [];
-        for (let cursor = input.cursor;
-          cursor < projects.length && page.length < input.limit; cursor += 1) {
-          const candidate = [...page, projects[cursor]];
-          const projected = contextPocWorkspaceCatalogResult({
-            kind: 'catalog', generation: snapshot.generation,
-            projectCount: projects.length, cursor: input.cursor,
-            nextCursor: input.cursor + candidate.length < projects.length
-              ? input.cursor + candidate.length : null,
-            projects: candidate
-          });
-          if (Buffer.byteLength(JSON.stringify(projected), 'utf8') > 5600 && page.length) break;
-          page.push(projects[cursor]);
-        }
-        const next = input.cursor + page.length;
-        return {
-          kind: 'catalog', generation: snapshot.generation,
-          projectCount: projects.length, cursor: input.cursor,
-          nextCursor: next < projects.length ? next : null,
-          projects: page
-        };
-      },
-      redact: contextPocWorkspaceCatalogResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'document.read': Object.freeze({
-      validate: contextPocWorkspaceFileProjectInput,
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        const surface = document(input.projectToken);
-        const page = surface.blocks.slice(input.cursor, input.cursor + input.limit).map((block) => {
-          const clipped = contextPocUtf8Clip(block.text, 1800);
-          return {
-            blockToken: block.blockToken,
-            kind: block.kind,
-            text: clipped.text,
-            textTruncated: clipped.truncated,
-            startLine: block.startLine,
-            endLine: block.endLine
-          };
-        });
-        const next = input.cursor + page.length;
-        return {
-          kind: 'document', projectToken: surface.projectToken,
-          title: surface.title, stage: surface.stage, stageLabel: surface.stageLabel,
-          blockCount: surface.blockCount, cursor: input.cursor,
-          nextCursor: next < surface.blocks.length ? next : null,
-          truncated: surface.truncated === true || next < surface.blockCount
-            || page.some((block) => block.textTruncated),
-          blocks: page
-        };
-      },
-      redact: contextPocWorkspaceDocumentResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'block.action.prepare': Object.freeze({
-      validate: contextPocWorkspaceFileBlockPrepareInput,
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        const identity = contextPocWorkspaceProjectIdentity(catalog(), {
-          projectToken: input.projectToken
-        });
-        const prepared = contextPocWorkspaceActionPrepareResult(
-          await blockAction(input, {
-            deliveryTargetRef: context.deliveryTargetRef || null
-          })
-        );
-        const latest = contextPocWorkspaceProjectIdentity(catalog(), {
-          contentRef: identity.contentRef
-        });
-        if (latest.projectToken !== identity.projectToken) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_CONTEXT_PROJECT_STALE', '内容块在预检期间已变化，请重新打开'
-          );
-        }
-        if (prepared.state === 'error') {
-          return {
-            kind: 'preflight', ...identity,
-            blockToken: input.blockToken, action: input.action, state: 'error',
-            preflightToken: null, targetLabel: null, workspaceLabel: null,
-            workspaceMatch: null, targetRunning: null, eventTracking: null,
-            expiresAt: null, message: prepared.message
-          };
-        }
-        return {
-          kind: 'preflight', ...identity,
-          blockToken: input.blockToken, action: input.action, state: 'ready',
-          preflightToken: prepared.preflightToken,
-          targetLabel: prepared.targetLabel,
-          workspaceLabel: prepared.workspaceLabel,
-          workspaceMatch: prepared.workspaceMatch,
-          targetRunning: prepared.targetRunning,
-          eventTracking: prepared.eventTracking,
-          expiresAt: prepared.expiresAt,
-          message: null
-        };
-      },
-      redact: contextPocWorkspaceBlockPrepareResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'block.action.submit': Object.freeze({
-      validate: contextPocWorkspaceFileBlockSubmitInput,
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        const identity = contextPocWorkspaceProjectIdentity(catalog(), {
-          projectToken: input.projectToken
-        });
-        const submitted = contextPocWorkspaceActionSubmitResult(
-          await blockAction(input, {
-            deliveryTargetRef: context.deliveryTargetRef || null
-          })
-        );
-        if (submitted.state === 'error') {
-          return {
-            kind: 'submission', ...identity,
-            blockToken: input.blockToken, action: input.action,
-            state: 'error', reason: null, target: null, receiptId: null,
-            message: submitted.message
-          };
-        }
-        let latest;
-        try {
-          latest = contextPocWorkspaceProjectIdentity(catalog(), {
-            contentRef: identity.contentRef
-          });
-        } catch (_error) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_OPERATION_OUTCOME_UNKNOWN',
-            '动作已提交，但当前内容身份无法确认'
-          );
-        }
-        return {
-          kind: 'submission', ...latest,
-          blockToken: input.blockToken, action: input.action,
-          state: submitted.state, reason: submitted.reason,
-          target: submitted.target,
-          receiptId: submitted.receiptId || null,
-          message: null
-        };
-      },
-      redact: contextPocWorkspaceBlockSubmitResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'overview.read': Object.freeze({
-      validate: contextPocWorkspaceFileOverviewInput,
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        const surface = overview(input.projectToken);
-        if (!isPlainObject(surface) || surface.projectToken !== input.projectToken
-            || typeof surface.contentRef !== 'string'
-            || !/^content-[a-f0-9]{24}$/.test(surface.contentRef)) {
-          const error = new Error('项目概览身份已变化');
-          error.code = 'ERR_CONTEXT_PROJECT_STALE';
-          throw error;
-        }
-        const angles = Array.isArray(surface && surface.angles) ? surface.angles : [];
-        const hooks = Array.isArray(surface && surface.hooks) ? surface.hooks : [];
-        const candidates = [
-          ...angles.map((value) => ({
-            field: 'angle', value, selected: value === surface.angle
-          })),
-          ...hooks.map((value) => ({
-            field: 'hook', value, selected: value === surface.hook
-          }))
-        ];
-        if (candidates.length > 64 || input.cursor > candidates.length) {
-          const error = new Error('项目概览候选页已变化');
-          error.code = 'ERR_CONTEXT_PROJECT_STALE';
-          throw error;
-        }
-        const page = [];
-        for (let cursor = input.cursor;
-          cursor < candidates.length && page.length < input.limit; cursor += 1) {
-          const candidate = [...page, candidates[cursor]];
-          const projected = contextPocWorkspaceOverviewResult({
-            kind: 'overview',
-            contentRef: surface.contentRef,
-            projectToken: surface.projectToken,
-            title: surface.title,
-            stage: surface.stage,
-            stageLabel: surface.stageLabel,
-            status: surface.status,
-            updated: surface.updated,
-            decision: surface.decision,
-            angle: surface.angle,
-            hook: surface.hook,
-            candidateCount: candidates.length,
-            cursor: input.cursor,
-            nextCursor: input.cursor + candidate.length < candidates.length
-              ? input.cursor + candidate.length : null,
-            candidates: candidate
-          });
-          if (Buffer.byteLength(JSON.stringify(projected), 'utf8') > 5600 && page.length) break;
-          page.push(candidates[cursor]);
-        }
-        const next = input.cursor + page.length;
-        return {
-          kind: 'overview',
-          contentRef: surface.contentRef,
-          projectToken: surface.projectToken,
-          title: surface.title,
-          stage: surface.stage,
-          stageLabel: surface.stageLabel,
-          status: surface.status,
-          updated: surface.updated,
-          decision: surface.decision,
-          angle: surface.angle,
-          hook: surface.hook,
-          candidateCount: candidates.length,
-          cursor: input.cursor,
-          nextCursor: next < candidates.length ? next : null,
-          candidates: page
-        };
-      },
-      redact: contextPocWorkspaceOverviewResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'topic.choose': Object.freeze({
-      validate: contextPocWorkspaceFileTopicInput,
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        const before = catalog();
-        const current = Array.isArray(before && before.projects)
-          ? before.projects.find((project) => project.projectToken === input.projectToken)
-          : null;
-        if (!current || typeof current.contentRef !== 'string'
-            || !/^content-[a-f0-9]{24}$/.test(current.contentRef)) {
-          const error = new Error('这张项目卡已过期，请重新选择');
-          error.code = 'ERR_CONTEXT_PROJECT_STALE';
-          throw error;
-        }
-        const result = await chooseTopic(input);
-        let after;
-        try { after = catalog(); }
-        catch (_error) {
-          const error = new Error('写回已执行，但刷新后的项目身份无法确认');
-          error.code = 'ERR_OPERATION_OUTCOME_UNKNOWN';
-          throw error;
-        }
-        const replacement = Array.isArray(after && after.projects)
-          ? after.projects.find((project) => project.contentRef === current.contentRef)
-          : null;
-        if (!replacement || typeof replacement.projectToken !== 'string'
-            || !/^project-[a-f0-9]{24}$/.test(replacement.projectToken)
-            || replacement.projectToken === input.projectToken
-            || replacement[input.field] !== input.value
-            || typeof replacement.updated !== 'string' || !replacement.updated) {
-          const error = new Error('写回已执行，但刷新后的项目身份无法确认');
-          error.code = 'ERR_OPERATION_OUTCOME_UNKNOWN';
-          throw error;
-        }
-        return {
-          kind: 'mutation', changed: true,
-          contentRef: current.contentRef,
-          projectToken: replacement.projectToken,
-          field: input.field,
-          value: input.value,
-          updated: safeText(replacement.updated, '', 64),
-          message: safeText(result && result.text, '已写回项目文件。', 160)
-        };
-      },
-      redact: contextPocWorkspaceMutationResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'proposal.read': Object.freeze({
-      validate: contextPocWorkspaceFileProposalReadInput,
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        const identity = contextPocWorkspaceProjectIdentity(catalog(), {
-          contentRef: input.contentRef
-        });
-        const candidate = await proposalSurface(input.contentRef);
-        const bound = candidate && candidate.contentRef === input.contentRef
-          ? candidate : null;
-        const latest = contextPocWorkspaceProjectIdentity(catalog(), {
-          contentRef: input.contentRef
-        });
-        const result = contextPocWorkspaceProposalResult(
-          contextPocWorkspaceProposalProjection(
-            latest, bound
-          )
-        );
-        if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 5600) {
-          throw new Error('建议卡投影超过安全上限');
-        }
-        return result;
-      },
-      redact: contextPocWorkspaceProposalResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'proposal.decide': Object.freeze({
-      validate: contextPocWorkspaceFileProposalDecisionInput,
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        const identity = contextPocWorkspaceProjectIdentity(catalog(), {
-          contentRef: input.contentRef
-        });
-        const candidate = await proposalSurface(input.contentRef);
-        const surface = candidate && candidate.contentRef === input.contentRef
-          ? candidate : null;
-        const visible = surface ? contextPocWorkspaceProposalResult(
-          contextPocWorkspaceProposalProjection(identity, surface)
-        ) : null;
-        if (!visible || visible.proposalToken !== input.proposalToken
-            || (input.decision === 'adopt'
-              && (visible.status !== 'ready' || visible.canAdopt !== true
-                || visible.proposalRevisionToken !== input.proposalRevisionToken))) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_CONTEXT_PROJECT_STALE', '这张建议卡已变化，请重新查看'
-          );
-        }
-        const result = await proposalDecision({
-          proposalToken: input.proposalToken,
-          decision: input.decision,
-          ...(input.decision === 'adopt'
-            ? { proposalRevisionToken: input.proposalRevisionToken } : {})
-        });
-        if (!contextPocExact(result, ['kind', 'text'])
-            || result.kind !== 'ok' || typeof result.text !== 'string'
-            || !result.text) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_OPERATION_OUTCOME_UNKNOWN',
-            '建议决策已执行，但结果无法确认'
-          );
-        }
-        let latest;
-        try {
-          latest = contextPocWorkspaceProjectIdentity(catalog(), {
-            contentRef: input.contentRef
-          });
-        } catch (_error) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_OPERATION_OUTCOME_UNKNOWN',
-            '建议决策已执行，但当前内容身份无法确认'
-          );
-        }
-        let revisionToken = null;
-        if (input.decision === 'adopt') {
-          let adoptedSurface;
-          try {
-            const candidateAfter = await proposalSurface(input.contentRef);
-            adoptedSurface = candidateAfter
-              && candidateAfter.contentRef === input.contentRef ? candidateAfter : null;
-          }
-          catch (_error) { adoptedSurface = null; }
-          if (latest.projectToken === identity.projectToken
-              || !adoptedSurface || adoptedSurface.status !== 'adopted'
-              || typeof adoptedSurface.revisionToken !== 'string'
-              || !/^revision-[a-f0-9]{24}$/.test(adoptedSurface.revisionToken)) {
-            throw contextPocWorkspaceOperationError(
-              'ERR_OPERATION_OUTCOME_UNKNOWN',
-              '原稿采用已执行，但新版本与撤销快照无法确认'
-            );
-          }
-          revisionToken = adoptedSurface.revisionToken;
-        }
-        return {
-          kind: 'decision', ...latest,
-          decision: input.decision,
-          changed: input.decision === 'adopt',
-          revisionToken,
-          message: safeText(result && result.text,
-            input.decision === 'adopt' ? '已采用这一块。' : '已退回建议。', 160)
-        };
-      },
-      redact: contextPocWorkspaceProposalDecisionResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'proposal.undo': Object.freeze({
-      validate: contextPocWorkspaceFileProposalUndoInput,
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        const identity = contextPocWorkspaceProjectIdentity(catalog(), {
-          contentRef: input.contentRef
-        });
-        const candidate = await proposalSurface(input.contentRef);
-        const surface = candidate && candidate.contentRef === input.contentRef
-          ? candidate : null;
-        if (!surface || surface.status !== 'adopted'
-            || surface.canUndo !== true
-            || surface.revisionToken !== input.revisionToken) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_CONTEXT_PROJECT_STALE', '这份撤销快照已变化，请重新查看'
-          );
-        }
-        const result = await proposalUndo({ revisionToken: input.revisionToken });
-        if (!contextPocExact(result, ['kind', 'text'])
-            || result.kind !== 'ok' || typeof result.text !== 'string'
-            || !result.text) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_OPERATION_OUTCOME_UNKNOWN',
-            '撤销已执行，但结果无法确认'
-          );
-        }
-        let latest;
-        try {
-          latest = contextPocWorkspaceProjectIdentity(catalog(), {
-            contentRef: input.contentRef
-          });
-        } catch (_error) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_OPERATION_OUTCOME_UNKNOWN',
-            '撤销已执行，但当前内容身份无法确认'
-          );
-        }
-        if (latest.projectToken === identity.projectToken) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_OPERATION_OUTCOME_UNKNOWN',
-            '撤销已执行，但最新文件版本无法确认'
-          );
-        }
-        return {
-          kind: 'undo', ...latest, changed: true,
-          message: safeText(result && result.text, '已撤销上一次块级采用。', 160)
-        };
-      },
-      redact: contextPocWorkspaceProposalUndoResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'publish.read': Object.freeze({
-      validate: contextPocWorkspaceFilePublishInput,
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        const identity = contextPocWorkspaceProjectIdentity(catalog(), {
-          contentRef: input.contentRef,
-          projectToken: input.projectToken
-        });
-        const surface = await readBoundPublishSurface(identity);
-        const latest = contextPocWorkspaceProjectIdentity(catalog(), {
-          contentRef: input.contentRef,
-          projectToken: input.projectToken
-        });
-        if (latest.contentRef !== surface.contentRef
-            || latest.projectToken !== surface.projectToken) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_CONTEXT_PROJECT_STALE', '发布页读取期间内容已变化'
-          );
-        }
-        return surface;
-      },
-      redact: contextPocWorkspacePublishSurface,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'publish.create': Object.freeze({
-      validate: contextPocWorkspaceFilePublishInput,
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        const sourceIdentity = contextPocWorkspaceProjectIdentity(catalog(), {
-          contentRef: input.contentRef,
-          projectToken: input.projectToken
-        });
-        const sourceSurface = await readBoundPublishSurface(sourceIdentity);
-        if (!sourceSurface.canCreate
-            || !['script', 'shoot', 'edit'].includes(sourceSurface.stage)) {
-          throw new Error('只能从脚本、拍摄或剪辑文档创建发布检查单');
-        }
-        const actionResult = await publishAction({
-          type: 'create',
-          contentRef: sourceIdentity.contentRef,
-          projectToken: sourceIdentity.projectToken
-        });
-        if (!contextPocExact(actionResult, [
-          'kind', 'created', 'contentRef', 'projectToken', 'text'
-        ]) || actionResult.kind !== 'ok' || typeof actionResult.created !== 'boolean'
-            || typeof actionResult.contentRef !== 'string'
-            || !/^content-[a-f0-9]{24}$/.test(actionResult.contentRef)
-            || typeof actionResult.projectToken !== 'string'
-            || !/^project-[a-f0-9]{24}$/.test(actionResult.projectToken)
-            || typeof actionResult.text !== 'string' || !actionResult.text) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_OPERATION_OUTCOME_UNKNOWN', '发布检查单创建后结果无法确认'
-          );
-        }
-        let latestSource;
-        let checklistIdentity;
-        let surface;
-        try {
-          const after = catalog();
-          latestSource = contextPocWorkspaceProjectIdentity(after, {
-            contentRef: sourceIdentity.contentRef
-          });
-          checklistIdentity = contextPocWorkspaceProjectIdentity(after, {
-            contentRef: actionResult.contentRef,
-            projectToken: actionResult.projectToken
-          });
-          surface = await readBoundPublishSurface(checklistIdentity);
-        } catch (_error) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_OPERATION_OUTCOME_UNKNOWN', '发布检查单创建后身份无法确认'
-          );
-        }
-        if (latestSource.projectToken !== sourceIdentity.projectToken
-            || checklistIdentity.contentRef === sourceIdentity.contentRef
-            || surface.stage !== 'publish' || !surface.checklist
-            || (actionResult.created && !surface.checklist.structureValid)) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_OPERATION_OUTCOME_UNKNOWN', '发布检查单创建后状态无法确认'
-          );
-        }
-        return {
-          kind: 'publish-create',
-          created: actionResult.created,
-          sourceContentRef: sourceIdentity.contentRef,
-          sourceProjectToken: latestSource.projectToken,
-          surface,
-          message: safeText(actionResult.text, '发布检查单已准备。', 160)
-        };
-      },
-      redact: contextPocWorkspacePublishCreateResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'publish.update': Object.freeze({
-      validate: contextPocWorkspaceFilePublishUpdateInput,
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        const identity = contextPocWorkspaceProjectIdentity(catalog(), {
-          contentRef: input.contentRef,
-          projectToken: input.projectToken
-        });
-        const before = await readBoundPublishSurface(identity);
-        if (before.stage !== 'publish' || !before.checklist
-            || before.checklist.structureValid !== true) {
-          throw new Error('发布检查单结构不完整，已停止写入');
-        }
-        if (input.type === 'light' && input.lightId === 'published'
-            && input.checked && !before.checklist.ready) {
-          throw new Error('发布前置灯与 AI 内容状态还没齐');
-        }
-        if (input.type === 'light' && input.lightId === 'ai-label'
-            && input.checked && before.checklist.aiDisclosure !== 'ai') {
-          throw new Error('只有确认含 AI 生成内容后才能点亮 AI 标识灯');
-        }
-        const actionResult = await publishAction(input);
-        if (!contextPocExact(actionResult, ['kind', 'text'])
-            || actionResult.kind !== 'ok'
-            || typeof actionResult.text !== 'string' || !actionResult.text) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_OPERATION_OUTCOME_UNKNOWN', '发布页写回后结果无法确认'
-          );
-        }
-        let latest;
-        let surface;
-        try {
-          latest = contextPocWorkspaceProjectIdentity(catalog(), {
-            contentRef: identity.contentRef
-          });
-          surface = await readBoundPublishSurface(latest);
-        } catch (_error) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_OPERATION_OUTCOME_UNKNOWN', '发布页写回后身份无法确认'
-          );
-        }
-        const beforePublishedLight = before.checklist.lights
-          .find((light) => light.id === 'published');
-        const afterPublishedLight = surface.checklist && surface.checklist.lights
-          .find((light) => light.id === 'published');
-        let reflected = latest.projectToken !== identity.projectToken
-          && surface.stage === 'publish' && surface.checklist
-          && typeof surface.updated === 'string' && surface.updated
-          && surface.updated !== before.updated;
-        if (input.type === 'light') {
-          const beforeLight = before.checklist.lights.find((light) => light.id === input.lightId);
-          const afterLight = surface.checklist
-            && surface.checklist.lights.find((light) => light.id === input.lightId);
-          reflected = reflected && Boolean(afterLight && afterLight.checked === input.checked);
-          if (input.lightId === 'published') {
-            reflected = reflected && surface.checklist.published === input.checked;
-          } else if (beforeLight && beforeLight.checked !== input.checked
-              && beforePublishedLight && beforePublishedLight.checked) {
-            reflected = reflected && Boolean(afterPublishedLight
-              && !afterPublishedLight.checked && !surface.checklist.published);
-          }
-        } else {
-          reflected = reflected && surface.checklist.aiDisclosure === input.value;
-          const beforeAiLight = before.checklist.lights
-            .find((light) => light.id === 'ai-label');
-          const aiPrerequisiteChanged = before.checklist.aiDisclosure !== input.value
-            || (input.value !== 'ai' && beforeAiLight && beforeAiLight.checked);
-          if (input.value !== 'ai') {
-            const aiLight = surface.checklist.lights.find((light) => light.id === 'ai-label');
-            reflected = reflected && Boolean(aiLight && !aiLight.checked);
-          }
-          if (aiPrerequisiteChanged
-              && beforePublishedLight && beforePublishedLight.checked) {
-            reflected = reflected && Boolean(afterPublishedLight
-              && !afterPublishedLight.checked && !surface.checklist.published);
-          }
-        }
-        if (!reflected) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_OPERATION_OUTCOME_UNKNOWN', '发布页写回已执行，但新版本无法确认'
-          );
-        }
-        return {
-          kind: 'publish-mutation', changed: true, surface,
-          message: safeText(actionResult.text, '发布检查单已写回。', 160)
-        };
-      },
-      redact: contextPocWorkspacePublishMutationResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'review.tactics.read': Object.freeze({
-      validate: contextPocWorkspaceFileTacticsInput,
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        const identity = reviewIdentity(catalog(), {
-          contentRef: input.contentRef,
-          projectToken: input.projectToken
-        });
-        const rawCollection = await tacticsCollection();
-        if (!contextPocExact(rawCollection, [
-          'collectionToken', 'complete', 'tactics'
-        ]) || typeof rawCollection.collectionToken !== 'string'
-            || !/^collection-[a-f0-9]{24}$/.test(rawCollection.collectionToken)
-            || typeof rawCollection.complete !== 'boolean'
-            || !Array.isArray(rawCollection.tactics)
-            || rawCollection.tactics.length > 512) {
-          throw new Error('打法库目录结果无效');
-        }
-        const tactics = rawCollection.tactics.map(contextPocWorkspaceTactic);
-        if (new Set(tactics.map((item) => item.contentRef)).size !== tactics.length
-            || new Set(tactics.map((item) => item.projectToken)).size !== tactics.length) {
-          throw new Error('打法库跨页内容身份重复');
-        }
-        if (input.cursor > tactics.length
-            || (input.cursor > 0
-              && input.collectionToken !== rawCollection.collectionToken)) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_CONTEXT_PROJECT_STALE', '打法库分页期间已变化'
-          );
-        }
-        const page = [];
-        for (let cursor = input.cursor;
-          cursor < tactics.length && page.length < input.limit; cursor += 1) {
-          const candidate = [...page, tactics[cursor]];
-          const next = input.cursor + candidate.length;
-          const projected = {
-            kind: 'tactics', ...identity,
-            collectionToken: rawCollection.collectionToken,
-            itemCount: tactics.length,
-            complete: rawCollection.complete,
-            cursor: input.cursor,
-            nextCursor: next < tactics.length ? next : null,
-            tactics: candidate
-          };
-          if (Buffer.byteLength(JSON.stringify(projected), 'utf8') > 5600
-              && page.length) break;
-          page.push(tactics[cursor]);
-        }
-        const latest = reviewIdentity(catalog(), {
-          contentRef: identity.contentRef,
-          projectToken: identity.projectToken
-        });
-        const next = input.cursor + page.length;
-        return {
-          kind: 'tactics', ...latest,
-          collectionToken: rawCollection.collectionToken,
-          itemCount: tactics.length,
-          complete: rawCollection.complete,
-          cursor: input.cursor,
-          nextCursor: next < tactics.length ? next : null,
-          tactics: page
-        };
-      },
-      redact: contextPocWorkspaceTacticsResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'review.solidify': Object.freeze({
-      validate: contextPocWorkspaceFileReviewIdentityInput,
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        const sourceIdentity = reviewIdentity(catalog(), {
-          contentRef: input.contentRef,
-          projectToken: input.projectToken
-        });
-        const actionResult = await solidifyAction(sourceIdentity);
-        if (!contextPocExact(actionResult, [
-          'kind', 'created', 'contentRef', 'projectToken', 'text'
-        ]) || actionResult.kind !== 'ok' || typeof actionResult.created !== 'boolean'
-            || typeof actionResult.contentRef !== 'string'
-            || !/^content-[a-f0-9]{24}$/.test(actionResult.contentRef)
-            || typeof actionResult.projectToken !== 'string'
-            || !/^project-[a-f0-9]{24}$/.test(actionResult.projectToken)
-            || typeof actionResult.text !== 'string' || !actionResult.text) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_OPERATION_OUTCOME_UNKNOWN', '打法固化后结果无法确认'
-          );
-        }
-        let latestSource;
-        let tacticIdentity;
-        let tactic;
-        try {
-          const after = catalog();
-          latestSource = reviewIdentity(after, {
-            contentRef: sourceIdentity.contentRef
-          });
-          tacticIdentity = contextPocWorkspaceProjectIdentity(after, {
-            contentRef: actionResult.contentRef,
-            projectToken: actionResult.projectToken
-          });
-          tactic = contextPocWorkspaceTactic(await tacticSurface(
-            tacticIdentity, sourceIdentity
-          ));
-        } catch (_error) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_OPERATION_OUTCOME_UNKNOWN', '打法固化后身份无法确认'
-          );
-        }
-        if (latestSource.projectToken !== sourceIdentity.projectToken
-            || tacticIdentity.contentRef === sourceIdentity.contentRef
-            || tacticIdentity.projectToken === sourceIdentity.projectToken
-            || tactic.contentRef !== tacticIdentity.contentRef
-            || tactic.projectToken !== tacticIdentity.projectToken) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_OPERATION_OUTCOME_UNKNOWN', '打法固化后来源绑定无法确认'
-          );
-        }
-        return {
-          kind: 'review-solidify', created: actionResult.created,
-          sourceContentRef: sourceIdentity.contentRef,
-          sourceProjectToken: latestSource.projectToken,
-          tactic,
-          message: actionResult.created
-            ? '已固化进打法库；没有伪造使用次数或胜率。'
-            : '已复用这一复盘版本的唯一打法。'
-        };
-      },
-      redact: contextPocWorkspaceReviewSolidifyResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'shoot.open': Object.freeze({
-      validate: contextPocWorkspaceFileShootIdentityInput,
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        const identity = shootIdentity(catalog(), {
-          contentRef: input.contentRef,
-          projectToken: input.projectToken
-        });
-        await readBoundShootSource(identity);
-        let disposition;
-        try {
-          disposition = await shootOpenAction(identity);
-        } catch (error) {
-          if (error && ['ERR_CONTEXT_PROJECT_STALE', 'ERR_VIDEO_RUNTIME_STALE',
-            'ERR_VIDEO_ROOT_CHANGED', 'ERR_ROOT_CHANGED', 'ERR_ROOT_INVALID',
-            'ERR_ROOT_UNREADABLE', 'ERR_PATH_CHANGED', 'ERR_PATH_NOT_FOUND',
-            'ERR_PATH_SYMLINK', 'ERR_PATH_OUTSIDE', 'ERR_PATH_NOT_FILE',
-            'ERR_OPERATION_OUTCOME_UNKNOWN'].includes(error.code)) throw error;
-          throw contextPocWorkspaceOperationError(
-            'ERR_OPERATION_OUTCOME_UNKNOWN', '本地拍摄窗已可能收到打开请求'
-          );
-        }
-        if (!contextPocExact(disposition, ['kind', 'state'])
-            || disposition.kind !== 'shoot-open'
-            || !['opened', 'focused', 'busy', 'unavailable'].includes(disposition.state)) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_OPERATION_OUTCOME_UNKNOWN', '本地拍摄窗打开结果无法确认'
-          );
-        }
-        let latest;
-        try {
-          await readBoundShootSource(identity);
-          latest = shootIdentity(catalog(), {
-            contentRef: identity.contentRef,
-            projectToken: identity.projectToken
-          });
-        } catch (error) {
-          if (disposition.state === 'unavailable') throw error;
-          throw contextPocWorkspaceOperationError(
-            'ERR_OPERATION_OUTCOME_UNKNOWN', '打开请求后口播稿身份无法确认'
-          );
-        }
-        return {
-          kind: 'shoot-open', ...latest,
-          state: disposition.state,
-          message: shootingOpenMessage(disposition.state)
-        };
-      },
-      redact: contextPocWorkspaceShootOpenResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'shoot.history.read': Object.freeze({
-      validate: contextPocWorkspaceFileShootHistoryInput,
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        const identity = shootIdentity(catalog(), {
-          contentRef: input.contentRef,
-          projectToken: input.projectToken
-        });
-        await readBoundShootSource(identity);
-        const rawCollection = await shootHistoryCollection();
-        if (!contextPocExact(rawCollection, [
-          'collectionToken', 'complete', 'records'
-        ]) || typeof rawCollection.collectionToken !== 'string'
-            || !/^collection-[a-f0-9]{24}$/.test(rawCollection.collectionToken)
-            || typeof rawCollection.complete !== 'boolean'
-            || !Array.isArray(rawCollection.records)
-            || rawCollection.records.length > 512) {
-          throw new Error('拍摄历史目录结果无效');
-        }
-        const records = rawCollection.records.map(contextPocWorkspaceShootHistoryRecord);
-        if (new Set(records.map((record) => record.recordRef)).size !== records.length) {
-          throw new Error('拍摄历史跨页身份重复');
-        }
-        if (input.cursor > records.length
-            || (input.cursor > 0
-              && input.collectionToken !== rawCollection.collectionToken)) {
-          throw contextPocWorkspaceOperationError(
-            'ERR_CONTEXT_PROJECT_STALE', '拍摄历史分页期间已变化'
-          );
-        }
-        const page = [];
-        for (let cursor = input.cursor;
-          cursor < records.length && page.length < input.limit; cursor += 1) {
-          const candidate = [...page, records[cursor]];
-          const next = input.cursor + candidate.length;
-          const projected = {
-            kind: 'shoot-history', ...identity,
-            collectionToken: rawCollection.collectionToken,
-            itemCount: records.length,
-            complete: rawCollection.complete,
-            cursor: input.cursor,
-            nextCursor: next < records.length ? next : null,
-            records: candidate
-          };
-          if (Buffer.byteLength(JSON.stringify(projected), 'utf8') > 5600
-              && page.length) break;
-          page.push(records[cursor]);
-        }
-        await readBoundShootSource(identity);
-        const latest = shootIdentity(catalog(), {
-          contentRef: identity.contentRef,
-          projectToken: identity.projectToken
-        });
-        const next = input.cursor + page.length;
-        return {
-          kind: 'shoot-history', ...latest,
-          collectionToken: rawCollection.collectionToken,
-          itemCount: records.length,
-          complete: rawCollection.complete,
-          cursor: input.cursor,
-          nextCursor: next < records.length ? next : null,
-          records: page
-        };
-      },
-      redact: contextPocWorkspaceShootHistoryResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'project.action.prepare': Object.freeze({
-      validate: contextPocWorkspaceFileActionPrepareInput,
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        return projectAction(input, {
-          deliveryTargetRef: context.deliveryTargetRef || null
-        });
-      },
-      redact: contextPocWorkspaceActionPrepareResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'project.action.submit': Object.freeze({
-      validate: contextPocWorkspaceFileActionSubmitInput,
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        return projectAction(input, {
-          deliveryTargetRef: context.deliveryTargetRef || null
-        });
-      },
-      redact: contextPocWorkspaceActionSubmitResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'receipts.read': Object.freeze({
-      validate: contextPocWorkspaceFileReceiptsInput,
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        const verified = verifyProject(input.projectToken);
-        if (!verified || !verified.runtime
-            || typeof verified.runtime.rootIdentityKey !== 'string'
-            || !verified.record || typeof verified.record.relativePath !== 'string') {
-          throw new Error('投递回执项目绑定无效');
-        }
-        const projectRelativePath = videoCockpit.safeRelativePath(
-          verified.record.relativePath
-        );
-        const snapshot = receiptSnapshot();
-        if (!contextPocExact(snapshot, ['receipts']) || !Array.isArray(snapshot.receipts)) {
-          throw new Error('投递回执快照无效');
-        }
-        const receipts = [];
-        const related = snapshot.receipts.filter((receipt) => {
-          if (!isPlainObject(receipt)) return false;
-          if (receipt.anchorRef === input.projectToken) return true;
-          const binding = receiptProjectBinding(receipt.receiptId);
-          return isPlainObject(binding)
-            && binding.relativePath === projectRelativePath
-            && binding.rootIdentityKey === verified.runtime.rootIdentityKey;
-        });
-        for (const receipt of related.slice(0, input.limit)) {
-          const candidate = [...receipts, receipt];
-          const projected = contextPocWorkspaceReceiptsResult({
-            kind: 'receipts', projectToken: input.projectToken, receipts: candidate
-          });
-          if (Buffer.byteLength(JSON.stringify(projected), 'utf8') > 5600 && receipts.length) break;
-          receipts.push(receipt);
-        }
-        return {
-          kind: 'receipts',
-          projectToken: input.projectToken,
-          receipts
-        };
-      },
-      redact: contextPocWorkspaceReceiptsResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'receipts.ack': Object.freeze({
-      validate: (input) => Object.freeze(deliveryPulseRequest(input)),
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        return { kind: ackReceipt(input) ? 'ok' : 'stale' };
-      },
-      redact: contextPocWorkspaceReceiptAckResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
-    }),
-    'receipts.open': Object.freeze({
-      validate: (input) => Object.freeze(deliveryResultRequest(input)),
-      async handle({ input, context }) {
-        contextPocAssertWorkspaceOperationCurrent(context);
-        return openReceipt(input);
-      },
-      redact: contextPocWorkspaceReceiptOpenResult,
-      errorCode: contextPocWorkspaceOperationErrorCode
+    [VERIFIED_PROJECT_ARTIFACT]: true,
+    internal: right.internal,
+    descriptor: right.descriptor
+  });
+}
+
+function projectPaneStateWithArtifact(project, descriptor) {
+  if (!isPlainObject(project)) throw new TypeError('project artifact record invalid');
+  const artifact = projectLayout.validateArtifactDescriptor(descriptor);
+  const fallback = Object.prototype.hasOwnProperty.call(
+    projectLayout.PRESETS, project.layoutPreset
+  ) ? project.layoutPreset : 'split-two';
+  const current = projectLayout.ensureTargetWindow(project.paneState, artifact.window, fallback);
+  const index = current.windows.findIndex((item) => item.window === artifact.window);
+  if (index < 0) throw new TypeError('project artifact window missing');
+  const locked = projectLayout.lockArtifact(current.windows[index], artifact);
+  if (locked === current.windows[index] && project.layoutPreset === current.preset) {
+    return Object.freeze({ changed: false, layoutPreset: current.preset, paneState: current });
+  }
+  const windows = current.windows.slice();
+  windows[index] = locked;
+  const paneState = projectLayout.validatePaneState({
+    schemaVersion: projectLayout.SCHEMA_VERSION,
+    preset: current.preset,
+    windows
+  });
+  return Object.freeze({ changed: true, layoutPreset: paneState.preset, paneState });
+}
+
+function projectArtifactNavigationAllowed(candidate, expected) {
+  try {
+    if (typeof candidate !== 'string' || typeof expected !== 'string'
+        || candidate !== expected) return false;
+    const target = new URL(expected);
+    const value = new URL(candidate);
+    const localFile = (entry) => entry.protocol === 'file:'
+      && entry.username === ''
+      && entry.password === ''
+      && entry.host === ''
+      && entry.hostname === ''
+      && entry.port === '';
+    return localFile(target) && localFile(value)
+      && value.href === target.href
+      && value.pathname === target.pathname
+      && value.search === target.search;
+  } catch (_error) { return false; }
+}
+
+function projectArtifactResourceAllowed(candidate, expected) {
+  if (projectArtifactNavigationAllowed(candidate, expected)) return true;
+  try { return ['data:', 'blob:'].includes(new URL(candidate).protocol); }
+  catch (_error) { return false; }
+}
+
+function projectArtifactWindowOptions(partition, parent) {
+  if (typeof partition !== 'string' || !/^whaledock-artifact-[a-f0-9]{32}$/.test(partition)) {
+    throw new TypeError('project artifact partition invalid');
+  }
+  return Object.freeze({
+    width: 1040,
+    height: 760,
+    minWidth: 640,
+    minHeight: 480,
+    show: false,
+    title: '鲸坞 · HTML 产物',
+    ...(parent ? { parent } : {}),
+    webPreferences: Object.freeze({
+      partition,
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      webviewTag: false,
+      navigateOnDragDrop: false
     })
   });
 }
 
+async function prepareProjectArtifactHtmlPreview(artifact, supplied = {}) {
+  if (!artifact || artifact[VERIFIED_PROJECT_ARTIFACT] !== true
+      || artifact.descriptor.kind !== 'html'
+      || artifact.descriptor.openMode !== 'electron-child') {
+    const error = new Error('HTML 预览只接受本轮验证的内存产物');
+    error.code = 'ERR_PROJECT_ARTIFACT_PREVIEW';
+    throw error;
+  }
+  const BrowserWindowClass = supplied.BrowserWindowClass || BrowserWindow;
+  const randomBytes = supplied.randomBytes || crypto.randomBytes;
+  if (typeof BrowserWindowClass !== 'function' || typeof randomBytes !== 'function') {
+    throw new TypeError('project artifact preview dependencies invalid');
+  }
+  const token = randomBytes(16);
+  if (!Buffer.isBuffer(token) || token.length !== 16) {
+    throw new TypeError('project artifact preview random source invalid');
+  }
+  const partition = `whaledock-artifact-${token.toString('hex')}`;
+  const parent = supplied.parent === undefined
+    ? (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null)
+    : supplied.parent;
+  const win = new BrowserWindowClass(projectArtifactWindowOptions(partition, parent));
+  const contents = win && win.webContents;
+  const previewSession = contents && contents.session;
+  const expected = pathToFileURL(artifact.internal.absolutePath).href;
+  const fail = () => {
+    try { if (win && !win.isDestroyed()) win.destroy(); } catch (_error) { /* fail closed */ }
+    const error = new Error('HTML 预览安全能力不可用');
+    error.code = 'ERR_PROJECT_ARTIFACT_PREVIEW';
+    throw error;
+  };
+  if (!contents || typeof contents.on !== 'function'
+      || typeof contents.setWindowOpenHandler !== 'function'
+      || typeof contents.loadURL !== 'function'
+      || !previewSession || typeof previewSession.on !== 'function'
+      || typeof previewSession.setPermissionRequestHandler !== 'function'
+      || typeof previewSession.setPermissionCheckHandler !== 'function'
+      || !previewSession.webRequest
+      || typeof previewSession.webRequest.onBeforeRequest !== 'function') fail();
+
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  const fenceNavigation = (event, url) => {
+    if (!projectArtifactNavigationAllowed(url, expected)) event.preventDefault();
+  };
+  contents.on('will-navigate', fenceNavigation);
+  contents.on('will-redirect', fenceNavigation);
+  contents.on('will-frame-navigate', fenceNavigation);
+  contents.on('will-attach-webview', (event) => event.preventDefault());
+  previewSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+  previewSession.setPermissionCheckHandler(() => false);
+  if (typeof previewSession.setDevicePermissionHandler === 'function') {
+    previewSession.setDevicePermissionHandler(() => false);
+  }
+  previewSession.on('will-download', (event) => event.preventDefault());
+  previewSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
+    callback({ cancel: !projectArtifactResourceAllowed(details.url, expected) });
+  });
+  projectArtifactPreviewWindows.add(win);
+  if (typeof win.once === 'function') {
+    win.once('closed', () => projectArtifactPreviewWindows.delete(win));
+  }
+  try { await contents.loadURL(expected); }
+  catch (error) {
+    projectArtifactPreviewWindows.delete(win);
+    try { if (!win.isDestroyed()) win.destroy(); } catch (_destroyError) { /* fail closed */ }
+    const wrapped = new Error('HTML 预览载入失败');
+    wrapped.code = 'ERR_PROJECT_ARTIFACT_PREVIEW';
+    wrapped.cause = error;
+    throw wrapped;
+  }
+  return Object.freeze({
+    activate() {
+      if (!win.isDestroyed()) {
+        win.show();
+        if (typeof win.focus === 'function') win.focus();
+      }
+    },
+    destroy() {
+      projectArtifactPreviewWindows.delete(win);
+      if (!win.isDestroyed()) win.destroy();
+    }
+  });
+}
+
+function projectArtifactFailureCode(error) {
+  const value = error && error.code;
+  return typeof value === 'string' && /^[A-Z][A-Z0-9_]{2,63}$/.test(value)
+    ? value : 'ERR_PROJECT_ARTIFACT_UNKNOWN';
+}
+
+function logProjectArtifactFailure(projectId, error, logger = log.line) {
+  const safeId = typeof projectId === 'string' && /^proj_[a-f0-9]{32}$/.test(projectId)
+    ? projectId : 'invalid-project';
+  logger('projects', `artifact scan failed project=${safeId} code=${projectArtifactFailureCode(error)}`);
+}
+
+function liveRegistryProjectArtifactRoot(projectId, store, supplied = {}) {
+  // 产物路径不允许用 supplied.forbiddenRoots 放宽保护策略；
+  // 只透传可测试的 fs/path/platform 与当前 userData 身份。
+  return canonicalRegistryProjectFolder(projectId, {
+    projectStore: store,
+    ...(supplied.fsImpl ? { fsImpl: supplied.fsImpl } : {}),
+    ...(supplied.platform ? { platform: supplied.platform } : {}),
+    ...(supplied.pathImpl ? { pathImpl: supplied.pathImpl } : {}),
+    ...(Object.prototype.hasOwnProperty.call(supplied, 'userData')
+      ? { userData: supplied.userData } : {})
+  }).root;
+}
+
+async function scanCompletedProjectArtifact(projectId, supplied = {}) {
+  const store = supplied.projectStore || requireProjectStore();
+  const readArtifact = supplied.readArtifact || projectArtifacts.readProjectArtifact;
+  const prepareHtmlPreview = supplied.prepareHtmlPreview || prepareProjectArtifactHtmlPreview;
+  const logger = supplied.logger || log.line;
+  // registry 里的 folder 是持久字符串，不是永久能力。每次读取前重新经过
+  // 当前 protected roots + realpath；把 canonical 实根交给 reader 后，即使
+  // 原路径祖先随后被换成 symlink，也不会沿新链接读入受保护目录。
+  const liveRoot = () => liveRegistryProjectArtifactRoot(projectId, store, supplied);
+  let preview = null;
+  try {
+    const initial = store.get(projectId);
+    if (!initial || initial.kind !== 'user' || initial.boundSession === null) {
+      return Object.freeze({ state: 'skipped' });
+    }
+    const binding = initial.boundSession;
+    const first = readArtifact(liveRoot());
+    const second = readArtifact(liveRoot());
+    const artifact = verifiedProjectArtifactReadback(first, second);
+    const current = store.get(projectId);
+    if (!current || current.kind !== 'user' || current.boundSession !== binding) {
+      return Object.freeze({ state: 'stale' });
+    }
+    const next = projectPaneStateWithArtifact(current, artifact.descriptor);
+    if (!next.changed) {
+      return Object.freeze({ state: 'duplicate', fingerprint: projectArtifactFingerprintKey(artifact.descriptor) });
+    }
+    if (artifact.descriptor.kind === 'html') {
+      // HTML 子窗开启前也要求 registry 根仍然有效；失效时不展示旧读回。
+      liveRoot();
+      preview = await prepareHtmlPreview(artifact);
+    }
+    store.update(projectId, {
+      layoutPreset: next.layoutPreset,
+      paneState: next.paneState
+    });
+    if (preview) {
+      try { preview.activate(); }
+      catch (error) {
+        try { preview.destroy(); } catch (_error) { /* 已持久化卡片仍可用 */ }
+        logProjectArtifactFailure(projectId, error, logger);
+      }
+      preview = null;
+    }
+    return Object.freeze({
+      state: 'locked',
+      fingerprint: projectArtifactFingerprintKey(artifact.descriptor)
+    });
+  } catch (error) {
+    if (preview) {
+      try { preview.destroy(); } catch (_error) { /* 预览清理不覆盖原始失败 */ }
+    }
+    logProjectArtifactFailure(projectId, error, logger);
+    return Object.freeze({ state: 'failed', code: projectArtifactFailureCode(error) });
+  }
+}
+
+function scheduleCompletedProjectArtifact(projectId) {
+  if (projectArtifactScans.has(projectId)) return projectArtifactScans.get(projectId);
+  const pending = scanCompletedProjectArtifact(projectId).finally(() => {
+    if (projectArtifactScans.get(projectId) === pending) projectArtifactScans.delete(projectId);
+  });
+  projectArtifactScans.set(projectId, pending);
+  return pending;
+}
+
+function handleProjectConsoleResult(value) {
+  if (!isPlainObject(value) || !Array.isArray(value.doneProjectIds)
+      || value.doneProjectIds.some((item) => typeof item !== 'string')) return Promise.resolve([]);
+  return Promise.allSettled(value.doneProjectIds.map(scheduleCompletedProjectArtifact));
+}
+
+function projectTextPreview(buffer, kind) {
+  if (!Buffer.isBuffer(buffer) || !['markdown', 'text'].includes(kind)) {
+    throw new Error('项目文本预览源无效');
+  }
+  let source;
+  try { source = new TextDecoder('utf-8', { fatal: true }).decode(buffer); }
+  catch (_error) { throw new Error('项目文本预览不是 UTF-8'); }
+  const clipped = contextPocUtf8Clip(source, PROJECT_PANE_PREVIEW_TEXT_BYTES);
+  return Object.freeze({
+    kind,
+    text: clipped.text,
+    truncated: clipped.truncated || Buffer.byteLength(source, 'utf8') < buffer.length
+  });
+}
+
+function projectImagePreview(buffer, supplied = {}) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 1) throw new Error('项目图片预览源无效');
+  // SVG/HTML/多帧容器不进入渲染层；首批只接受有尺寸头且可真实解码的 PNG/JPEG。
+  const header = imageInput.inspectImageHeader(buffer);
+  const images = supplied.nativeImageImpl || nativeImage;
+  if (!images || typeof images.createFromBuffer !== 'function') {
+    throw new Error('项目图片解码器不可用');
+  }
+  const decoded = images.createFromBuffer(buffer);
+  if (!decoded || typeof decoded.isEmpty !== 'function' || decoded.isEmpty()
+      || typeof decoded.getSize !== 'function' || typeof decoded.resize !== 'function') {
+    throw new Error('项目图片无法解码');
+  }
+  const decodedSize = decoded.getSize();
+  if (decodedSize.width !== header.width || decodedSize.height !== header.height) {
+    throw new Error('项目图片解码尺寸不一致');
+  }
+  const encode = (maximum, quality) => {
+    const scale = Math.min(1, maximum / Math.max(decodedSize.width, decodedSize.height));
+    const image = decoded.resize({
+      width: Math.max(1, Math.round(decodedSize.width * scale)),
+      height: Math.max(1, Math.round(decodedSize.height * scale)),
+      quality: 'good'
+    });
+    if (!image || typeof image.toJPEG !== 'function' || typeof image.getSize !== 'function') {
+      throw new Error('项目图片缩略图编码器不可用');
+    }
+    const bytes = image.toJPEG(quality);
+    if (!Buffer.isBuffer(bytes) || bytes.length < 1) throw new Error('项目图片缩略图无效');
+    return { bytes, size: image.getSize() };
+  };
+  let encoded = encode(96, 55);
+  if (encoded.bytes.length > PROJECT_PANE_PREVIEW_IMAGE_BYTES) encoded = encode(64, 45);
+  if (encoded.bytes.length > PROJECT_PANE_PREVIEW_IMAGE_BYTES
+      || !Number.isSafeInteger(encoded.size.width) || encoded.size.width < 1
+      || !Number.isSafeInteger(encoded.size.height) || encoded.size.height < 1) {
+    throw new Error('项目图片缩略图超过安全上限');
+  }
+  return Object.freeze({
+    kind: 'image',
+    dataUrl: `data:image/jpeg;base64,${encoded.bytes.toString('base64')}`,
+    width: encoded.size.width,
+    height: encoded.size.height
+  });
+}
+
+function projectPanePreviews(project, supplied = {}) {
+  const store = supplied.projectStore || requireProjectStore();
+  const readFile = supplied.readFile || projectArtifacts.readProjectFile;
+  const readArtifact = supplied.readArtifact || projectArtifacts.readProjectArtifact;
+  if (!project || typeof project.id !== 'string' || project.kind !== 'user'
+      || project.paneState === null) return Object.freeze([]);
+  let pane;
+  try {
+    pane = projectLayout.validatePaneState(project.paneState);
+  } catch (_error) { return Object.freeze([]); }
+  // 根目录只能由 main-only store 身份解析，页面 relativeRef 永不参与选根。
+  // 每个 project-artifacts reader 调用前都现场回读，阻断多标签预览期间的祖先链接漂移。
+  const liveRoot = () => liveRegistryProjectArtifactRoot(project.id, store, supplied);
+  const previews = [];
+  for (const window of pane.windows) {
+    for (const tab of window.tabs) {
+      if (previews.length >= PROJECT_PANE_PREVIEW_LIMIT) return Object.freeze(previews);
+      let kind = null;
+      let relativePath = null;
+      let expectedFingerprint = null;
+      try {
+        if (['markdown', 'text', 'image'].includes(tab.type)) {
+          kind = tab.type;
+          relativePath = tab.path;
+        } else if (tab.type === 'artifact'
+            && ['markdown', 'text', 'image'].includes(tab.descriptor.kind)) {
+          const verified = readArtifact(liveRoot());
+          if (JSON.stringify(verified.descriptor) !== JSON.stringify(tab.descriptor)) continue;
+          kind = tab.descriptor.kind;
+          relativePath = tab.descriptor.path;
+          expectedFingerprint = tab.descriptor.fingerprint;
+        } else continue;
+        const source = readFile(liveRoot(), relativePath, kind);
+        if (expectedFingerprint
+            && JSON.stringify(source.fingerprint) !== JSON.stringify(expectedFingerprint)) continue;
+        const preview = kind === 'image'
+          ? projectImagePreview(source.buffer, supplied)
+          : projectTextPreview(source.buffer, kind);
+        const next = Object.freeze({ window: window.window, tabId: tab.id, preview });
+        if (Buffer.byteLength(JSON.stringify([...previews, next]), 'utf8')
+            > PROJECT_PANE_PREVIEW_TOTAL_BYTES) return Object.freeze(previews);
+        previews.push(next);
+      } catch (_error) {
+        // 单个文件缺失、过大、软链、竞态或解码失败只让该预览不可用；
+        // 不下发路径/内容，也不让项目本身打不开。
+      }
+    }
+  }
+  return Object.freeze(previews);
+}
+
+function closeProjectArtifactPreviews() {
+  for (const win of projectArtifactPreviewWindows) {
+    try { if (!win.isDestroyed()) win.destroy(); } catch (_error) { /* 退出继续 */ }
+  }
+  projectArtifactPreviewWindows.clear();
+}
+
+function managedProjectTemplateSource(templateId, supplied = {}) {
+  if (typeof templateId !== 'string' || !/^(?:builtin|user):[^\\/:*?"<>|\u0000-\u001f]{1,64}$/.test(templateId)) {
+    const error = new Error('项目模板 id 无效');
+    error.code = 'ERR_PROJECT_TEMPLATE_INVALID';
+    throw error;
+  }
+  const packages = Array.isArray(supplied.packages)
+    ? supplied.packages
+    : listAvailableWorkbenches({ refresh: true }).packages;
+  const pkg = workbenches.selectWorkbench(packages, templateId);
+  if (!pkg) {
+    const error = new Error('找不到受管项目模板');
+    error.code = 'ERR_PROJECT_TEMPLATE_NOT_FOUND';
+    throw error;
+  }
+  const template = projectTemplates.projectTemplateFromWorkbench(pkg);
+  if (template.templateId !== templateId) {
+    const error = new Error('项目模板身份不一致');
+    error.code = 'ERR_PROJECT_TEMPLATE_INVALID';
+    throw error;
+  }
+  if (typeof pkg.dir === 'string' && pkg.dir
+      && JSON.stringify(template.actions).includes(pkg.dir)) {
+    const error = new Error('项目模板 action 含包路径');
+    error.code = 'ERR_PROJECT_TEMPLATE_INVALID';
+    throw error;
+  }
+  return Object.freeze({ pkg, template });
+}
+
+function managedProjectTemplate(templateId, supplied = {}) {
+  return managedProjectTemplateSource(templateId, supplied).template;
+}
+
+function projectTemplateActionsFor(templateId, supplied = {}) {
+  if (templateId === null || templateId === undefined) return Object.freeze([]);
+  return managedProjectTemplate(templateId, supplied).actions;
+}
+
+function projectTemplateCatalog(supplied = {}) {
+  const listed = supplied.listed || listAvailableWorkbenches({ refresh: true });
+  if (!listed || !Array.isArray(listed.packages)) return Object.freeze([]);
+  const catalog = [];
+  for (const pkg of listed.packages) {
+    try {
+      const source = managedProjectTemplateSource(pkg.id, { packages: listed.packages });
+      catalog.push(Object.freeze({
+        id: source.template.templateId,
+        label: source.template.name,
+        hint: safeText(pkg.summary, '', 80) || null
+      }));
+    } catch (_error) { /* 非法包不进入新建向导 */ }
+  }
+  return Object.freeze(catalog);
+}
+
+function projectPaneStateForTemplate(templateId, currentPaneState = null, supplied = {}) {
+  if (templateId === null || templateId === undefined) return currentPaneState;
+  const source = managedProjectTemplateSource(templateId, supplied);
+  if (source.pkg.cockpit !== 'video') return currentPaneState;
+  let pane = currentPaneState === null
+    ? projectLayout.createPaneState('split-two')
+    : projectLayout.validatePaneState(currentPaneState);
+  if (pane.windows.some((window) => window.tabs.some((tab) => (
+    tab.type === 'video-template' && tab.templateId === templateId
+  )))) return pane;
+  let target = pane.windows.find((window) => !window.tabs.some((tab) => (
+    tab.type === 'artifact' && tab.locked === true
+  )));
+  if (!target) {
+    const nextWindow = pane.windows.length + 1;
+    if (nextWindow > projectLayout.LIMITS.maxWindows) {
+      const error = new Error('项目布局没有可用窗口');
+      error.code = 'ERR_PROJECT_TEMPLATE_LAYOUT';
+      throw error;
+    }
+    pane = projectLayout.ensureTargetWindow(pane, nextWindow);
+    target = pane.windows.find((window) => window.window === nextWindow);
+  }
+  const usedIds = new Set(target.tabs.map((tab) => tab.id));
+  let tabId = 'video-template-main';
+  for (let suffix = 2; usedIds.has(tabId) && suffix <= projectLayout.LIMITS.maxTabsPerWindow; suffix += 1) {
+    tabId = `video-template-main-${suffix}`;
+  }
+  if (usedIds.has(tabId)) {
+    const error = new Error('项目布局没有可用标签位');
+    error.code = 'ERR_PROJECT_TEMPLATE_LAYOUT';
+    throw error;
+  }
+  const tab = Object.freeze({
+    id: tabId,
+    type: 'video-template',
+    title: source.template.name,
+    templateId
+  });
+  return projectLayout.validatePaneState({
+    schemaVersion: projectLayout.SCHEMA_VERSION,
+    preset: pane.preset,
+    windows: pane.windows.map((window) => (
+      window.window === target.window
+        ? { ...window, tabs: [...window.tabs, tab], active: tab.id, collapsed: false }
+        : window
+    ))
+  });
+}
+
+function createProjectAtFolder(input, folder, supplied = {}) {
+  const store = supplied.projectStore || requireProjectStore();
+  const resolveTemplate = supplied.resolveTemplate || managedProjectTemplate;
+  const applyTemplate = supplied.applyTemplate || projectTemplates.applyProjectTemplate;
+  const seedPaneState = supplied.seedPaneState || projectPaneStateForTemplate;
+  // findByFolder 同时完成存在性、canonical、protected 与 duplicate 预检；
+  // 它必须先于任何模板写入。
+  const duplicate = store.findByFolder(folder);
+  if (duplicate) {
+    const error = new Error('项目文件夹已登记');
+    error.code = 'ERR_PROJECT_DUPLICATE_FOLDER';
+    throw error;
+  }
+  const rows = store.list({ includeHidden: true });
+  const maxProjects = Number.isSafeInteger(supplied.maxProjects)
+    ? supplied.maxProjects : projectRegistry.LIMITS.maxProjects;
+  if (!Array.isArray(rows)) {
+    const error = new Error('项目注册表预检失败');
+    error.code = 'ERR_PROJECT_RUNTIME';
+    throw error;
+  }
+  if (rows.filter((item) => item.kind === 'user').length >= maxProjects - 1) {
+    const error = new Error('项目数量已达上限');
+    error.code = 'ERR_PROJECT_LIMIT';
+    throw error;
+  }
+  let applied = null;
+  let paneState = null;
+  if (input.templateId !== null && input.templateId !== undefined) {
+    const template = resolveTemplate(input.templateId, supplied);
+    paneState = seedPaneState(input.templateId, null, supplied);
+    applied = applyTemplate({ root: folder, template, reason: 'create' });
+  }
+  // 模板写入全部结束后才登记项目；后续失败保留用户文件，不做猜测性删除。
+  try {
+    return store.create({
+      ...input,
+      folder,
+      ...(paneState === null ? {} : { layoutPreset: paneState.preset, paneState })
+    });
+  } catch (error) {
+    if (applied === null) throw error;
+    const pending = new Error('模板文件已安全落地，但项目登记失败；可选择同一目录重试');
+    pending.code = 'ERR_PROJECT_REGISTRY_AFTER_TEMPLATE';
+    pending.cause = error;
+    pending.recovery = Object.freeze({
+      kind: 'template-applied-registry-pending',
+      templateId: input.templateId,
+      createdCount: Array.isArray(applied.created) ? applied.created.length : 0,
+      keptCount: Array.isArray(applied.kept) ? applied.kept.length : 0
+    });
+    throw pending;
+  }
+}
+
+function projectSwitchBindingKey(value) {
+  if (!isPlainObject(value)
+      || Object.keys(value).length !== 4
+      || !['hostInstanceId', 'controllerId', 'pageInstanceId']
+        .every((key) => typeof value[key] === 'string' && CONTEXT_POC_ID_RE.test(value[key]))
+      || !Number.isSafeInteger(value.selectionRevision) || value.selectionRevision < 1) {
+    return null;
+  }
+  return JSON.stringify([
+    value.hostInstanceId, value.controllerId, value.pageInstanceId, value.selectionRevision
+  ]);
+}
+
+function activateProjectWorkbench(options = {}) {
+  const changed = classicCockpitEnabled || cockpitNativeMode || cockpitChatOpen;
+  classicCockpitEnabled = false;
+  cockpitNativeMode = false;
+  cockpitChatOpen = false;
+  if (options.refresh !== false && changed) {
+    stopVideoWorkspaceMonitor();
+    layoutMainWindow();
+    pushShellState();
+    if (!MAIN_HELPER_TEST) createAppMenu();
+  }
+  return changed;
+}
+
+function enterClassicCockpit(options = {}) {
+  const changed = !classicCockpitEnabled;
+  classicCockpitEnabled = true;
+  cockpitNativeMode = false;
+  cockpitChatOpen = false;
+  if (options.refresh !== false) refreshWorkbenchSurfaces();
+  return Object.freeze({
+    kind: 'ok', mode: 'classic', changed,
+    text: '已进入经典驾驶舱（旧）；项目与旧配置均保留。'
+  });
+}
+
+function returnToProjectWorkbench(options = {}) {
+  const changed = activateProjectWorkbench({ refresh: options.refresh !== false });
+  return Object.freeze({
+    kind: 'ok', mode: 'projects', changed,
+    text: '已返回项目工作台。'
+  });
+}
+
+function clearProjectSwitchCommand(projectId, seq) {
+  const changed = pendingProjectSwitchCommand !== null
+    && (projectId === undefined || (
+      pendingProjectSwitchCommand.projectId === projectId
+      && pendingProjectSwitchCommand.seq === seq
+    ));
+  if (!changed) return false;
+  pendingProjectSwitchCommand = null;
+  return true;
+}
+
+function currentProjectSwitchBinding(supplied = {}) {
+  const runtime = supplied.runtime === undefined ? contextPocBridgeRuntime : supplied.runtime;
+  const controller = supplied.controller === undefined ? contextPocController : supplied.controller;
+  const isCurrent = supplied.isCurrent || contextPocRuntimeCurrent;
+  if (!runtime || !controller || typeof isCurrent !== 'function' || !isCurrent(runtime)
+      || !runtime.handshake || !runtime.pageBinding) return null;
+  const candidate = {
+    hostInstanceId: runtime.handshake.hostInstanceId,
+    controllerId: runtime.pageBinding.controllerId,
+    pageInstanceId: runtime.pageBinding.pageInstanceId,
+    selectionRevision: runtime.pageBinding.selectionRevision
+  };
+  return candidate.controllerId === controller.controllerId
+    && projectSwitchBindingKey(candidate) ? Object.freeze(candidate) : null;
+}
+
+function queueProjectSwitchCommand(projectId, supplied = {}) {
+  const store = supplied.projectStore || requireProjectStore();
+  const now = supplied.now || Date.now;
+  const at = now();
+  const project = store.get(projectId);
+  const binding = Object.prototype.hasOwnProperty.call(supplied, 'binding')
+    ? supplied.binding : currentProjectSwitchBinding(supplied);
+  const bindingKey = projectSwitchBindingKey(binding);
+  if (!Number.isSafeInteger(at) || at < 0 || !project
+      || project.kind !== 'user' || project.hidden === true || !bindingKey
+      || !Number.isSafeInteger(at + PROJECT_SWITCH_COMMAND_TTL_MS)) return null;
+  projectSwitchCommandSeq = projectSwitchCommandSeq >= Number.MAX_SAFE_INTEGER
+    ? 1 : projectSwitchCommandSeq + 1;
+  pendingProjectSwitchCommand = Object.freeze({
+    seq: projectSwitchCommandSeq,
+    projectId,
+    bindingKey,
+    expiresAt: at + PROJECT_SWITCH_COMMAND_TTL_MS
+  });
+  activateProjectWorkbench({ refresh: supplied.refresh !== false });
+  return Object.freeze({ seq: projectSwitchCommandSeq, projectId });
+}
+
+function readProjectSwitchCommand(binding, supplied = {}) {
+  const command = pendingProjectSwitchCommand;
+  if (!command) return null;
+  const now = supplied.now || Date.now;
+  const at = now();
+  const store = supplied.projectStore || requireProjectStore();
+  const key = projectSwitchBindingKey(binding);
+  const project = store.get(command.projectId);
+  if (!Number.isSafeInteger(at) || at < 0 || at >= command.expiresAt
+      || !key || !project || project.kind !== 'user' || project.hidden === true) {
+    clearProjectSwitchCommand();
+    return null;
+  }
+  if (command.bindingKey !== key) return null;
+  return Object.freeze({ seq: command.seq, projectId: command.projectId });
+}
+
+function projectShortcutRows(supplied = {}) {
+  const store = supplied.projectStore || requireProjectStore();
+  const rows = store.list({ includeHidden: false });
+  if (!Array.isArray(rows)) return Object.freeze([]);
+  return Object.freeze(rows.filter((item) => item.kind === 'user' && item.hidden !== true)
+    .slice(0, 9)
+    .map((item, index) => Object.freeze({
+      index: index + 1,
+      projectId: item.id,
+      name: safeText(item.name, `项目 ${index + 1}`, 40),
+      icon: safeText(item.icon, '🧱', 8)
+    })));
+}
+
+function projectMigrationErrorCode(error) {
+  const code = error && error.code;
+  return typeof code === 'string' && /^ERR_PROJECT_[A-Z0-9_]{2,60}$/.test(code)
+    ? code : 'ERR_PROJECT_MIGRATION_FAILED';
+}
+
+async function chooseProjectFolder() {
+  const selection = await dialog.showOpenDialog({
+    title: '选择项目文件夹',
+    properties: ['openDirectory', 'createDirectory']
+  });
+  return selection && !selection.canceled && selection.filePaths[0]
+    ? selection.filePaths[0] : null;
+}
+
+function updateControlRoomNeedCount(value) {
+  if (!Number.isSafeInteger(value) || value < 0 || value > 128) return false;
+  if (controlRoomNeedCount === value) return false;
+  controlRoomNeedCount = value;
+  refreshAttentionSurface();
+  return true;
+}
+
+function projectProtectedRoots(userData) {
+  const candidates = [
+    ...forbiddenWorkspaceRoots(),
+    userData,
+    path.join(userData, 'context-poc', 'v1', 'dsh-home')
+  ];
+  const seen = new Set();
+  return Object.freeze(candidates.filter((entry) => {
+    const normalized = path.resolve(entry);
+    const key = process.platform === 'win32' ? normalized.toLocaleLowerCase('en-US') : normalized;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }));
+}
+
+function initializeProjectRegistry(userData = app.getPath('userData'), supplied = {}) {
+  if (projectStoreUnsubscribe) {
+    try { projectStoreUnsubscribe(); } catch (_error) { /* 重建测试 store 时尽力解绑 */ }
+    projectStoreUnsubscribe = null;
+  }
+  projectStore = projectRegistry.createProjectStore({
+    baseDir: userData,
+    forbiddenRoots: projectProtectedRoots(userData)
+  });
+  const consoleProject = projectStore.ensureConsole();
+  const logger = typeof supplied.logger === 'function'
+    ? supplied.logger : (scope, message) => log.line(scope, message);
+  logger('projects', `registry ready revision=${projectStore.revision} console=${consoleProject ? 'ensured' : 'missing'}`);
+  const migrate = supplied.migrate || projectMigration.migrateLegacyProject;
+  const configSnapshot = Object.prototype.hasOwnProperty.call(supplied, 'configSnapshot')
+    ? supplied.configSnapshot : config.get();
+  const markMigrated = supplied.markMigrated || (() => (
+    config.set({ projectMigrationVersion: 1 })
+  ));
+  const seedMigrationPaneState = supplied.seedMigrationPaneState
+    || projectPaneStateForTemplate;
+  try {
+    if (configSnapshot && configSnapshot.projectMigrationVersion === 1) {
+      logger('projects', 'legacy migration status=skipped reason=already-migrated');
+    } else {
+      // 迁移新建时把模板窗格作为同一次 registry 写入的一部分；这样 seed
+      // 失败不会留下“项目已登记但窗口缺失”的半迁移。复用既有项目时则
+      // 完全不经过 create，也不会复活用户主动删除的标签页。
+      const migrationStore = Object.freeze({
+        ensureConsole: () => projectStore.ensureConsole(),
+        findByFolder: (folder) => projectStore.findByFolder(folder),
+        create: (input) => {
+          const paneState = seedMigrationPaneState(input.templateId, null, supplied);
+          return projectStore.create({
+            ...input,
+            ...(paneState === null ? {} : {
+              layoutPreset: paneState.preset,
+              paneState
+            })
+          });
+        }
+      });
+      const migrated = migrate({ config: configSnapshot, projectStore: migrationStore });
+      markMigrated();
+      logger('projects', `legacy migration status=${migrated.status} reason=${migrated.reason || 'none'}`);
+    }
+  } catch (error) {
+    // 旧 config 是兼容来源，不是启动前置：失败只记稳定码，不写路径/消息，
+    // 也绝不清理或改写旧 workdir/workbenchId。
+    logger('projects', `legacy migration failed code=${projectMigrationErrorCode(error)}`);
+  }
+  if (!MAIN_HELPER_TEST) {
+    projectStoreUnsubscribe = projectStore.subscribe(() => {
+      try { createAppMenu(); } catch (_error) { /* 菜单刷新不污染 registry */ }
+      try { refreshTrayMenu(); } catch (_error) { /* 同上 */ }
+    });
+  }
+  return projectStore;
+}
+
+const contextPocProjectOperations = projectOperationModel.createProjectOperations({
+  projectStore: projectStoreFacade,
+  chooseFolder: chooseProjectFolder,
+  createProject: createProjectAtFolder,
+  templateActionsFor: projectTemplateActionsFor,
+  templateCatalogFor: projectTemplateCatalog,
+  previewForProject: projectPanePreviews,
+  readSwitchCommand: readProjectSwitchCommand,
+  bootstrapTicketFor: contextPocProjectBootstrapTicket,
+  onProjectOpened: (projectId, switchCommandSeq) => {
+    activateProjectWorkbench();
+    // 同步建立新项目 video runtime 后再触发 context restage；
+    // 失败必须向 operation 传播，由 broker 脱敏为 operation-failed，
+    // 且在 project-ops touch/ACK 之前收口。
+    activateOpenedRegistryProject(projectId);
+    if (switchCommandSeq !== null) {
+      clearProjectSwitchCommand(projectId, switchCommandSeq);
+    }
+  },
+  onProjectOpenOutcomeUnknown: handleProjectOpenOutcomeUnknown,
+  controlRoom: controlRoomModel,
+  onNeedCount: updateControlRoomNeedCount,
+  onConsoleResult: handleProjectConsoleResult
+});
+
 function contextPocWorkspaceFileBroker(options = {}) {
+  const projectOperations = options.projectOperations === undefined
+    ? contextPocProjectOperations : options.projectOperations;
   return contextFileRpc.createContextFileRpcBroker({
-    operations: contextPocWorkspaceFileOperations(options.operations),
+    operations: {
+      ...contextPocWorkspaceFileOperations(options.operations),
+      ...projectOperations
+    },
     ...(options.now ? { now: options.now } : {}),
     ...(options.randomBytes ? { randomBytes: options.randomBytes } : {}),
     limits: {
@@ -9369,12 +8185,15 @@ function contextPocWorkspacePublicRejectCode(value) {
 }
 
 function contextPocWorkspaceBindingEqual(left, right) {
-  return Boolean(left && right
-    && left.hostInstanceId === right.hostInstanceId
-    && left.controllerId === right.controllerId
+  if (!left || !right || left.hostInstanceId !== right.hostInstanceId) return false;
+  const common = left.controllerId === right.controllerId
     && left.pageInstanceId === right.pageInstanceId
-    && left.selectionRevision === right.selectionRevision
-    && left.projectId === right.projectId
+    && left.selectionRevision === right.selectionRevision;
+  if (!common) return false;
+  const leftGlobal = !Object.prototype.hasOwnProperty.call(left, 'projectId');
+  const rightGlobal = !Object.prototype.hasOwnProperty.call(right, 'projectId');
+  if (leftGlobal || rightGlobal) return leftGlobal && rightGlobal;
+  return Boolean(left.projectId === right.projectId
     && left.contextRevision === right.contextRevision
     && left.workspaceGeneration === right.workspaceGeneration
     && left.rootIdentity && right.rootIdentity
@@ -9392,7 +8211,8 @@ function createContextPocWorkspaceFileCoordinator(options = {}) {
     throw new TypeError('context POC workspace files adapter invalid');
   }
 
-  const settle = async (runtime, request, claim, status, code, result) => {
+  const settle = async (runtime, request, claim, status, code, result,
+    rootAuthorizationToken = null) => {
     if (!isCurrent(runtime)) return false;
     const raw = await runtime.transport.call('workspace/files/settle', {
       contract: contextBridgeModel.CONTRACT_VERSION,
@@ -9402,14 +8222,23 @@ function createContextPocWorkspaceFileCoordinator(options = {}) {
       claimToken: claim.claimToken,
       status,
       code,
-      result
+      result,
+      ...(rootAuthorizationToken === null ? {} : { rootAuthorizationToken })
     });
     const response = contextPocWorkspaceFileSettleValue(raw);
+    if (response && response.settled === false && response.code === 'outcome-unknown'
+        && request.operation === 'projects.open' && request.input.phase === 'commit'
+        && activeRegistryProjectId === request.input.projectId) {
+      // Host 在授权后、settle 前观察到 cwd 再次变化。同步激活已经发生，
+      // 无法伪称未执行；立即撤销 main 的 active root，且绝不回 fulfilled。
+      if (clearActiveRegistryProject()) pushShellState();
+    }
     return Boolean(response && response.settled);
   };
 
   const apply = async (runtime, request) => {
     let claim = null;
+    let rootAuthorizationToken = null;
     try {
       const rawClaim = await runtime.transport.call('workspace/files/claim', {
         contract: contextBridgeModel.CONTRACT_VERSION,
@@ -9427,22 +8256,34 @@ function createContextPocWorkspaceFileCoordinator(options = {}) {
           || request.deadlineMs - at < CONTEXT_POC_WORKSPACE_FILE_EXECUTION_MARGIN_MS
           || claim.runningDeadlineMs - at < CONTEXT_POC_WORKSPACE_FILE_EXECUTION_MARGIN_MS
           || claim.runningDeadlineMs > request.deadlineMs) {
-        return settle(runtime, request, claim, 'rejected', 'operation-timeout', null);
+        return await settle(runtime, request, claim, 'rejected', 'operation-timeout', null);
       }
       const binding = bindingFor(runtime, request);
       if (!binding) {
-        return settle(runtime, request, claim, 'rejected', 'operation-stale', null);
+        return await settle(runtime, request, claim, 'rejected', 'operation-stale', null);
+      }
+      const rootBoundProjectOperation = request.operation === 'projects.bind'
+        || (request.operation === 'projects.open' && request.input.phase === 'commit');
+      let expectedProjectRootRef = null;
+      if (rootBoundProjectOperation) {
+        try {
+          expectedProjectRootRef = contextPocProjectSessionRootRef(
+            runtime, request.input.projectId
+          );
+        } catch (_error) { expectedProjectRootRef = null; }
       }
 
       const queued = broker.enqueue({ binding, operation: request.operation, input: request.input });
       const row = broker.read({ binding, limit: CONTEXT_POC_MAX_WORKSPACE_FILE_READ_BATCH })
         .find((item) => item.requestToken === queued.requestToken);
-      if (!row) return settle(runtime, request, claim, 'rejected', 'operation-failed', null);
+      if (!row) return await settle(
+        runtime, request, claim, 'rejected', 'operation-failed', null
+      );
       const internalClaim = broker.claim({
         binding, requestToken: row.requestToken, requestSeq: row.requestSeq
       });
       if (!internalClaim.claimed) {
-        return settle(runtime, request, claim, 'rejected', 'operation-failed', null);
+        return await settle(runtime, request, claim, 'rejected', 'operation-failed', null);
       }
       const outcome = await broker.execute({
         binding,
@@ -9451,6 +8292,31 @@ function createContextPocWorkspaceFileCoordinator(options = {}) {
         claimToken: internalClaim.claimToken,
         context: Object.freeze({
           deliveryTargetRef: request.deliveryTargetRef || null,
+          ...(request.operation === 'projects.open' && request.input.phase === 'commit'
+            ? { currentBindingRef: request.currentBindingRef } : {}),
+          ...(rootBoundProjectOperation ? {
+            sessionRootRef: request.sessionRootRef,
+            projectRootRef: expectedProjectRootRef,
+            async authorizeProjectRoot() {
+              if (rootAuthorizationToken !== null || !isCurrent(runtime)) return false;
+              const rawAuthorization = await runtime.transport.call(
+                'workspace/files/authorize', {
+                  contract: contextBridgeModel.CONTRACT_VERSION,
+                  hostInstanceId: runtime.handshake.hostInstanceId,
+                  requestToken: request.requestToken,
+                  requestSeq: request.requestSeq,
+                  claimToken: claim.claimToken
+                }
+              );
+              if (!isCurrent(runtime)) return false;
+              const authorization = contextPocWorkspaceFileRootAuthorizationValue(
+                rawAuthorization
+              );
+              if (!authorization || authorization.authorized !== true) return false;
+              rootAuthorizationToken = authorization.authorizationToken;
+              return true;
+            }
+          } : {}),
           assertCurrent() {
             return contextPocWorkspaceBindingEqual(bindingFor(runtime, request), binding);
           }
@@ -9459,19 +8325,22 @@ function createContextPocWorkspaceFileCoordinator(options = {}) {
       if (!isCurrent(runtime)) return false;
       if (!contextPocWorkspaceBindingEqual(bindingFor(runtime, request), binding)) {
         // handler 已取得执行权后才发现 selection/context/workspace 变化，不能声称没执行。
-        return settle(runtime, request, claim, 'rejected', 'outcome-unknown', null);
+        return await settle(runtime, request, claim, 'rejected', 'outcome-unknown', null,
+          rootAuthorizationToken);
       }
       const snapshot = outcome && outcome.snapshot
         ? outcome.snapshot : broker.snapshot({ binding, requestToken: row.requestToken });
       if (snapshot.state === 'fulfilled') {
-        return settle(runtime, request, claim, 'fulfilled', null, snapshot.result);
+        return await settle(runtime, request, claim, 'fulfilled', null, snapshot.result,
+          rootAuthorizationToken);
       }
-      return settle(runtime, request, claim, 'rejected',
-        contextPocWorkspacePublicRejectCode(snapshot.code), null);
+      return await settle(runtime, request, claim, 'rejected',
+        contextPocWorkspacePublicRejectCode(snapshot.code), null, rootAuthorizationToken);
     } catch (_error) {
       if (claim && claim.claimed && isCurrent(runtime)) {
         try {
-          return await settle(runtime, request, claim, 'rejected', 'operation-failed', null);
+          return await settle(runtime, request, claim, 'rejected', 'operation-failed', null,
+            rootAuthorizationToken);
         } catch (_settleError) { return false; }
       }
       return false;
@@ -9485,7 +8354,7 @@ function createContextPocWorkspaceFileCoordinator(options = {}) {
       const capable = Boolean(runtime.handshake
         && Array.isArray(runtime.handshake.capabilities)
         && runtime.handshake.capabilities.includes(CONTEXT_POC_WORKSPACE_FILES_CAPABILITY));
-      if (!capable || !isCurrent(runtime) || !runtime.binding) return false;
+      if (!capable || !isCurrent(runtime) || !(runtime.pageBinding || runtime.binding)) return false;
       const raw = await runtime.transport.call('workspace/files/read', {
         contract: contextBridgeModel.CONTRACT_VERSION,
         hostInstanceId: runtime.handshake.hostInstanceId,
@@ -9750,20 +8619,42 @@ function contextPocHandshakeValue(value) {
 
 function contextPocBindingValue(value, runtime, controller = contextPocController) {
   if (!contextPocExact(value, ['state', 'hostInstanceId', 'sessionRef', 'code'], [
-    'controllerId', 'pageInstanceId', 'selectionRevision', 'deliveryTargetRef'
+    'controllerId', 'pageInstanceId', 'selectionRevision', 'deliveryTargetRef',
+    'currentBindingRef', 'sessionRootRef'
   ]) || !['selected', 'none', 'stale', 'conflict'].includes(value.state)
       || value.hostInstanceId !== runtime.handshake.hostInstanceId
       || !(value.code === null || (typeof value.code === 'string' && value.code.length <= 64))) {
     return null;
   }
   if (value.state !== 'selected') {
-    return value.sessionRef === null
-      && !Object.prototype.hasOwnProperty.call(value, 'deliveryTargetRef')
-      ? { state: value.state, code: value.code } : null;
+    if (value.sessionRef !== null
+        || Object.prototype.hasOwnProperty.call(value, 'deliveryTargetRef')
+        || Object.prototype.hasOwnProperty.call(value, 'currentBindingRef')
+        || Object.prototype.hasOwnProperty.call(value, 'sessionRootRef')) return null;
+    const pageKeys = ['controllerId', 'pageInstanceId', 'selectionRevision'];
+    const hasPage = pageKeys.some((key) => Object.prototype.hasOwnProperty.call(value, key));
+    if (!hasPage) return { state: value.state, code: value.code };
+    if (!pageKeys.every((key) => Object.prototype.hasOwnProperty.call(value, key))
+        || value.controllerId !== controller.controllerId
+        || !contextPocValidId(value.pageInstanceId)
+        || !Number.isSafeInteger(value.selectionRevision)
+        || value.selectionRevision < 1) return null;
+    return {
+      state: value.state,
+      controllerId: value.controllerId,
+      pageInstanceId: value.pageInstanceId,
+      selectionRevision: value.selectionRevision,
+      code: value.code
+    };
   }
+  const hasBindingProof = Object.prototype.hasOwnProperty.call(value, 'currentBindingRef');
+  const hasRootProof = Object.prototype.hasOwnProperty.call(value, 'sessionRootRef');
   if (typeof value.sessionRef !== 'string' || !CONTEXT_POC_SESSION_REF_RE.test(value.sessionRef)
       || typeof value.deliveryTargetRef !== 'string'
       || !CONTEXT_POC_DELIVERY_TARGET_REF_RE.test(value.deliveryTargetRef)
+      || hasBindingProof !== hasRootProof
+      || (hasBindingProof && (!CONTEXT_POC_SESSION_BINDING_REF_RE.test(value.currentBindingRef)
+        || !CONTEXT_POC_SESSION_ROOT_REF_RE.test(value.sessionRootRef)))
       || value.controllerId !== controller.controllerId
       || !contextPocValidId(value.pageInstanceId)
       || !Number.isSafeInteger(value.selectionRevision) || value.selectionRevision < 1) return null;
@@ -9774,6 +8665,10 @@ function contextPocBindingValue(value, runtime, controller = contextPocControlle
     controllerId: value.controllerId,
     pageInstanceId: value.pageInstanceId,
     selectionRevision: value.selectionRevision,
+    ...(hasBindingProof ? {
+      currentBindingRef: value.currentBindingRef,
+      sessionRootRef: value.sessionRootRef
+    } : {}),
     code: null
   };
 }
@@ -9882,20 +8777,48 @@ function contextPocEventsValue(value, runtime) {
   return value;
 }
 
-function currentContextPocWorkspaceIdentity() {
-  const workspace = currentWorkspaceSurface();
+function currentContextPocWorkspaceIdentity(supplied = {}) {
+  const registryLocation = !classicCockpitEnabled
+    ? activeRegistryProjectLocation(supplied) : null;
+  // 默认项目模式在真实 open commit 前不借用旧 config.workdir。
+  if (!classicCockpitEnabled && !registryLocation) return null;
+  const workspace = registryLocation ? Object.freeze({
+    current: Object.freeze({
+      effectivePath: registryLocation.root,
+      label: safeText(registryLocation.project.name, '当前项目', 72)
+    }),
+    generation: registryLocation.generation,
+    busy: false
+  }) : currentWorkspaceSurface();
   const workspaceKey = workspace && workspace.current && workspace.current.effectivePath;
   if (!boundedPath(workspaceKey) || !Number.isSafeInteger(workspace.generation)
       || workspace.generation < 0 || workspace.busy) return null;
   try {
-    const stat = fs.lstatSync(workspaceKey, { bigint: true });
+    const fsImpl = supplied.fsImpl || fs;
+    const stat = fsImpl.lstatSync(workspaceKey, { bigint: true });
     if (stat.isSymbolicLink() || !stat.isDirectory()
-        || fs.realpathSync(workspaceKey) !== workspaceKey) return null;
+        || fsImpl.realpathSync(workspaceKey) !== workspaceKey) return null;
+    let workbench = null;
+    if (registryLocation) {
+      if (registryLocation.project.templateId !== null) {
+        try {
+          workbench = managedProjectTemplateSource(
+            registryLocation.project.templateId,
+            supplied.packages ? { packages: supplied.packages } : {}
+          ).pkg;
+        } catch (_error) { workbench = null; }
+      }
+    } else {
+      workbench = supplied.currentWorkbench === undefined
+        ? currentWorkbench() : supplied.currentWorkbench;
+    }
     return Object.freeze({
       workspace,
       workspaceKey,
       workspaceGeneration: workspace.generation,
-      rootIdentity: Object.freeze({ dev: String(stat.dev), ino: String(stat.ino) })
+      rootIdentity: Object.freeze({ dev: String(stat.dev), ino: String(stat.ino) }),
+      registryMode: Boolean(registryLocation),
+      workbench
     });
   } catch (_error) { return null; }
 }
@@ -9903,7 +8826,10 @@ function currentContextPocWorkspaceIdentity() {
 function currentContextPocProject(identity = currentContextPocWorkspaceIdentity()) {
   if (!identity) return null;
   const { workspace, workspaceKey, workspaceGeneration, rootIdentity } = identity;
-  const active = currentWorkbench();
+  // registry 项目即使未设 template，也不能借用旧
+  // config.workbenchId 伪造工作台身份。
+  const active = identity.registryMode === true
+    ? identity.workbench : (identity.workbench || currentWorkbench());
   const workbenchId = active && typeof active.id === 'string'
     ? `${active.source === 'user' ? 'user' : 'builtin'}:${crypto.createHash('sha256')
       .update(active.id).digest('hex').slice(0, 32)}`
@@ -9928,9 +8854,24 @@ function currentContextPocProject(identity = currentContextPocWorkspaceIdentity(
 
 function contextPocWorkspaceFileBindingFor(runtime, request) {
   try {
-    if (!runtime || !request || !runtime.handshake || !runtime.binding
+    if (!runtime || !request || !runtime.handshake
         || !Array.isArray(runtime.handshake.capabilities)
-        || !runtime.handshake.capabilities.includes(CONTEXT_POC_WORKSPACE_FILES_CAPABILITY)
+        || !runtime.handshake.capabilities.includes(CONTEXT_POC_WORKSPACE_FILES_CAPABILITY)) {
+      return null;
+    }
+    if (CONTEXT_POC_PROJECT_OPERATIONS.has(request.operation)) {
+      const page = runtime.pageBinding || runtime.binding;
+      if (!page || request.controllerId !== page.controllerId
+          || request.pageInstanceId !== page.pageInstanceId
+          || request.selectionRevision !== page.selectionRevision) return null;
+      return contextFileRpc.normalizeBinding({
+        hostInstanceId: runtime.handshake.hostInstanceId,
+        controllerId: page.controllerId,
+        pageInstanceId: page.pageInstanceId,
+        selectionRevision: page.selectionRevision
+      });
+    }
+    if (!runtime.binding
         || request.controllerId !== runtime.binding.controllerId
         || request.pageInstanceId !== runtime.binding.pageInstanceId
         || request.selectionRevision !== runtime.binding.selectionRevision) return null;
@@ -9996,6 +8937,10 @@ function contextPocSuspend(reason = 'bridge-disconnected') {
 
 function stopContextPocBridge(reason = 'bridge-disconnected') {
   contextPocBridgeGeneration += 1;
+  if (controlRoomNeedCount !== null) {
+    controlRoomNeedCount = null;
+    refreshAttentionSurface();
+  }
   const runtime = contextPocBridgeRuntime;
   contextPocBridgeRuntime = null;
   if (runtime) {
@@ -10019,15 +8964,36 @@ async function contextPocSendEffects(runtime, effects) {
         || !isPlainObject(effect.envelope) || !runtime.binding) {
       throw new Error('context POC stage effect invalid');
     }
+    // 项目模式没有 active project 时绝不重放旧 desired stage；切回原会话
+    // 也必须 fresh open 才能再次注入。
+    if (!classicCockpitEnabled && activeRegistryProjectId === null) continue;
+    let registryProof = null;
+    if (!classicCockpitEnabled) {
+      if (!activeRegistryProjectBindingMatches(runtime, runtime.binding)) {
+        reconcileActiveRegistryProjectBinding(runtime, runtime.binding);
+        contextPocController.runtime.availabilityReason = 'session-unavailable';
+        pushShellState();
+        return false;
+      }
+      registryProof = Object.freeze({
+        currentBindingRef: runtime.binding.currentBindingRef,
+        sessionRootRef: runtime.binding.sessionRootRef
+      });
+    }
     const rawResponse = await runtime.transport.call('context/stage', {
       controllerId: runtime.binding.controllerId,
       pageInstanceId: runtime.binding.pageInstanceId,
       selectionRevision: runtime.binding.selectionRevision,
-      envelope: effect.envelope
+      envelope: effect.envelope,
+      ...(registryProof || {})
     });
     if (!contextPocRuntimeCurrent(runtime)) return false;
     const response = contextPocStageResponseValue(rawResponse, runtime, effect.envelope);
     if (!response || response.accepted !== true) {
+      if (!classicCockpitEnabled && activeRegistryProjectId !== null) {
+        clearActiveRegistryProject();
+        runtime.resumeEffects = [];
+      }
       const reason = response
         && ['context-invalid', 'revision-conflict', 'session-unavailable', 'host-rejected']
           .includes(response.code) ? response.code : 'host-rejected';
@@ -10210,6 +9176,16 @@ async function contextPocTick(runtime) {
     if (!contextPocRuntimeCurrent(runtime)) return;
     const binding = contextPocBindingValue(rawBinding, runtime);
     if (!binding) throw new Error('context POC selection response invalid');
+    if (!classicCockpitEnabled && activeRegistryProjectId !== null
+        && reconcileActiveRegistryProjectBinding(runtime, binding).closed) {
+      changed = true;
+      log.line('context', '活动项目已因会话或工作区变化自动关闭 code=workspace-mismatch');
+    }
+    runtime.pageBinding = binding.controllerId ? Object.freeze({
+      controllerId: binding.controllerId,
+      pageInstanceId: binding.pageInstanceId,
+      selectionRevision: binding.selectionRevision
+    }) : null;
     const selectionFence = binding.state === 'selected' ? null : binding;
     if (selectionFence) runtime.selectionState = selectionFence.state;
     if (!selectionFence) {
@@ -10225,6 +9201,8 @@ async function contextPocTick(runtime) {
       const bindingChanged = !runtime.binding
         || runtime.binding.sessionRef !== binding.sessionRef
         || runtime.binding.deliveryTargetRef !== binding.deliveryTargetRef
+        || runtime.binding.currentBindingRef !== binding.currentBindingRef
+        || runtime.binding.sessionRootRef !== binding.sessionRootRef
         || runtime.binding.pageInstanceId !== binding.pageInstanceId
         || runtime.binding.selectionRevision !== binding.selectionRevision;
       if (bindingChanged) {
@@ -10377,6 +9355,7 @@ async function startContextPocBridge(state) {
       transport,
       handshake,
       binding: null,
+      pageBinding: null,
       selectionState: 'none',
       cursor: contextPocController.runtime.eventCursor,
       resumeEffects: [...connected.effects],
@@ -10766,7 +9745,7 @@ function refreshAttentionSurface() {
     refreshTrayState();
     refreshTrayMenu();
   }
-  if (isMac && app.dock) {
+  if (isMac && app && app.dock) {
     try { app.dock.setBadge(attentionCount > 0 ? String(Math.min(attentionCount, 99)) : ''); }
     catch (_error) { /* Dock 降级不影响事件落盘 */ }
   }
@@ -10955,6 +9934,7 @@ async function onReady() {
   });
   await initializeWorkspaceConfig();
   log.init(path.join(app.getPath('userData'), 'logs'));
+  initializeProjectRegistry();
   try {
     const cleanup = backend.cleanupContextPocRuns(app.getPath('userData'));
     log.line('context', `context-poc startup cleanup removed=${cleanup.removed} skipped=${cleanup.skipped}`);
@@ -11742,7 +10722,8 @@ function layoutMainWindow() {
   const layout = mainViewLayout({
     width,
     height,
-    cockpit: active && active.cockpit,
+    classicMode: classicCockpitEnabled,
+    cockpit: classicCockpitEnabled && active && active.cockpit,
     cockpitMode: cockpitNativeMode ? 'native' : 'cockpit',
     chatOpen: cockpitChatOpen
   });
@@ -13042,6 +12023,7 @@ function registerSettingsIpc() {
     'settings:rescan-pets', 'settings:reload-themes', 'settings:open-resource-dir',
     'settings:list-workbenches', 'settings:switch-workbench',
     'settings:remove-workbench', 'settings:rescan-workbenches',
+    'settings:open-classic-cockpit', 'settings:return-project-workbench',
     'settings:remote-feishu-credentials-save',
     'settings:remote-feishu-credentials-clear',
     'settings:remote-feishu-test-notification',
@@ -13392,6 +12374,21 @@ function registerSettingsIpc() {
     return { kind: 'ok' };
   }));
 
+  // 经典驾驶舱只保留在设置页，动作固定且不接受 workbench id 或其他参数。
+  ipcMain.handle('settings:open-classic-cockpit', trustedSettingsHandler(async (...args) => {
+    if (args.length !== 0) throw new Error('经典驾驶舱入口不接受参数');
+    const result = enterClassicCockpit();
+    showApp();
+    return result;
+  }));
+
+  ipcMain.handle('settings:return-project-workbench', trustedSettingsHandler(async (...args) => {
+    if (args.length !== 0) throw new Error('项目工作台入口不接受参数');
+    const result = returnToProjectWorkbench();
+    showApp();
+    return result;
+  }));
+
   // 参数在主进程再夹一次固定枚举，不信任 preload 的夹取结果。
   ipcMain.handle('settings:open-resource-dir', trustedSettingsHandler(async (kind) => {
     const allowed = kind === 'themes' || kind === 'workbenches' ? kind : 'pets';
@@ -13733,7 +12730,7 @@ function trayMenuTemplate() {
     { label: '显示 / 隐藏窗口', click: () => toggleWindow() },
     { label: '任务与用量看板…', click: () => openDashboardWindow() },
     { label: '截图与图片…', click: () => openCaptureWindow({ source: 'drop' }) },
-    { label: '工作台', submenu: workbenchSubmenuTemplate() },
+    { label: '项目', submenu: projectMenuTemplate({ accelerators: false }) },
     { label: '工作区', submenu: workspaceSubmenuTemplate() },
     { label: '桌面宠物', submenu: petSubmenuTemplate() },
     { label: '设置…', click: () => openSettingsWindow() },
@@ -13748,7 +12745,7 @@ function trayMenuTemplate() {
   ];
 }
 
-// 工作台切换的第二个入口：托盘。第三个是应用菜单里的快捷键。
+// 旧工作台菜单构造器留作经典模式兼容；产品顶层托盘/应用菜单不再挂载它。
 function workbenchSubmenuTemplate() {
   const listed = listAvailableWorkbenches();
   const activeId = config.get('workbenchId') || null;
@@ -13887,7 +12884,8 @@ function trayImageFor(state, frame) {
 }
 
 function trayTooltipFor(state) {
-  const suffix = state === 'waiting' && attentionCount > 0 ? `（${attentionCount} 项）` : '';
+  const suffix = state === 'waiting' && controlRoomNeedCount > 0
+    ? `（${controlRoomNeedCount} 处等你）` : '';
   return `鲸坞 WhaleDock · ${TRAY_STATE_TEXT[state] || TRAY_STATE_TEXT.idle}${suffix}`;
 }
 
@@ -13921,7 +12919,8 @@ function refreshTrayState() {
   if (!tray || tray.isDestroyed()) return;
   const state = trayEffectiveState();
   if (state === trayDisplayState) {
-    if (state === 'busy') applyTrayState(state);
+    // 控制室 need 数变化不改五态本身，但 tooltip 仍要实时刷新。
+    applyTrayState(state);
     return;
   }
   trayDisplayState = state;
@@ -14109,19 +13108,30 @@ function createTray() {
   }
 }
 
-// 切换工作台的第三个入口：应用菜单里的快捷键。
-// 这里刻意**不用 globalShortcut**——那是系统级抢占，而切工作台是应用内动作；
-// 而且 macOS 的 ⌘⇧3/4/5 是系统截屏，抢不过来也不该抢。菜单加速键只在鲸坞在前台时生效。
+// 项目快捷键只在应用菜单生效，不用 globalShortcut 抢占系统。
+// click 只排一个绑定当前 Host/controller/page 代际的短 TTL 命令；Client 通过
+// projects.list(cursor=0) 读取并完成两阶段 open，主进程绝不 DOM 注入或直接 touch/ack。
+function projectMenuTemplate(supplied = {}) {
+  const rows = Array.isArray(supplied.rows) ? supplied.rows : projectShortcutRows();
+  const accelerators = supplied.accelerators !== false;
+  if (!rows.length) return [{ label: '暂无可切换项目', enabled: false }];
+  return rows.map((row) => ({
+    label: `${row.icon} ${row.name}`,
+    ...(accelerators ? { accelerator: `CommandOrControl+Shift+${row.index}` } : {}),
+    click: () => { queueProjectSwitchCommand(row.projectId); }
+  }));
+}
+
+// 旧工作台管理与手动入口继续保留，但不再占用项目的 1–9 / 0 快捷键。
 function workbenchMenuTemplate() {
   const listed = listAvailableWorkbenches();
   const activeId = config.get('workbenchId') || null;
   const active = workbenches.selectWorkbench(listed.packages, activeId);
-  const rows = listed.packages.slice(0, 9).map((pkg, index) => ({
+  const rows = listed.packages.slice(0, 9).map((pkg) => ({
     label: pkg.name,
     type: 'checkbox',
     checked: activeId === pkg.id,
-    accelerator: `CommandOrControl+Shift+${index + 1}`,
-    click: () => { void switchWorkbenchByIndex(index + 1); }
+    click: () => { void applyWorkbench(pkg.id); }
   }));
   const rest = listed.packages.slice(9).map((pkg) => ({
     label: pkg.name,
@@ -14140,10 +13150,9 @@ function workbenchMenuTemplate() {
     { type: 'separator' },
     {
       label: '回到上一个工作台',
-      accelerator: 'CommandOrControl+Shift+0',
       click: () => { void switchToPreviousWorkbench(); }
     },
-    ...(active && active.cockpit === 'video' ? [
+    ...(classicCockpitEnabled && active && active.cockpit === 'video' ? [
       { type: 'separator' },
       {
         label: cockpitChatOpen ? '返回创作流程' : '打开 AI 工作台',
@@ -14207,7 +13216,7 @@ function createAppMenu() {
         { label: '退出鲸坞', click: () => { quitting = true; app.quit(); } }
       ]
     }]),
-    { label: '工作台', submenu: workbenchMenuTemplate() },
+    { label: '项目', submenu: projectMenuTemplate() },
     { label: '工作区', submenu: workspaceSubmenuTemplate() },
     {
       label: '编辑',
@@ -14372,6 +13381,7 @@ if (!MAIN_HELPER_TEST) {
     });
     // 宠物窗只是本地视觉层，退出时直接销毁并停掉瞬时态定时器。
     closePetWindow();
+    closeProjectArtifactPreviews();
     // 叫醒阶梯与托盘定时器全部停掉，绝不把 Dock 弹跳留在那里。
     stopWakeLadder('App 正在退出');
     stopTrayFallbackPoll();
@@ -14444,13 +13454,77 @@ if (MAIN_HELPER_TEST) {
     contextPocWorkspaceFileRequestValue,
     contextPocWorkspaceFileReadResponseValue,
     contextPocWorkspaceFileClaimValue,
+    contextPocWorkspaceFileRootAuthorizationValue,
     contextPocWorkspaceFileSettleValue,
     contextPocUtf8Clip,
     contextPocWorkspaceFileOperations,
     contextPocWorkspaceFileBroker,
     contextPocWorkspaceBindingEqual,
     createContextPocWorkspaceFileCoordinator,
+    contextPocWorkspaceFileBindingFor,
+    CONTEXT_POC_LEGACY_WORKSPACE_FILE_OPERATIONS,
+    CONTEXT_POC_PROJECT_OPERATIONS,
+    CONTEXT_POC_WORKSPACE_FILE_OPERATIONS,
     CONTEXT_POC_WORKSPACE_FILE_EXECUTION_MARGIN_MS,
+    projectProtectedRoots,
+    initializeProjectRegistry,
+    canonicalRegistryProjectFolder,
+    canonicalRegistryProjectLocation,
+    activeRegistryProjectLocation,
+    activateRegistryProject,
+    clearActiveRegistryProject,
+    handleProjectOpenOutcomeUnknown,
+    activateOpenedRegistryProject,
+    videoWorkspaceLocation,
+    videoWorkspaceRoot,
+    startVideoWorkspaceMonitor,
+    stopVideoWorkspaceMonitor,
+    currentVideoWorkspaceSnapshot,
+    currentVideoRuntime,
+    videoDocumentSurface,
+    currentContextPocWorkspaceIdentity,
+    currentContextPocProject,
+    contextPocProjectSessionRootRef,
+    contextPocProjectBootstrapTicket,
+    activeRegistryProjectBindingMatches,
+    reconcileActiveRegistryProjectBinding,
+    projectMigrationErrorCode,
+    managedProjectTemplateSource,
+    managedProjectTemplate,
+    projectTemplateActionsFor,
+    projectTemplateCatalog,
+    projectPaneStateForTemplate,
+    createProjectAtFolder,
+    projectTextPreview,
+    projectImagePreview,
+    projectPanePreviews,
+    projectSwitchBindingKey,
+    currentProjectSwitchBinding,
+    queueProjectSwitchCommand,
+    readProjectSwitchCommand,
+    clearProjectSwitchCommand,
+    projectShortcutRows,
+    projectMenuTemplate,
+    workbenchMenuTemplate,
+    activateProjectWorkbench,
+    enterClassicCockpit,
+    returnToProjectWorkbench,
+    PROJECT_SWITCH_COMMAND_TTL_MS,
+    PROJECT_PANE_PREVIEW_TEXT_BYTES,
+    PROJECT_PANE_PREVIEW_IMAGE_BYTES,
+    PROJECT_PANE_PREVIEW_TOTAL_BYTES,
+    PROJECT_PANE_PREVIEW_LIMIT,
+    updateControlRoomNeedCount,
+    projectArtifactFingerprintKey,
+    verifiedProjectArtifactReadback,
+    projectPaneStateWithArtifact,
+    projectArtifactNavigationAllowed,
+    projectArtifactResourceAllowed,
+    projectArtifactWindowOptions,
+    prepareProjectArtifactHtmlPreview,
+    logProjectArtifactFailure,
+    scanCompletedProjectArtifact,
+    handleProjectConsoleResult,
     contextPocCurrentEffects,
     contextPocRememberTurnMiss,
     contextPocClearTurnMiss,

@@ -1174,6 +1174,31 @@ async function main() {
       result.status === 0 ? file : `${file} exit=${result.status}`);
   }
 
+  // v0.11 项目工作台：项目注册表与控制室状态镜像先以纯 Node 落地，再接界面。
+  for (const [file, label] of [
+    ['context-workspace-ops-smoke.js', '21 项 workspace operation 纯 Node 合同'],
+    ['project-ops-smoke.js', '8 项全局项目 operation 与两阶段打开'],
+    ['projects-smoke.js', '项目注册表、稳定身份与文件夹契约'],
+    ['control-room-smoke.js', '控制室会话快照镜像与提醒 ack 生命周期'],
+    ['project-layout-smoke.js', '项目窗格布局、预设与锁定窗格边界'],
+    ['project-artifacts-smoke.js', '项目成果卡、安全预览与文件读取边界'],
+    ['project-templates-smoke.js', '模板目录、初始化文件与动作契约'],
+    ['project-migration-smoke.js', '零概念首次路径与一次性迁移标记'],
+    ['project-root-ref-smoke.js', '会话根 HMAC proof 与跨平台归一'],
+    ['project-bootstrap-ticket-smoke.js', '未绑定项目 bootstrap 加密 ticket 与 owner 防重放'],
+    ['main-v11-projects-smoke.js', '主进程 21+8 分域、注册表与托盘接线']
+  ]) {
+    const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
+      cwd: path.join(__dirname, '..'),
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024
+    });
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    check(`v0.11: ${label}直测纳入统一 smoke`, result.status === 0,
+      result.status === 0 ? file : `${file} exit=${result.status}`);
+  }
+
   // v0.7 远程板块：纯 Node 通道核心与 Electron 薄层必须一起拿到证据。
   for (const [file, label] of [
     ['remote-smoke.js', '远程收推批、绑定与生命周期'],

@@ -1,6 +1,24 @@
 # HANDOFF.md — WhaleDock v0.10.0 发布收口与 v0.11 当前交接
 
-更新：2026-08-30 · v0.10.0 已公开发布；官方 macOS arm64 公共成品已安装回读，下一功能批次为 v0.11
+更新：2026-09-02 · SGD 已拍板 v0.11 路线 B 与 Q1–Q5；Codex 已完成批次 1–4 源码实现、全量回归与隔离源码 UI 复验
+
+## v0.11 批次 0（2026-09-02，Claude）：标杆审计与项目/控制室地基
+
+- 标杆：[Aisland-SJL/dsh-worktable](https://github.com/Aisland-SJL/dsh-worktable) v0.2.3（MIT）。SGD 明确其界面、交互与设计逻辑就是目标，并提出新愿景“桌面智能体，随时插入不同项目”。Codex 于 2026-09-01 完成一轮只读学习。
+- 三份内部文档（均命中 exclude）：`docs/审计-以dsh-worktable为标杆的项目审计-Claude-2026-09-02.md`、`docs/开发方案-v0.11-桌面智能体项目工作台-2026-09-02.md`、`docs/接力提示词-v0.11-项目工作台-批次1-2026-09-02.md`。推荐路线 B：在鲸坞私有插件 + `whaledock.content-shell/v1` seam 上重建标杆的四个模型（项目一等对象、控制室、窗格容器、产物回流），不引入标杆代码。
+- 当时已落地代码（分支 `claude/v011-project-workbench`，该批次交接时**未提交、未推送**）：`lib/projects.js`（app-owned 项目注册表：`proj_` 随机 id、文件夹 canonical 校验与受保护根、绑定会话、布局、排序/隐藏、控制室固定首位、原子写与坏文件隔离、可选 `.whaledock/project.json` 旁车认领）；`lib/control-room.js`（控制室纯函数：rc.2 快照收窄、need>done>busy>idle、子代理双通道聚合、ack 生命周期）；`test/projects-smoke.js` 14 项、`test/control-room-smoke.js` 8 项；`test/smoke.js` 新增 v0.11 组。本机 `npm run smoke`：`ALL PASS`，46 个 ALL PASS 标记（正式版基线 44）。
+- 已核实的关键前提：rc.2 `session.create` 接受 `workspaceId` 或 `cwd`（`vendor/.../dsh-client-connection/lib/client.js:5267`），插件已在用 `workspaces.create({path})` + `connectWorkspace()`；因此“切项目 = 切会话，不重启后端”可行。
+- SGD 已拍板（开发方案 §9）：Q1 明确选择“是”；Q2–Q5 全部采用 Claude 推荐——保留零概念首次路径并恢复项目抽屉、registry 为主 + 旁车可选、首批 1:1 绑定、控制室独立暗色蓝图视觉。路线 B 与总纲修订正式生效。
+- Codex 随后按接力提示词完成批次 1，并继续完成批次 2–4；结果见下一节。候选批次 5 的终端窗格等安全面仍按方案要求另行批准。
+
+## v0.11 批次 1–4（2026-09-02，Codex）：源码开发完成
+
+- **批次 1**：21 个 legacy context operation 已抽入纯 Node `lib/context-workspace-ops.js`，8 个项目 operation 独立分域；主进程注册表、Host root authorize、HMAC 根证明、AEAD bootstrap ticket、prepare/open/commit 与 settle fallback 均已闭环。页面不传绝对路径，`~/.dsh` 仍不读写。
+- **批次 2**：项目抽屉、固定控制室、项目管理、1:1 会话绑定/切换、三态主题、need/done/busy/idle 卡片与托盘文案已落地；控制室保留独立暗色蓝图视觉，右侧原生对话持续可达。
+- **批次 3**：三个持久化预设、稳定「窗口N」、五类安全窗格、`widget-result.json` 双回读锁定回流和隔离 HTML 子窗已落地。响应式使用“中栏 720px + 单窗 600px”两层容器查询；1200×768 三预设的中栏 538px、单窗 508px、模板 482px，所有测点 `scrollWidth == clientWidth`。空窗收为明确的 Agent 产物落点。
+- **批次 4**：模板+文件夹向导、只补缺失文件、项目动作只填草稿不发送、经典驾驶舱 Settings-only、⌘⇧1–9 切项目与旧配置 durable-once 迁移已落地。
+- 全量 `npm run smoke` 实跑 **1007 PASS / 55 个 ALL PASS 标记**，末行 `ALL PASS`；定向回归为 plugin 28、main v0.11 25、project ops 22、projects 17、P0B 21、backend context 19。context 固定包为 **15 文件 / 998,730 B**，digest `4120ef87ecf588829de06b9424c1f7f89d9526148504fb43609a9c5a749db8b5`。App runtime 合规仍为 52 包 / 830 文件，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`。
+- 隔离源码 UI 证据位于 `docs/验收证据-v0.11-项目工作台-2026-09-02/`，完整记录为 `docs/验收记录-v0.11-项目工作台-批次1至4-2026-09-02.md`；两者均命中 `.git/info/exclude`。本批没有构建 v0.11 包、没有触碰正式安装、没有推送/PR/tag/Release，也没有程序化录屏；3 张 PNG 不能代替方案要求的 PR/录屏或 SGD 人工验收。
 
 ## v0.10.0 已公开发布与本机收口
 
@@ -21,14 +39,13 @@
 - 正式 v0.10.0 尚未用真实模型完成整条创作链；完整视觉、滚动、长时间操作、真实会话与整体手感仍待人工。系统 App 界面唯一可见性也因上述索引边界保持 **NEEDS-HUMAN**。
 - 后续功能从当前 main 新开独立 v0.11 分支；不得回到 v0.9.x，也不得在清理批次前擅自删除旧 worktree、已合并分支或 `docs/_to_delete/`。
 
-## v0.11 下一批登记（本批不动）
+## v0.11 剩余人工与授权闸门
 
-1. 灵感收件箱与灵感拆条回迁同屏台，新增 `inspiration.*` 需过文件 RPC 黑名单与投影脱敏。
-2. 把「今天，推进一件事」回迁为内容库顶部的「今天」卡。
-3. 视频工作台默认进入同屏台；旧驾驶舱入口移到设置「经典驾驶舱（旧）」。
-4. 将 `main.js` 的 21 个 context operation 抽到纯 Node 可加载的 `lib/context-workspace-ops.js`，由 smoke 直测。
-5. 统一「视频工作台」与「AI 工作台」的一词两义，先给 SGD 2–3 个候选名再定。
-6. 按 D6 清理两个 prunable worktree（`harness-desktop-v010-forward`、`whaledock-v0.2`）与三条已合并的 `codex/v010-*` 本地分支；`docs/_to_delete/`（含 `_audit-cowork-20260827/`、`_audit-cowork-20260829/`）由 SGD 自己移入废纸篓。
+1. 批次 2：SGD 用安装 alpha 建两个真实项目并分别绑定对话，制造一次 need 状态，确认黄灯、点卡切换与五分钟手感。
+2. 批次 3：真实 Agent 在项目根生成 Markdown 与 `widget-result.json`，确认产物自动回到指定「窗口N」。
+3. 批次 4：用真实 v0.10.0 用户数据升级，回读原短视频工作区只迁成一个项目且旧配置未被改写。
+4. 批次 5：终端窗格、旁车认领 UI、原生皮肤等继续保持未开始；必须由 SGD 单独批准。
+5. Windows/Intel 真机、真实模型、钥匙串/TCC、系统 App 界面与正式安装包/签名/公证/发布仍是独立证据，不由本次源码 smoke 或隔离 UI 代替。
 
 ## v0.9.1 历史恢复与更新提醒基线
 

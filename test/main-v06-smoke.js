@@ -247,20 +247,24 @@ async function main06() {
     assert.equal(/一键安装|自动安装/.test(settings), false);
   });
 
-  await test('切换工作台的三个入口都在，且快捷键不抢系统级', async () => {
+  await test('旧工作台能力保留但入口降到设置，项目占用菜单 1–9 且不抢系统级', async () => {
     const value = source('main.js');
-    // 入口一：窗口左上角常驻按钮（外壳页里）。
+    // 经典模式内部的旧切换器仍保留，不删除历史工作台能力。
     assert.match(source('shell.html'), /id="switcher-button"/);
-    // 入口二：托盘菜单。
-    assert.match(value, /\{ label: '工作台', submenu: workbenchSubmenuTemplate\(\) \}/);
-    // 入口三：应用菜单加速键。
-    assert.match(value, /\{ label: '工作台', submenu: workbenchMenuTemplate\(\) \}/);
-    assert.match(value, /accelerator: `CommandOrControl\+Shift\+\$\{index \+ 1\}`/);
-    assert.match(value, /accelerator: 'CommandOrControl\+Shift\+0'/);
+    // 产品级入口只在 Settings，托盘/应用顶层由项目工作台接管。
+    const settings = source('settings.html');
+    const preload = source('preload-settings.js');
+    assert.match(settings, /id="open-classic-cockpit"/);
+    assert.match(settings, /id="return-project-workbench"/);
+    assert.match(preload, /settings:open-classic-cockpit/);
+    assert.match(preload, /settings:return-project-workbench/);
+    assert.match(value, /\{ label: '项目', submenu: projectMenuTemplate\(\) \}/);
+    assert.match(value, /accelerator: `CommandOrControl\+Shift\+\$\{row\.index\}`/);
+    assert.doesNotMatch(value, /accelerator: 'CommandOrControl\+Shift\+0'/);
     // 刻意不走 globalShortcut：那是系统级抢占，而 macOS 的 ⌘⇧3/4/5 是系统截屏。
-    const menuBlock = value.slice(value.indexOf('function workbenchMenuTemplate()'), value.indexOf('function createAppMenu()'));
+    const menuBlock = value.slice(value.indexOf('function projectMenuTemplate('), value.indexOf('function workbenchMenuTemplate()'));
     assert.equal(/globalShortcut/.test(menuBlock), false);
-    assert.match(value, /这里刻意\*\*不用 globalShortcut\*\*/);
+    assert.match(value, /项目快捷键只在应用菜单生效，不用 globalShortcut 抢占系统/);
   });
 
   await test('工作台自带主题优先，且只注入自有页面', async () => {

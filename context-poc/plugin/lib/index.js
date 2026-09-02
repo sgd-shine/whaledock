@@ -1,8 +1,12 @@
-import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import {
+  createDecipheriv, createHash, createHmac, randomUUID, timingSafeEqual
+} from 'node:crypto';
+import { realpathSync, statSync } from 'node:fs';
+import * as path from 'node:path';
 import { isAgentLoopRequest } from '@deepseek-ai/dsh-llm';
 
 export const name = 'whaledock-context-bridge-poc';
-export const inject = ['connection', 'systemPrompt', 'sessions', 'llm'];
+export const inject = ['connection', 'systemPrompt', 'sessions', 'llm', 'apiProxy'];
 
 const CONTRACT = 'whaledock.context-bridge/v1';
 const CHANNEL = '/whaledock.context';
@@ -16,12 +20,20 @@ const CAPABILITIES = Object.freeze([
   'controller-conflict-fence',
   'ordered-events',
   'ui-preferences-v1',
-  'workspace-files-v1'
+  'workspace-files-v1',
+  'project-workbench-v1',
+  'project-session-bootstrap-v1'
 ]);
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 const SESSION_REF_RE = /^session-[a-f0-9]{64}$/;
+const SESSION_BINDING_REF_RE = /^session-binding-[a-f0-9]{64}$/;
+const SESSION_ROOT_REF_RE = /^session-root-[a-f0-9]{64}$/;
+const PROJECT_OPEN_TOKEN_RE = /^project-open-[a-f0-9]{64}$/;
+const PROJECT_BOOTSTRAP_TICKET_RE = /^project-bootstrap-v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{16,10923}\.[A-Za-z0-9_-]{22}$/;
+const PROJECT_BOOTSTRAP_NONCE_RE = /^[a-f0-9]{32}$/;
 const DELIVERY_TARGET_REF_RE = /^delivery-target-[a-f0-9]{64}$/;
 const PROJECT_ID_RE = /^wdp1_[a-f0-9]{32}$/;
+const APP_PROJECT_ID_RE = /^proj_[a-f0-9]{32}$/;
 const PROJECT_REVISION_RE = /^[a-f0-9]{64}$/;
 const WORKBENCH_ID_RE = /^(?:builtin|user):[A-Za-z0-9][A-Za-z0-9._-]{0,87}$/;
 const TOKEN_RE = /^[a-f0-9]{64}$/;
@@ -50,7 +62,13 @@ const WORKSPACE_FILE_OPERATIONS = new Set([
   'publish.read', 'publish.create', 'publish.update',
   'review.tactics.read', 'review.solidify',
   'shoot.open', 'shoot.history.read',
-  'receipts.read', 'receipts.ack', 'receipts.open'
+  'receipts.read', 'receipts.ack', 'receipts.open',
+  'projects.list', 'projects.create', 'projects.update', 'projects.remove',
+  'projects.bind', 'projects.reorder', 'projects.open', 'console.read'
+]);
+const PROJECT_OPERATIONS = new Set([
+  'projects.list', 'projects.create', 'projects.update', 'projects.remove',
+  'projects.bind', 'projects.reorder', 'projects.open', 'console.read'
 ]);
 const WORKSPACE_FILE_DELIVERY_OPERATIONS = new Set([
   'project.action.prepare', 'project.action.submit',
@@ -61,25 +79,44 @@ const WORKSPACE_FILE_STATES = new Set([
 ]);
 const WORKSPACE_FILE_REJECT_CODES = new Set([
   'workspace-unavailable', 'workspace-mismatch', 'operation-invalid',
-  'operation-timeout', 'operation-failed', 'operation-stale', 'outcome-unknown', 'busy'
+  'operation-timeout', 'operation-failed', 'operation-stale', 'outcome-unknown', 'busy',
+  'cancelled', 'project-not-found', 'project-folder-invalid', 'project-protected',
+  'project-duplicate-folder', 'project-limit'
 ]);
 const WORKSPACE_FILE_FORBIDDEN_KEYS = new Set([
   'absolutepath', 'relativepath', 'effectivepath', 'workspacekey', 'cwd',
   'filepath', 'root', 'rootpath', 'frontmatter', 'patch',
-  'sessionref', 'currentsessionid', 'rawsession', 'context', 'envelope',
+  'sessionref', 'sessionrootref', 'currentbindingref', 'currentsessionid',
+  'rootauthorizationtoken',
+  'rawsession', 'context', 'envelope',
   'deliverytargetref',
   'authtoken', 'selectiontoken', 'controllerproof', 'claimtoken', 'requestseq',
   'hash', 'dev', 'ino'
 ]);
 const MAX_WORKSPACE_FILE_INPUT_BYTES = 4 * 1024;
 const MAX_WORKSPACE_FILE_RESULT_BYTES = 6 * 1024;
+const MAX_PROJECT_DETAIL_BYTES = 24 * 1024;
+const MAX_PROJECT_LIST_BYTES = 32 * 1024;
+const MAX_PROJECT_CONSOLE_BYTES = 48 * 1024;
+const MAX_PROJECT_RESULT_BYTES = 64 * 1024;
+const MAX_PROJECT_CONSOLE_SESSIONS = 512;
 const MAX_WORKSPACE_FILE_JOBS = 64;
 const MAX_WORKSPACE_FILE_QUEUED = 32;
 const MAX_WORKSPACE_FILE_PER_CONTROLLER = 4;
 const MAX_WORKSPACE_FILE_READ_BATCH = 4;
+// backend 的完整 HTTP 回包上限为 64KiB。这里按 Host RPC result 的
+// 实际 UTF-8 序列化体积动态装箱，并为 client-request 中最多 8KiB 的
+// rpcId 回显与 server-response 外层信封预留空间。
+const MAX_WORKSPACE_FILE_READ_RESULT_BYTES = 56 * 1024;
 const WORKSPACE_FILE_PENDING_MS = 10000;
 const WORKSPACE_FILE_RUNNING_MS = 10000;
 const WORKSPACE_FILE_RETAIN_MS = 30000;
+const WORKSPACE_FILE_ROOT_AUTHORIZATION_MS = 5000;
+const PROJECT_BOOTSTRAP_TICKET_MS = 10000;
+const PROJECT_BOOTSTRAP_CLOCK_SKEW_MS = 1000;
+const MAX_PROJECT_BOOTSTRAP_TICKET_BYTES = 8192;
+const MAX_PROJECT_BOOTSTRAP_REPLAYS = 128;
+const PROJECT_BOOTSTRAP_SESSION_PREFIX = 'session-whaledock-project-';
 const ENDPOINT_RATES = Object.freeze({
   handshake: 16,
   'selection/register': 256,
@@ -97,7 +134,10 @@ const ENDPOINT_RATES = Object.freeze({
   'workspace/files/cancel': 16,
   'workspace/files/read': 64,
   'workspace/files/claim': 32,
-  'workspace/files/settle': 32
+  'workspace/files/authorize': 32,
+  'workspace/files/settle': 32,
+  'projects/session/resolve': 16,
+  'projects/session/bootstrap': 8
 });
 
 function plain(value) {
@@ -127,6 +167,100 @@ function deliveryTargetRef(secret, hostInstanceId, rawSessionId) {
   return `delivery-target-${createHmac('sha256', secret)
     .update(`whaledock-delivery-target-v1\0${hostInstanceId}\0${rawSessionId}`)
     .digest('hex')}`;
+}
+
+// 项目绑定跨 Host 重启稳定；它不是现有单轮、随机的 sessionRef。
+function sessionBindingRef(rawSessionId) {
+  return `session-binding-${sha256(`whaledock-session-binding/v1\0${rawSessionId}`)}`;
+}
+
+// session.header.cwd 只在 Host 内部 realpath；跨进程仅传当次 Host
+// auth token 域分离的 opaque HMAC，Client 既看不到路径也不能伪造 proof。
+function canonicalSessionRoot(value) {
+  if (typeof value !== 'string' || !value || CONTROL_RE.test(value)
+      || Buffer.byteLength(value, 'utf8') > 4096 || !path.isAbsolute(value)) return null;
+  try {
+    const stat = statSync(value);
+    if (!stat || !stat.isDirectory()) return null;
+    const resolver = typeof realpathSync.native === 'function' ? realpathSync.native : realpathSync;
+    let normalized = resolver(value);
+    if (process.platform === 'win32') {
+      if (normalized.startsWith('\\\\?\\UNC\\')) normalized = `\\\\${normalized.slice(8)}`;
+      else if (/^\\\\\?\\[A-Za-z]:/.test(normalized)) normalized = normalized.slice(4);
+    }
+    normalized = path.resolve(normalized);
+    return process.platform === 'win32'
+      ? normalized.toLocaleLowerCase('en-US') : normalized;
+  } catch (_error) { return null; }
+}
+
+function sessionRootRef(secret, hostInstanceId, cwd) {
+  const canonical = canonicalSessionRoot(cwd);
+  if (canonical === null) return null;
+  return `session-root-${createHmac('sha256', secret)
+    .update(`whaledock-session-root/v1\0${hostInstanceId}\0${canonical}`)
+    .digest('hex')}`;
+}
+
+function projectBootstrapKey(secret) {
+  return createHmac('sha256', Buffer.from(secret, 'hex'))
+    .update('whaledock-project-bootstrap-key/v1')
+    .digest();
+}
+
+function openProjectBootstrapTicket(secret, hostInstanceId, ticket, expected, now = Date.now()) {
+  try {
+    if (typeof secret !== 'string' || !TOKEN_RE.test(secret)
+        || !validId(hostInstanceId) || typeof ticket !== 'string'
+        || !PROJECT_BOOTSTRAP_TICKET_RE.test(ticket)
+        || Buffer.byteLength(ticket, 'utf8') > MAX_PROJECT_BOOTSTRAP_TICKET_BYTES
+        || !plain(expected) || !validId(expected.controllerId)
+        || !validId(expected.pageInstanceId)
+        || !validPreferenceRevision(expected.selectionRevision)
+        || !APP_PROJECT_ID_RE.test(expected.projectId)
+        || !PROJECT_OPEN_TOKEN_RE.test(expected.openToken)
+        || !Number.isSafeInteger(now) || now < 0) return null;
+    const parts = ticket.split('.');
+    const iv = Buffer.from(parts[1], 'base64url');
+    const encrypted = Buffer.from(parts[2], 'base64url');
+    const tag = Buffer.from(parts[3], 'base64url');
+    if (iv.length !== 12 || encrypted.length < 1 || tag.length !== 16) return null;
+    const decipher = createDecipheriv('aes-256-gcm', projectBootstrapKey(secret), iv);
+    decipher.setAAD(Buffer.from(`project-bootstrap-v1\0${hostInstanceId}`, 'utf8'));
+    decipher.setAuthTag(tag);
+    const decoded = Buffer.concat([
+      decipher.update(encrypted), decipher.final()
+    ]).toString('utf8');
+    if (Buffer.byteLength(decoded, 'utf8') > 6144) return null;
+    const value = JSON.parse(decoded);
+    if (!exact(value, [
+      'version', 'hostInstanceId', 'controllerId', 'pageInstanceId',
+      'selectionRevision', 'projectId', 'openToken', 'root',
+      'issuedAtMs', 'expiresAtMs', 'nonce'
+    ]) || value.version !== 1 || value.hostInstanceId !== hostInstanceId
+        || value.controllerId !== expected.controllerId
+        || value.pageInstanceId !== expected.pageInstanceId
+        || value.selectionRevision !== expected.selectionRevision
+        || value.projectId !== expected.projectId
+        || value.openToken !== expected.openToken
+        || typeof value.root !== 'string' || !value.root
+        || Buffer.byteLength(value.root, 'utf8') > 4096
+        || CONTROL_RE.test(value.root) || !path.isAbsolute(value.root)
+        || !PROJECT_BOOTSTRAP_NONCE_RE.test(String(value.nonce || ''))
+        || !Number.isSafeInteger(value.issuedAtMs) || value.issuedAtMs < 0
+        || !Number.isSafeInteger(value.expiresAtMs)
+        || value.expiresAtMs <= value.issuedAtMs
+        || value.expiresAtMs - value.issuedAtMs > PROJECT_BOOTSTRAP_TICKET_MS
+        || value.issuedAtMs > now + PROJECT_BOOTSTRAP_CLOCK_SKEW_MS
+        || now >= value.expiresAtMs) return null;
+    return Object.freeze({
+      projectId: value.projectId,
+      openToken: value.openToken,
+      root: value.root,
+      nonce: value.nonce,
+      expiresAtMs: value.expiresAtMs
+    });
+  } catch (_error) { return null; }
 }
 
 function tokenMatches(actual, expected) {
@@ -205,18 +339,40 @@ function samePreferenceSnapshot(left, right) {
     && left.contentViewHintSeen === right.contentViewHintSeen);
 }
 
-function safeWorkspaceValue(value, maximumBytes) {
+function workspaceFileLimits(operation) {
+  if (operation === 'console.read') {
+    return Object.freeze({ input: MAX_PROJECT_CONSOLE_BYTES, result: MAX_PROJECT_RESULT_BYTES });
+  }
+  if (operation === 'projects.list') {
+    return Object.freeze({ input: MAX_WORKSPACE_FILE_INPUT_BYTES, result: MAX_PROJECT_LIST_BYTES });
+  }
+  if (PROJECT_OPERATIONS.has(operation)) {
+    return Object.freeze({ input: MAX_PROJECT_DETAIL_BYTES, result: MAX_PROJECT_DETAIL_BYTES });
+  }
+  return Object.freeze({
+    input: MAX_WORKSPACE_FILE_INPUT_BYTES,
+    result: MAX_WORKSPACE_FILE_RESULT_BYTES
+  });
+}
+
+function safeWorkspaceValue(value, maximumBytes, options = {}) {
+  const maxDepth = Number.isSafeInteger(options.maxDepth) ? options.maxDepth : 5;
+  const maxArrayItems = Number.isSafeInteger(options.maxArrayItems) ? options.maxArrayItems : 64;
+  const maxStringBytes = Number.isSafeInteger(options.maxStringBytes) ? options.maxStringBytes : 2048;
+  const maxInteger = Number.isSafeInteger(options.maxInteger)
+    ? options.maxInteger : 1_000_000_000_000;
+  const maxKeyChars = Number.isSafeInteger(options.maxKeyChars) ? options.maxKeyChars : 64;
   const canonicalKey = (key) => key.toLowerCase().replace(/[-_]/g, '');
   const visit = (item, depth) => {
-    if (depth > 5) return null;
+    if (depth > maxDepth) return null;
     if (item === null || typeof item === 'boolean') return item;
-    if (Number.isSafeInteger(item) && Math.abs(item) <= 1_000_000_000_000) return item;
+    if (Number.isSafeInteger(item) && Math.abs(item) <= maxInteger) return item;
     if (typeof item === 'string') {
-      return Buffer.byteLength(item, 'utf8') <= 2048 && !WORKSPACE_TEXT_CONTROL_RE.test(item)
+      return Buffer.byteLength(item, 'utf8') <= maxStringBytes && !WORKSPACE_TEXT_CONTROL_RE.test(item)
         ? item : null;
     }
     if (Array.isArray(item)) {
-      if (item.length > 64) return null;
+      if (item.length > maxArrayItems) return null;
       const result = [];
       for (const child of item) {
         const clean = visit(child, depth + 1);
@@ -228,7 +384,8 @@ function safeWorkspaceValue(value, maximumBytes) {
     if (!plain(item) || Object.keys(item).length > 64) return null;
     const result = {};
     for (const [key, child] of Object.entries(item)) {
-      if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(key)
+      if (typeof key !== 'string' || key.length < 1 || key.length > maxKeyChars
+          || !/^[A-Za-z][A-Za-z0-9_-]*$/.test(key)
           || WORKSPACE_FILE_FORBIDDEN_KEYS.has(canonicalKey(key))) return null;
       const clean = visit(child, depth + 1);
       if (clean === null && child !== null) return null;
@@ -240,6 +397,92 @@ function safeWorkspaceValue(value, maximumBytes) {
   if (!plain(clean)) return null;
   return Buffer.byteLength(JSON.stringify(clean), 'utf8') <= maximumBytes
     ? Object.freeze(clean) : null;
+}
+
+function safeWorkspaceOperationValue(operation, value, direction) {
+  const limits = workspaceFileLimits(operation);
+  const project = PROJECT_OPERATIONS.has(operation);
+  return safeWorkspaceValue(value, limits[direction], project ? {
+    maxDepth: 12,
+    maxArrayItems: MAX_PROJECT_CONSOLE_SESSIONS,
+    maxStringBytes: MAX_PROJECT_DETAIL_BYTES,
+    maxInteger: Number.MAX_SAFE_INTEGER,
+    maxKeyChars: operation === 'console.read' ? 128 : 64
+  } : undefined);
+}
+
+function validBoundRawSession(value) {
+  return value !== null && validRawSession(value);
+}
+
+// Client 先把官方 snapshot 收窄成数组，Host 再把所有 raw id 换成稳定 bindingRef；
+// 这样 main/项目 operation 永远看不到 dsh 原始 session id，也避开长 opaque id 作为 JSON key。
+function projectConsoleSnapshot(value) {
+  if (!exact(value, ['byId', 'subagentsByParent', 'jobsBySession', 'current'])
+      || !Array.isArray(value.byId) || value.byId.length > MAX_PROJECT_CONSOLE_SESSIONS
+      || !Array.isArray(value.subagentsByParent)
+      || value.subagentsByParent.length > MAX_PROJECT_CONSOLE_SESSIONS
+      || !Array.isArray(value.jobsBySession)
+      || value.jobsBySession.length > MAX_PROJECT_CONSOLE_SESSIONS
+      || !(value.current === null || validBoundRawSession(value.current))) return null;
+  const seen = new Set();
+  const byId = {};
+  for (const entry of value.byId) {
+    if (!exact(entry, [
+      'sessionId', 'running', 'completed', 'pendingInteraction',
+      'parentId', 'displayTitle', 'updatedAt'
+    ]) || !validBoundRawSession(entry.sessionId) || seen.has(entry.sessionId)
+        || typeof entry.running !== 'boolean' || typeof entry.completed !== 'boolean'
+        || !(entry.pendingInteraction === null || (
+          typeof entry.pendingInteraction === 'string'
+          && ['approval', 'plan-review', 'question'].includes(entry.pendingInteraction)
+        )) || !(entry.parentId === null || validBoundRawSession(entry.parentId))
+        || typeof entry.displayTitle !== 'string'
+        || Buffer.byteLength(entry.displayTitle, 'utf8') > 512
+        || WORKSPACE_TEXT_CONTROL_RE.test(entry.displayTitle)
+        || !Number.isSafeInteger(entry.updatedAt) || entry.updatedAt < 0) return null;
+    seen.add(entry.sessionId);
+    const bindingRef = sessionBindingRef(entry.sessionId);
+    byId[bindingRef] = Object.freeze({
+      id: bindingRef,
+      running: entry.running,
+      completed: entry.completed,
+      pendingInteraction: entry.pendingInteraction,
+      parentId: entry.parentId === null ? null : sessionBindingRef(entry.parentId),
+      displayTitle: entry.displayTitle,
+      updatedAt: entry.updatedAt
+    });
+  }
+  const subagentsByParent = {};
+  for (const row of value.subagentsByParent) {
+    if (!exact(row, ['parentId', 'children']) || !validBoundRawSession(row.parentId)
+        || !Array.isArray(row.children) || row.children.length > 64
+        || row.children.some((id) => !validBoundRawSession(id))) return null;
+    subagentsByParent[sessionBindingRef(row.parentId)] = Object.freeze(
+      [...new Set(row.children)].map(sessionBindingRef)
+    );
+  }
+  const jobsBySession = {};
+  for (const row of value.jobsBySession) {
+    if (!exact(row, ['sessionId', 'jobs']) || !validBoundRawSession(row.sessionId)
+        || !Array.isArray(row.jobs) || row.jobs.length > 64) return null;
+    const jobs = [];
+    for (const job of row.jobs) {
+      if (!exact(job, ['status', 'startedAt']) || typeof job.status !== 'string'
+          || !job.status || job.status.length > 32 || CONTROL_RE.test(job.status)
+          || !(job.startedAt === null || (Number.isSafeInteger(job.startedAt)
+            && job.startedAt >= 0))) return null;
+      jobs.push(Object.freeze({ status: job.status, startedAt: job.startedAt }));
+    }
+    jobsBySession[sessionBindingRef(row.sessionId)] = Object.freeze(jobs);
+  }
+  const snapshot = {
+    byId: Object.freeze(byId),
+    subagentsByParent: Object.freeze(subagentsByParent),
+    jobsBySession: Object.freeze(jobsBySession),
+    current: value.current === null ? null : sessionBindingRef(value.current)
+  };
+  return safeWorkspaceOperationValue('console.read', snapshot, 'input');
 }
 
 function sessionProjectId(session) {
@@ -318,6 +561,7 @@ export function apply(ctx) {
   const endpointBuckets = new Map();
   const pendingPreferences = new Map();
   const workspaceFileJobs = new Map();
+  const projectBootstrapReplays = new Map();
   let workspaceFileRequestSeq = 0;
   let preferences = Object.freeze({
     revision: 0,
@@ -720,6 +964,108 @@ export function apply(ctx) {
     });
   };
 
+  const prepareProjectOperationInput = (operation, input, selection) => {
+    if (operation === 'projects.list') {
+      if (!exact(input, ['cursor', 'limit', 'includeHidden'])
+          || !Number.isSafeInteger(input.cursor) || input.cursor < 0
+          || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 32
+          || typeof input.includeHidden !== 'boolean') return { code: 'operation-invalid' };
+      return { input };
+    }
+    if (operation === 'projects.create') {
+      if (!plain(input) || Object.keys(input).some((key) => (
+        key !== 'name' && key !== 'icon' && key !== 'templateId'
+      ))) return { code: 'operation-invalid' };
+      return { input };
+    }
+    if (operation === 'projects.update') {
+      if (!exact(input, ['projectId', 'changes']) || !APP_PROJECT_ID_RE.test(input.projectId)
+          || !plain(input.changes) || Object.keys(input.changes).length < 1
+          || Object.keys(input.changes).some((key) => ![
+            'name', 'icon', 'hidden', 'layoutPreset', 'paneState'
+          ].includes(key))) return { code: 'operation-invalid' };
+      return { input };
+    }
+    if (operation === 'projects.remove') {
+      return exact(input, ['projectId']) && APP_PROJECT_ID_RE.test(input.projectId)
+        ? { input } : { code: 'operation-invalid' };
+    }
+    if (operation === 'projects.bind') {
+      if (!exact(input, ['projectId'], ['openToken'])
+          || !APP_PROJECT_ID_RE.test(input.projectId)
+          || (Object.prototype.hasOwnProperty.call(input, 'openToken')
+            && !PROJECT_OPEN_TOKEN_RE.test(String(input.openToken || '')))) {
+        return { code: 'operation-invalid' };
+      }
+      if (!selection || !validBoundRawSession(selection.raw)) {
+        return { code: 'workspace-unavailable' };
+      }
+      let session = null;
+      try { session = ctx.sessions?.get?.(selection.raw) || null; }
+      catch (_error) { session = null; }
+      const rootRef = sessionRootRef(authToken, hostInstanceId, session?.header?.cwd);
+      if (!SESSION_ROOT_REF_RE.test(String(rootRef || ''))) {
+        return { code: 'workspace-unavailable' };
+      }
+      return { input: Object.freeze({
+        projectId: input.projectId,
+        bindingRef: sessionBindingRef(selection.raw),
+        ...(Object.prototype.hasOwnProperty.call(input, 'openToken')
+          ? { openToken: input.openToken } : {})
+      }), sessionRootRef: rootRef };
+    }
+    if (operation === 'projects.reorder') {
+      if (!exact(input, ['ids']) || !Array.isArray(input.ids)
+          || input.ids.length < 1 || input.ids.length > 128
+          || input.ids.some((id) => !APP_PROJECT_ID_RE.test(id))
+          || new Set(input.ids).size !== input.ids.length) return { code: 'operation-invalid' };
+      return { input };
+    }
+    if (operation === 'projects.open') {
+      if (!plain(input) || !APP_PROJECT_ID_RE.test(input.projectId)
+          || (input.phase !== 'prepare' && input.phase !== 'commit')) {
+        return { code: 'operation-invalid' };
+      }
+      if (input.phase === 'prepare') {
+        return exact(input, ['projectId', 'phase']) ? { input } : { code: 'operation-invalid' };
+      }
+      if (!exact(input, ['projectId', 'phase', 'openToken', 'bindingRef'])
+          || !PROJECT_OPEN_TOKEN_RE.test(input.openToken)
+          || !SESSION_BINDING_REF_RE.test(input.bindingRef)) {
+        return { code: 'operation-invalid' };
+      }
+      if (!selection || !validBoundRawSession(selection.raw)
+          || sessionBindingRef(selection.raw) !== input.bindingRef) {
+        return { code: 'workspace-unavailable' };
+      }
+      let session = null;
+      try { session = ctx.sessions?.get?.(selection.raw) || null; }
+      catch (_error) { session = null; }
+      const rootRef = sessionRootRef(authToken, hostInstanceId, session?.header?.cwd);
+      if (!SESSION_ROOT_REF_RE.test(String(rootRef || ''))) {
+        return { code: 'workspace-unavailable' };
+      }
+      // bindingRef 只用于 Host 确认 Client 已真实切到目标会话；
+      // main 的公开 input 仅收 prepare 发放的 openToken。Host 从已验证
+      // raw 重新计算的 stable ref 只放在内部 job metadata，页面无法覆盖。
+      return {
+        input: Object.freeze({
+          projectId: input.projectId,
+          phase: 'commit',
+          openToken: input.openToken
+        }),
+        currentBindingRef: sessionBindingRef(selection.raw),
+        sessionRootRef: rootRef
+      };
+    }
+    if (operation === 'console.read') {
+      if (!exact(input, ['snapshot'])) return { code: 'operation-invalid' };
+      const snapshot = projectConsoleSnapshot(input.snapshot);
+      return snapshot ? { input: Object.freeze({ snapshot }) } : { code: 'operation-invalid' };
+    }
+    return { code: 'operation-invalid' };
+  };
+
   const workspaceFileTerminal = (state) => (
     state === 'fulfilled' || state === 'rejected'
       || state === 'cancelled' || state === 'expired'
@@ -734,6 +1080,19 @@ export function apply(ctx) {
 
   const workspaceFileContextCurrent = (job) => {
     const selection = job && controllers.get(job.controllerId);
+    if (job && job.scope === 'global') {
+      const pageCurrent = Boolean(selection && selection.managed === true
+        && selection.pageInstanceId === job.pageInstanceId
+        && selection.selectionRevision === job.selectionRevision);
+      if (!pageCurrent) return false;
+      if (job.sessionRootRef === null) return true;
+      if (!validBoundRawSession(selection.raw)) return false;
+      let session = null;
+      try { session = ctx.sessions?.get?.(selection.raw) || null; }
+      catch (_error) { session = null; }
+      return sessionRootRef(authToken, hostInstanceId, session?.header?.cwd)
+        === job.sessionRootRef;
+    }
     const record = job && recordsByRef.get(job.sessionRef);
     const envelope = record && record.effective;
     let session = null;
@@ -777,12 +1136,25 @@ export function apply(ctx) {
         job.code = 'workspace-unavailable';
         job.finishedAtMs = now;
       } else if (job.state === 'running' && !workspaceFileContextCurrent(job)) {
-        // claim 已发出后 selection 变化，副作用是否发生不可确认。
-        job.state = 'rejected';
-        job.code = 'outcome-unknown';
-        job.result = null;
-        job.claimToken = null;
-        job.finishedAtMs = now;
+        if (job.sessionRootRef !== null && job.rootAuthorizationToken === null) {
+          // root-bound 操作在最终 authorize 之前按协议不得执行任何
+          // bind/touch/ACK/active 副作用，因此可精确报 workspace-mismatch。
+          job.state = 'rejected';
+          job.code = 'workspace-mismatch';
+          job.result = null;
+          job.claimToken = null;
+          job.finishedAtMs = now;
+        } else if (job.sessionRootRef === null) {
+          // 旧 operation 或无 root proof 的 operation 保持原有不确定语义。
+          job.state = 'rejected';
+          job.code = 'outcome-unknown';
+          job.result = null;
+          job.claimToken = null;
+          job.finishedAtMs = now;
+        }
+        // 已取得 root authorization 的任务以该快照为线性化点；
+        // 留在 running 到 settle，settle 会再读当前根并降级为
+        // outcome-unknown，绝不回 fulfilled。
       }
       if (workspaceFileTerminal(job.state)
           && Number.isSafeInteger(job.finishedAtMs)
@@ -808,7 +1180,7 @@ export function apply(ctx) {
     if (!selection || selection.managed !== true
         || selection.pageInstanceId !== payload.pageInstanceId
         || selection.selectionRevision !== payload.selectionRevision
-        || selection.sessionRef !== job.sessionRef
+        || (job.scope !== 'global' && selection.sessionRef !== job.sessionRef)
         || !workspaceFileContextCurrent(job)
         || !tokenMatches(payload.controllerProof, selection.controllerProof)) return null;
     return selection;
@@ -816,36 +1188,56 @@ export function apply(ctx) {
 
   const requestWorkspaceFile = (payload) => {
     const selection = preferencePageSelection(payload, ['operation', 'input']);
-    const input = selection && safeWorkspaceValue(
-      payload.input, MAX_WORKSPACE_FILE_INPUT_BYTES
-    );
+    const operation = typeof payload?.operation === 'string' ? payload.operation : '';
+    let input = selection && WORKSPACE_FILE_OPERATIONS.has(operation)
+      ? safeWorkspaceOperationValue(operation, payload.input, 'input') : null;
     if (!selection || typeof payload.operation !== 'string'
         || !WORKSPACE_FILE_OPERATIONS.has(payload.operation) || !input) return bad();
     if (!takeEndpointBudget('workspace/files/request')) return bad();
     sweep();
-    const resolved = resolveSelectionState(selection);
-    const record = resolved.state === 'selected'
-      ? recordsByRef.get(selection.sessionRef) : null;
-    const envelope = record && record.effective;
-    if (!record || record.revoked || !envelope) {
-      return ok({
+    const globalProjectOperation = PROJECT_OPERATIONS.has(payload.operation);
+    let currentBindingRef = null;
+    let sessionRootRef = null;
+    let record = null;
+    let envelope = null;
+    let deliveryOperation = false;
+    if (globalProjectOperation) {
+      const prepared = prepareProjectOperationInput(payload.operation, input, selection);
+      if (!prepared.input) return ok({
         accepted: false, requestToken: null, state: 'rejected',
-        code: 'workspace-unavailable', deadlineMs: null
+        code: prepared.code, deadlineMs: null
       });
-    }
-    let session = null;
-    try {
-      session = ctx.sessions && typeof ctx.sessions.get === 'function'
-        ? ctx.sessions.get(record.raw) : null;
-    } catch (_error) { session = null; }
-    const selectedProjectId = sessionProjectId(session);
-    const deliveryOperation = WORKSPACE_FILE_DELIVERY_OPERATIONS.has(payload.operation);
-    if ((!selectedProjectId || selectedProjectId !== envelope.project.projectId)
-        && !deliveryOperation) {
-      return ok({
-        accepted: false, requestToken: null, state: 'rejected',
-        code: 'workspace-mismatch', deadlineMs: null
-      });
+      input = safeWorkspaceOperationValue(payload.operation, prepared.input, 'input');
+      if (!input) return bad();
+      currentBindingRef = typeof prepared.currentBindingRef === 'string'
+        ? prepared.currentBindingRef : null;
+      sessionRootRef = typeof prepared.sessionRootRef === 'string'
+        ? prepared.sessionRootRef : null;
+    } else {
+      const resolved = resolveSelectionState(selection);
+      record = resolved.state === 'selected'
+        ? recordsByRef.get(selection.sessionRef) : null;
+      envelope = record && record.effective;
+      if (!record || record.revoked || !envelope) {
+        return ok({
+          accepted: false, requestToken: null, state: 'rejected',
+          code: 'workspace-unavailable', deadlineMs: null
+        });
+      }
+      let session = null;
+      try {
+        session = ctx.sessions && typeof ctx.sessions.get === 'function'
+          ? ctx.sessions.get(record.raw) : null;
+      } catch (_error) { session = null; }
+      const selectedProjectId = sessionProjectId(session);
+      deliveryOperation = WORKSPACE_FILE_DELIVERY_OPERATIONS.has(payload.operation);
+      if ((!selectedProjectId || selectedProjectId !== envelope.project.projectId)
+          && !deliveryOperation) {
+        return ok({
+          accepted: false, requestToken: null, state: 'rejected',
+          code: 'workspace-mismatch', deadlineMs: null
+        });
+      }
     }
     const activeForController = [...workspaceFileJobs.values()].filter((job) => (
       job.controllerId === selection.controllerId && !workspaceFileTerminal(job.state)
@@ -877,12 +1269,15 @@ export function apply(ctx) {
       controllerId: selection.controllerId,
       pageInstanceId: selection.pageInstanceId,
       selectionRevision: selection.selectionRevision,
-      sessionRef: selection.sessionRef,
-      projectId: envelope.project.projectId,
-      projectRevision: envelope.project.projectRevision,
-      contextRevision: envelope.revision,
+      scope: globalProjectOperation ? 'global' : 'workspace',
+      sessionRef: globalProjectOperation ? null : selection.sessionRef,
+      projectId: globalProjectOperation ? null : envelope.project.projectId,
+      projectRevision: globalProjectOperation ? null : envelope.project.projectRevision,
+      contextRevision: globalProjectOperation ? null : envelope.revision,
       operation: payload.operation,
       input,
+      currentBindingRef,
+      sessionRootRef,
       deliveryTargetRef: boundDeliveryTarget,
       issuedAtMs,
       deadlineMs,
@@ -891,6 +1286,8 @@ export function apply(ctx) {
       code: null,
       result: null,
       claimToken: null,
+      rootAuthorizationToken: null,
+      rootAuthorizedAtMs: null,
       finishedAtMs: null
     };
     workspaceFileJobs.set(requestToken, job);
@@ -936,27 +1333,43 @@ export function apply(ctx) {
         || value.limit > MAX_WORKSPACE_FILE_READ_BATCH) return bad();
     if (!takeEndpointBudget('workspace/files/read')) return bad();
     sweep();
-    const requests = [...workspaceFileJobs.values()]
+    const queuedJobs = [...workspaceFileJobs.values()]
       .filter((job) => job.state === 'queued')
       .sort((left, right) => left.requestSeq - right.requestSeq)
-      .slice(0, value.limit)
-      .map((job) => Object.freeze({
+      .slice(0, value.limit);
+    const requests = [];
+    const reply = () => ok({ contract: CONTRACT, hostInstanceId, requests });
+    for (const job of queuedJobs) {
+      const request = Object.freeze({
         requestToken: job.requestToken,
         requestSeq: job.requestSeq,
         controllerId: job.controllerId,
         pageInstanceId: job.pageInstanceId,
         selectionRevision: job.selectionRevision,
-        projectId: job.projectId,
-        projectRevision: job.projectRevision,
-        contextRevision: job.contextRevision,
+        ...(job.scope === 'workspace' ? {
+          projectId: job.projectId,
+          projectRevision: job.projectRevision,
+          contextRevision: job.contextRevision
+        } : {}),
         operation: job.operation,
         input: job.input,
+        ...(job.currentBindingRef === null
+          ? {} : { currentBindingRef: job.currentBindingRef }),
+        ...(job.sessionRootRef === null
+          ? {} : { sessionRootRef: job.sessionRootRef }),
         ...(job.deliveryTargetRef === null
           ? {} : { deliveryTargetRef: job.deliveryTargetRef }),
         issuedAtMs: job.issuedAtMs,
         deadlineMs: job.deadlineMs
-      }));
-    return ok({ contract: CONTRACT, hostInstanceId, requests });
+      });
+      requests.push(request);
+      if (Buffer.byteLength(JSON.stringify(reply()), 'utf8')
+          > MAX_WORKSPACE_FILE_READ_RESULT_BYTES) {
+        requests.pop();
+        break;
+      }
+    }
+    return reply();
   };
 
   const claimWorkspaceFile = (payload) => {
@@ -987,33 +1400,364 @@ export function apply(ctx) {
     });
   };
 
+  const authorizeWorkspaceFileRoot = (payload) => {
+    const value = withAuth(payload, [
+      'contract', 'hostInstanceId', 'requestToken', 'requestSeq', 'claimToken'
+    ]);
+    if (!value || value.contract !== CONTRACT || value.hostInstanceId !== hostInstanceId
+        || !TOKEN_RE.test(value.requestToken) || !TOKEN_RE.test(value.claimToken)
+        || !Number.isSafeInteger(value.requestSeq) || value.requestSeq < 1) return bad();
+    if (!takeEndpointBudget('workspace/files/authorize')) return bad();
+    sweep();
+    const job = workspaceFileJobs.get(value.requestToken);
+    if (job && job.state === 'rejected' && job.code === 'workspace-mismatch') {
+      return ok({ authorized: false, code: 'workspace-mismatch' });
+    }
+    if (!job || job.requestSeq !== value.requestSeq || job.state !== 'running'
+        || job.sessionRootRef === null || job.rootAuthorizationToken !== null
+        || !tokenMatches(value.claimToken, job.claimToken)
+        || !workspaceFileContextCurrent(job)) {
+      return ok({ authorized: false, code: 'operation-stale' });
+    }
+    const now = Date.now();
+    const authorizationToken = sha256(
+      `workspace-root-authorize\0${randomUUID()}\0${job.requestToken}\0${job.requestSeq}`
+    );
+    job.rootAuthorizationToken = authorizationToken;
+    job.rootAuthorizedAtMs = now;
+    return ok({ authorized: true, code: null, authorizationToken });
+  };
+
   const settleWorkspaceFile = (payload) => {
     const value = withAuth(payload, [
       'contract', 'hostInstanceId', 'requestToken', 'requestSeq',
       'claimToken', 'status', 'code', 'result'
-    ]);
+    ], ['rootAuthorizationToken']);
     if (!value || value.contract !== CONTRACT || value.hostInstanceId !== hostInstanceId
         || !TOKEN_RE.test(value.requestToken) || !TOKEN_RE.test(value.claimToken)
         || !Number.isSafeInteger(value.requestSeq) || value.requestSeq < 1
-        || !['fulfilled', 'rejected'].includes(value.status)) return bad();
-    const result = value.status === 'fulfilled'
-      ? safeWorkspaceValue(value.result, MAX_WORKSPACE_FILE_RESULT_BYTES) : null;
+        || !['fulfilled', 'rejected'].includes(value.status)
+        || (Object.prototype.hasOwnProperty.call(value, 'rootAuthorizationToken')
+          && !TOKEN_RE.test(value.rootAuthorizationToken))) return bad();
+    const job = workspaceFileJobs.get(value.requestToken);
+    const result = value.status === 'fulfilled' && job
+      ? safeWorkspaceOperationValue(job.operation, value.result, 'result') : null;
     if ((value.status === 'fulfilled' && (value.code !== null || !result))
         || (value.status === 'rejected'
           && (!WORKSPACE_FILE_REJECT_CODES.has(value.code) || value.result !== null))) return bad();
     if (!takeEndpointBudget('workspace/files/settle')) return bad();
     sweep();
-    const job = workspaceFileJobs.get(value.requestToken);
     if (!job || job.requestSeq !== value.requestSeq || job.state !== 'running'
         || !tokenMatches(value.claimToken, job.claimToken)) {
       return ok({ settled: false, code: 'operation-stale' });
     }
+    const rootBound = job.sessionRootRef !== null;
+    const hasRootAuthorization = Object.prototype.hasOwnProperty.call(
+      value, 'rootAuthorizationToken'
+    );
+    if (rootBound) {
+      if (hasRootAuthorization
+          ? (!job.rootAuthorizationToken
+            || !tokenMatches(value.rootAuthorizationToken, job.rootAuthorizationToken))
+          : value.status === 'fulfilled') return bad();
+      if (hasRootAuthorization && (!Number.isSafeInteger(job.rootAuthorizedAtMs)
+          || Date.now() - job.rootAuthorizedAtMs > WORKSPACE_FILE_ROOT_AUTHORIZATION_MS)) {
+        job.state = 'rejected';
+        job.code = 'outcome-unknown';
+        job.result = null;
+        job.claimToken = null;
+        job.finishedAtMs = Date.now();
+        return ok({ settled: false, code: 'outcome-unknown' });
+      }
+      // settle 必须再读 Host 当前 cwd。authorize 是 main 同步提交的
+      // 线性化点；如果此后根又变化，无法撤回已授权的本地同步
+      // 动作，但绝不对外声称 fulfilled。
+      if (hasRootAuthorization && !workspaceFileContextCurrent(job)) {
+        job.state = 'rejected';
+        job.code = 'outcome-unknown';
+        job.result = null;
+        job.claimToken = null;
+        job.finishedAtMs = Date.now();
+        return ok({ settled: false, code: 'outcome-unknown' });
+      }
+    } else if (hasRootAuthorization) return bad();
     job.state = value.status;
     job.code = value.code;
     job.result = result;
     job.claimToken = null;
+    job.rootAuthorizationToken = null;
+    job.rootAuthorizedAtMs = null;
     job.finishedAtMs = Date.now();
     return ok({ settled: true, code: null });
+  };
+
+  const bootstrapProjectSession = async (payload) => {
+    const selection = preferencePageSelection(payload, [
+      'projectId', 'openToken', 'bootstrapTicket'
+    ]);
+    if (!selection || !APP_PROJECT_ID_RE.test(String(payload.projectId || ''))
+        || !PROJECT_OPEN_TOKEN_RE.test(String(payload.openToken || ''))
+        || typeof payload.bootstrapTicket !== 'string'
+        || !PROJECT_BOOTSTRAP_TICKET_RE.test(payload.bootstrapTicket)
+        || Buffer.byteLength(payload.bootstrapTicket, 'utf8')
+          > MAX_PROJECT_BOOTSTRAP_TICKET_BYTES) return bad();
+    const now = Date.now();
+    for (const [nonce, record] of projectBootstrapReplays) {
+      if (record.expiresAtMs <= now) projectBootstrapReplays.delete(nonce);
+    }
+    const ticket = openProjectBootstrapTicket(authToken, hostInstanceId,
+      payload.bootstrapTicket, {
+        controllerId: payload.controllerId,
+        pageInstanceId: payload.pageInstanceId,
+        selectionRevision: payload.selectionRevision,
+        projectId: payload.projectId,
+        openToken: payload.openToken
+      }, now);
+    if (!ticket) {
+      return ok({ bootstrapped: false, bindingRef: null, code: 'operation-stale' });
+    }
+    const ticketDigest = sha256(payload.bootstrapTicket);
+    const currentOwner = (selfSelectedRoot = null) => {
+      const current = controllers.get(payload.controllerId);
+      if (!current || current.managed !== true
+          || current.pageInstanceId !== payload.pageInstanceId
+          || !tokenMatches(payload.controllerProof, current.controllerProof)
+          || Date.now() >= ticket.expiresAtMs) return false;
+      const exactRevision = current.selectionRevision === payload.selectionRevision;
+      const selfSelectedRevision = selfSelectedRoot !== null
+        && current.selectionRevision === payload.selectionRevision + 1;
+      if (!exactRevision && !selfSelectedRevision) return false;
+      const resolved = resolveSelectionState(current);
+      if (exactRevision) return resolved.state === 'none' || resolved.state === 'selected';
+      // workspace.create 会触发 rc.2 官方前端的首选逻辑：它可能立即
+      // 创建并选中一个同根空白会话，从而让本页 revision 精确自增一次。这种
+      // 自触发前进不应把本次 ticket 误判为并发篡改；但只有当当前
+      // 唯一 owner 仍是同页/同 proof，且 live 顶层会话仍精确属于目标
+      // 规范根时才放行。none、异根、子代理、跨页或 revision 回退仍拒绝。
+      if (resolved.state !== 'selected' || !validBoundRawSession(current.raw)) return false;
+      let selected = null;
+      try { selected = ctx.sessions?.get?.(current.raw) || null; }
+      catch (_error) { selected = null; }
+      return Boolean(selected && selected.header?.id === current.raw
+        && selected.header?.origin !== 'subagent'
+        && selected.header?.parentSession === undefined
+        && canonicalSessionRoot(selected.header?.cwd) === selfSelectedRoot);
+    };
+    if (!currentOwner()) {
+      return ok({ bootstrapped: false, bindingRef: null, code: 'operation-stale' });
+    }
+    const replay = projectBootstrapReplays.get(ticket.nonce);
+    if (replay) {
+      if (replay.ticketDigest !== ticketDigest) {
+        return ok({ bootstrapped: false, bindingRef: null, code: 'operation-stale' });
+      }
+      return replay.promise;
+    }
+    if (!takeEndpointBudget('projects/session/bootstrap')) return bad();
+    if (projectBootstrapReplays.size >= MAX_PROJECT_BOOTSTRAP_REPLAYS) {
+      return ok({ bootstrapped: false, bindingRef: null, code: 'busy' });
+    }
+    const operation = (async () => {
+      const root = canonicalSessionRoot(ticket.root);
+      if (root === null || !ctx.apiProxy || !ctx.apiProxy.workspace
+          || typeof ctx.apiProxy.workspace.create !== 'function'
+          || typeof ctx.apiProxy.workspace.list !== 'function'
+          || !ctx.apiProxy.sessions || typeof ctx.apiProxy.sessions.create !== 'function'
+          || typeof ctx.apiProxy.sessions.list !== 'function') {
+        return ok({ bootstrapped: false, bindingRef: null, code: 'workspace-unavailable' });
+      }
+      let sideEffectPossible = false;
+      try {
+        // workspace.create 是第一个外部持久副作用；自调用开始起，
+        // 任何抛错、丢包或 owner 漂移都只能回 outcome-unknown，
+        // 不得伪装成完全没有副作用的 stale/unavailable。
+        sideEffectPossible = true;
+        const workspaceReply = await ctx.apiProxy.workspace.create({
+          rpcId: randomUUID(), payload: { path: root }
+        });
+        if (!currentOwner(root)) {
+          return ok({ bootstrapped: false, bindingRef: null, code: 'outcome-unknown' });
+        }
+        if (workspaceReply?.result?.ok !== true) {
+          return ok({ bootstrapped: false, bindingRef: null, code: 'outcome-unknown' });
+        }
+        const workspaceValue = workspaceReply.result.value;
+        const workspace = workspaceValue?.workspace;
+        if (!workspace || typeof workspace.workspaceId !== 'string'
+            || workspace.workspaceId.length < 1 || workspace.workspaceId.length > 256
+            || CONTROL_RE.test(workspace.workspaceId)) {
+          return ok({ bootstrapped: false, bindingRef: null, code: 'outcome-unknown' });
+        }
+        if (canonicalSessionRoot(workspace.path) !== root) {
+          return ok({ bootstrapped: false, bindingRef: null, code: 'workspace-mismatch' });
+        }
+        // raw id 由注册表 projectId 唯一派生，而不是由每次 ticket 派生。
+        // 即使首次 session.create 成功后回包丢失，新 prepare 也只会
+        // ensure 同一个 raw id，不会无界生成孤儿会话。
+        const rawSessionId = `${PROJECT_BOOTSTRAP_SESSION_PREFIX}${ticket.projectId.slice(5)}`;
+        // 上一次成功 birth 后若 Host→Client 回包丢失，新 prepare 会带新
+        // ticket。先复用同一官方 workspace 中仍为空、未归档、已 attach 且
+        // cwd 精确一致的会话，避免每次重试盲建一条。
+        const [sessionListReply, workspaceListReply] = await Promise.all([
+          ctx.apiProxy.sessions.list({ rpcId: randomUUID(), payload: {} }),
+          ctx.apiProxy.workspace.list({ rpcId: randomUUID(), payload: {} })
+        ]);
+        if (!currentOwner(root)) {
+          return ok({ bootstrapped: false, bindingRef: null, code: 'outcome-unknown' });
+        }
+        if (sessionListReply?.result?.ok !== true
+            || !Array.isArray(sessionListReply.result.value?.items)
+            || sessionListReply.result.value.items.length > MAX_PROJECT_CONSOLE_SESSIONS
+            || workspaceListReply?.result?.ok !== true
+            || !Array.isArray(workspaceListReply.result.value?.items)
+            || workspaceListReply.result.value.items.length > MAX_PROJECT_CONSOLE_SESSIONS
+            || !Array.isArray(workspaceListReply.result.value?.archivedSessionIds)
+            || workspaceListReply.result.value.archivedSessionIds.length
+              > MAX_PROJECT_CONSOLE_SESSIONS) {
+          return ok({ bootstrapped: false, bindingRef: null, code: 'outcome-unknown' });
+        }
+        const sessionRows = sessionListReply.result.value.items;
+        const workspaceRows = workspaceListReply.result.value.items;
+        const archived = new Set(workspaceListReply.result.value.archivedSessionIds);
+        const listedWorkspace = workspaceRows.find((item) => (
+          item?.workspaceId === workspace.workspaceId
+          && canonicalSessionRoot(item.path) === root
+        ));
+        if (!listedWorkspace || !Array.isArray(listedWorkspace.sessionIds)
+            || listedWorkspace.sessionIds.length > MAX_PROJECT_CONSOLE_SESSIONS
+            || listedWorkspace.sessionIds.some((id) => !validBoundRawSession(id))) {
+          return ok({ bootstrapped: false, bindingRef: null, code: 'outcome-unknown' });
+        }
+        const accounted = new Set(listedWorkspace.sessionIds);
+        const reusableSession = (item) => {
+          if (!item || item.blank !== true || item.origin === 'subagent'
+              || item.parentSessionId !== undefined
+              || !validBoundRawSession(item.sessionId)
+              || !accounted.has(item.sessionId) || archived.has(item.sessionId)
+              || canonicalSessionRoot(item.cwd) !== root) return false;
+          let live = null;
+          try { live = ctx.sessions?.get?.(item.sessionId) || null; }
+          catch (_error) { live = null; }
+          return Boolean(live && live.header?.id === item.sessionId
+            && live.header?.origin !== 'subagent'
+            && live.header?.parentSession === undefined
+            && canonicalSessionRoot(live.header?.cwd) === root);
+        };
+        // 预定 stable id 不是所有权证明。只要官方 roster 或 live
+        // store 中已有同 id，必须同时证明它为空、非子代理、未归档、
+        // attach 到本次精确 workspace，并且 live cwd/id 一致。不允许
+        // 单凭 ctx.sessions.get(id) 绕过这些证明。
+        let stableLive = null;
+        try { stableLive = ctx.sessions?.get?.(rawSessionId) || null; }
+        catch (_error) { stableLive = null; }
+        const stableRows = sessionRows.filter((item) => item?.sessionId === rawSessionId);
+        const stableAttachedElsewhere = workspaceRows.some((item) => (
+          item?.workspaceId !== workspace.workspaceId
+          && Array.isArray(item?.sessionIds)
+          && item.sessionIds.includes(rawSessionId)
+        ));
+        const stableOccupied = stableRows.length > 0 || accounted.has(rawSessionId)
+          || archived.has(rawSessionId) || stableAttachedElsewhere || stableLive !== null;
+        if (stableOccupied) {
+          if (stableRows.length === 1 && !stableAttachedElsewhere
+              && reusableSession(stableRows[0])) {
+            return ok({
+              bootstrapped: true,
+              bindingRef: sessionBindingRef(rawSessionId),
+              code: null
+            });
+          }
+          return ok({ bootstrapped: false, bindingRef: null, code: 'workspace-mismatch' });
+        }
+        const reusable = sessionRows.find(reusableSession);
+        if (reusable) {
+          return ok({
+            bootstrapped: true,
+            bindingRef: sessionBindingRef(reusable.sessionId),
+            code: null
+          });
+        }
+        let sessionReply = null;
+        try {
+          sessionReply = await ctx.apiProxy.sessions.create({
+            rpcId: randomUUID(),
+            payload: { workspaceId: workspace.workspaceId, sessionId: rawSessionId }
+          });
+        } catch (_error) {
+          // 回包丢失后不能只凭 live id/cwd 猜测它是本次创建。
+          // 保留 outcome-unknown，下一张 ticket 再通过完整官方 roster
+          // 证明 blank/origin/archive/workspace attach 后复用。
+          return ok({ bootstrapped: false, bindingRef: null, code: 'outcome-unknown' });
+        }
+        if (!currentOwner(root)) {
+          return ok({ bootstrapped: false, bindingRef: null, code: 'outcome-unknown' });
+        }
+        const sessionValue = sessionReply?.result?.ok === true
+          ? sessionReply.result.value : null;
+        if (!sessionValue || sessionValue.sessionId !== rawSessionId) {
+          return ok({ bootstrapped: false, bindingRef: null, code: 'outcome-unknown' });
+        }
+        let session = null;
+        try { session = ctx.sessions?.get?.(rawSessionId) || null; }
+        catch (_error) { session = null; }
+        if (!session || session.header?.id !== rawSessionId
+            || canonicalSessionRoot(session.header?.cwd) !== root) {
+          return ok({ bootstrapped: false, bindingRef: null, code: 'workspace-mismatch' });
+        }
+        return ok({
+          bootstrapped: true,
+          bindingRef: sessionBindingRef(rawSessionId),
+          code: null
+        });
+      } catch (_error) {
+        return ok({
+          bootstrapped: false,
+          bindingRef: null,
+          code: sideEffectPossible ? 'outcome-unknown' : 'workspace-unavailable'
+        });
+      }
+    })();
+    projectBootstrapReplays.set(ticket.nonce, Object.freeze({
+      ticketDigest,
+      expiresAtMs: ticket.expiresAtMs,
+      promise: operation
+    }));
+    const result = await operation;
+    if (result?.ok !== true || (result.value?.bootstrapped !== true
+        && result.value?.code !== 'outcome-unknown')) {
+      projectBootstrapReplays.delete(ticket.nonce);
+    }
+    return result;
+  };
+
+  const resolveProjectSession = (payload) => {
+    const selection = preferencePageSelection(payload, ['bindingRef', 'candidateSessionIds']);
+    if (!selection || typeof payload.bindingRef !== 'string'
+        || !SESSION_BINDING_REF_RE.test(payload.bindingRef)
+        || !Array.isArray(payload.candidateSessionIds)
+        || payload.candidateSessionIds.length > MAX_PROJECT_CONSOLE_SESSIONS
+        || payload.candidateSessionIds.some((id) => !validBoundRawSession(id))
+        || new Set(payload.candidateSessionIds).size !== payload.candidateSessionIds.length) {
+      return bad();
+    }
+    if (!takeEndpointBudget('projects/session/resolve')) return bad();
+    let liveSessions;
+    try {
+      liveSessions = ctx.sessions && typeof ctx.sessions.list === 'function'
+        ? ctx.sessions.list() : null;
+    } catch (_error) { liveSessions = null; }
+    if (!Array.isArray(liveSessions)) {
+      return ok({ resolved: false, candidateIndex: null, code: 'workspace-unavailable' });
+    }
+    const candidates = new Map(payload.candidateSessionIds.map((id, index) => [id, index]));
+    for (const session of liveSessions) {
+      const raw = session && session.header && session.header.id;
+      const candidateIndex = candidates.get(raw);
+      if (candidateIndex !== undefined && sessionBindingRef(raw) === payload.bindingRef) {
+        return ok({ resolved: true, candidateIndex, code: null });
+      }
+    }
+    return ok({ resolved: false, candidateIndex: null, code: 'workspace-unavailable' });
   };
 
   const validPreflightAuth = (payload) => exact(payload, [
@@ -1024,10 +1768,19 @@ export function apply(ctx) {
   const stageContext = (payload) => {
     const value = withAuth(payload, [
       'controllerId', 'pageInstanceId', 'selectionRevision', 'envelope'
-    ]);
+    ], ['currentBindingRef', 'sessionRootRef']);
+    const hasBindingProof = Boolean(value && Object.prototype.hasOwnProperty.call(
+      value, 'currentBindingRef'
+    ));
+    const hasRootProof = Boolean(value && Object.prototype.hasOwnProperty.call(
+      value, 'sessionRootRef'
+    ));
     if (!value || !validId(value.controllerId) || !validId(value.pageInstanceId)
         || !Number.isSafeInteger(value.selectionRevision) || value.selectionRevision < 1
-        || !validEnvelope(value.envelope, hostInstanceId)) return bad();
+        || !validEnvelope(value.envelope, hostInstanceId)
+        || hasBindingProof !== hasRootProof
+        || (hasBindingProof && (!SESSION_BINDING_REF_RE.test(value.currentBindingRef)
+          || !SESSION_ROOT_REF_RE.test(value.sessionRootRef)))) return bad();
     const selection = controllers.get(value.controllerId);
     const resolved = resolveSelectionState(selection);
     if (!selection || selection.managed !== true || resolved.state !== 'selected'
@@ -1035,6 +1788,22 @@ export function apply(ctx) {
         || selection.selectionRevision !== value.selectionRevision
         || selection.sessionRef !== value.envelope.sessionRef) {
       return ok({ accepted: false, code: 'session-unavailable' });
+    }
+    if (hasBindingProof) {
+      let session = null;
+      try { session = ctx.sessions?.get?.(selection.raw) || null; }
+      catch (_error) { session = null; }
+      const actualBindingRef = validBoundRawSession(selection.raw)
+        ? sessionBindingRef(selection.raw) : null;
+      const actualRootRef = sessionRootRef(
+        authToken, hostInstanceId, session?.header?.cwd
+      );
+      // registry 项目模式必须在真正 stage 的这一刻重算 selection/cwd；
+      // resolve 时的 proof 只用于 main 决策，不能跨越此处的竞态窗口。
+      if (actualBindingRef !== value.currentBindingRef
+          || actualRootRef !== value.sessionRootRef) {
+        return ok({ accepted: false, code: 'session-unavailable' });
+      }
     }
     const record = recordsByRef.get(value.envelope.sessionRef);
     if (!record || record.revoked) return ok({ accepted: false, code: 'session-unavailable' });
@@ -1161,6 +1930,25 @@ export function apply(ctx) {
           return ok({ state: 'none', hostInstanceId, sessionRef: null, code: null });
         }
         const current = resolveSelectionState(selection);
+        let currentBindingRef = null;
+        let currentRootRef = null;
+        if (current.state === 'selected' && validBoundRawSession(selection.raw)) {
+          let session = null;
+          try { session = ctx.sessions?.get?.(selection.raw) || null; }
+          catch (_error) { session = null; }
+          currentBindingRef = sessionBindingRef(selection.raw);
+          currentRootRef = sessionRootRef(
+            authToken, hostInstanceId, session?.header?.cwd
+          );
+          if (!SESSION_BINDING_REF_RE.test(currentBindingRef)
+              || !SESSION_ROOT_REF_RE.test(String(currentRootRef || ''))) {
+            // 经典模式仍允许没有 canonical cwd 的 selection；它不携带
+            // registry proof。main 若有 active registry project 会因 proof
+            // 缺失自动关闭，绝不借这个兼容分支继续 stage。
+            currentBindingRef = null;
+            currentRootRef = null;
+          }
+        }
         const boundDeliveryTarget = current.state === 'selected'
           && typeof selection.raw === 'string'
           ? deliveryTargetRef(authToken, hostInstanceId, selection.raw) : null;
@@ -1170,6 +1958,10 @@ export function apply(ctx) {
           controllerId: selection.controllerId,
           pageInstanceId: selection.pageInstanceId,
           selectionRevision: selection.selectionRevision,
+          ...(currentBindingRef === null ? {} : {
+            currentBindingRef,
+            sessionRootRef: currentRootRef
+          }),
           ...(boundDeliveryTarget === null
             ? {} : { deliveryTargetRef: boundDeliveryTarget })
         });
@@ -1177,7 +1969,7 @@ export function apply(ctx) {
       if (endpoint === 'context/stage') {
         if (!withAuth(payload, [
           'controllerId', 'pageInstanceId', 'selectionRevision', 'envelope'
-        ])) return bad();
+        ], ['currentBindingRef', 'sessionRootRef'])) return bad();
         if (!takeEndpointBudget(endpoint)) return bad();
         sweep();
         return stageContext(payload);
@@ -1193,11 +1985,14 @@ export function apply(ctx) {
       if (endpoint === 'ui/preferences/read') return readPreferences(payload);
       if (endpoint === 'ui/preferences/sync') return syncPreferences(payload);
       if (endpoint === 'ui/preferences/settle') return settlePreferences(payload);
+      if (endpoint === 'projects/session/bootstrap') return bootstrapProjectSession(payload);
+      if (endpoint === 'projects/session/resolve') return resolveProjectSession(payload);
       if (endpoint === 'workspace/files/request') return requestWorkspaceFile(payload);
       if (endpoint === 'workspace/files/status') return statusWorkspaceFile(payload);
       if (endpoint === 'workspace/files/cancel') return cancelWorkspaceFile(payload);
       if (endpoint === 'workspace/files/read') return readWorkspaceFiles(payload);
       if (endpoint === 'workspace/files/claim') return claimWorkspaceFile(payload);
+      if (endpoint === 'workspace/files/authorize') return authorizeWorkspaceFileRoot(payload);
       if (endpoint === 'workspace/files/settle') return settleWorkspaceFile(payload);
       if (endpoint === 'events/read') {
         const value = withAuth(payload, ['contract', 'hostInstanceId', 'afterEventSeq']);
