@@ -3403,8 +3403,10 @@ async function main() {
       };
       const projectId = `proj_${'a'.repeat(32)}`;
       const expectedBindingRef = sessionBindingRef(rawA);
+      const rootResolver = typeof fs.realpathSync.native === 'function'
+        ? fs.realpathSync.native : fs.realpathSync;
       const expectedRootRef = projectRootRef.sessionRootRef(
-        BRIDGE_TOKEN, hostInstanceId, fs.realpathSync(cwdA)
+        BRIDGE_TOKEN, hostInstanceId, rootResolver(cwdA)
       );
       const selectedPrivate = await rpcHandler('selection/resolve', {
         contract: CONTRACT, controllerId, authToken
@@ -3670,7 +3672,9 @@ async function main() {
       const rootTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-bootstrap-host-'));
       const projectRoot = path.join(rootTmp, 'Project Root');
       fs.mkdirSync(projectRoot);
-      const canonicalRoot = fs.realpathSync(projectRoot);
+      const rootResolver = typeof fs.realpathSync.native === 'function'
+        ? fs.realpathSync.native : fs.realpathSync;
+      const canonicalRoot = projectRootRef.canonicalRootKey(rootResolver(projectRoot));
       const projectId = `proj_${'8'.repeat(32)}`;
       const rawSessionId = `session-whaledock-project-${'8'.repeat(32)}`;
 
