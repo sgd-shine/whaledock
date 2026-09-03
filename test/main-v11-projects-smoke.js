@@ -62,10 +62,13 @@ function videoPackage() {
 }
 
 async function run() {
-  await test('legacy 21 + project 8 = combined 29 且互不混用', () => {
+  await test('legacy 21 + project 11 = combined 32 且互不混用', () => {
     assert.equal(main.CONTEXT_POC_LEGACY_WORKSPACE_FILE_OPERATIONS.size, 21);
-    assert.equal(main.CONTEXT_POC_PROJECT_OPERATIONS.size, 8);
-    assert.equal(main.CONTEXT_POC_WORKSPACE_FILE_OPERATIONS.size, 29);
+    assert.equal(main.CONTEXT_POC_PROJECT_OPERATIONS.size, 11);
+    assert.equal(main.CONTEXT_POC_WORKSPACE_FILE_OPERATIONS.size, 32);
+    for (const operation of ['projects.adopt', 'projects.sidecar', 'projects.detach']) {
+      assert.equal(main.CONTEXT_POC_PROJECT_OPERATIONS.has(operation), true, operation);
+    }
     assert.equal([...main.CONTEXT_POC_PROJECT_OPERATIONS]
       .some((name) => main.CONTEXT_POC_LEGACY_WORKSPACE_FILE_OPERATIONS.has(name)), false);
   });
@@ -517,6 +520,62 @@ async function run() {
     const publicText = JSON.stringify({ actions, catalog });
     assert.equal(publicText.includes(path.join(__dirname, '..', 'assets')), false);
     assert.equal(publicText.includes('"dir"'), false);
+  });
+
+  await test('facade 新能力与 skin/detached Host wiring 保持最小公开面', () => {
+    const mainSource = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    const facadeStart = mainSource.indexOf('const projectStoreFacade = Object.freeze({');
+    const facadeEnd = mainSource.indexOf('\n});', facadeStart);
+    assert(facadeStart >= 0 && facadeEnd > facadeStart);
+    const facadeSource = mainSource.slice(facadeStart, facadeEnd);
+    for (const method of ['findByFolder', 'readManifest', 'writeManifest', 'adoptFolder']) {
+      assert.equal(facadeSource.includes(
+        `${method}: (...args) => requireProjectStore().${method}(...args)`
+      ), true, method);
+    }
+    const operationStart = mainSource.indexOf(
+      'const contextPocProjectOperations = projectOperationModel.createProjectOperations({'
+    );
+    const operationEnd = mainSource.indexOf('\n});', operationStart);
+    assert(operationStart >= 0 && operationEnd > operationStart);
+    const operationWiring = mainSource.slice(operationStart, operationEnd);
+    assert.match(operationWiring, /skinForTemplate: projectSkinForTemplate/);
+    assert.match(operationWiring, /onDetach: openProjectDetachedWindow/);
+
+    const colors = Object.freeze({
+      background: '#010101', surface: '#020202', border: '#030303',
+      primary: '#040404', accent: '#050505', text: '#060606', textMuted: '#070707'
+    });
+    const video = videoPackage();
+    const skin = main.projectSkinForTemplate(video.id, {
+      packages: [{ ...video, theme: { base: 'dark', colors, privatePath: '/secret/theme.json' } }]
+    });
+    assert.deepEqual(skin, { base: 'dark', colors });
+    assert.equal(Object.isFrozen(skin), true);
+    assert.equal(Object.isFrozen(skin.colors), true);
+    assert.equal(JSON.stringify(skin).includes('/secret/theme.json'), false);
+    assert.equal(main.projectSkinForTemplate(null), null);
+
+    assert.deepEqual(main.projectDetachedTab({
+      id: 'readme', type: 'markdown', title: '项目说明', path: 'README.md'
+    }, { kind: 'markdown', text: '# 项目' }), {
+      id: 'readme', type: 'markdown', title: '项目说明',
+      relativeRef: 'README.md', text: '# 项目'
+    });
+    assert.deepEqual(main.projectDetachedTab({
+      id: 'terminal', type: 'terminal', title: '终端'
+    }), { id: 'terminal', type: 'terminal', title: '终端', text: '' });
+    assert.deepEqual(main.projectDetachedTab({
+      id: 'result', type: 'artifact', title: '结果', locked: true,
+      descriptor: { kind: 'html', path: 'output/result.html' }
+    }), {
+      id: 'result', type: 'artifact', title: '结果', locked: true,
+      artifactKind: 'html', relativeRef: 'output/result.html'
+    });
+    assert.throws(() => main.projectDetachedTab({
+      id: 'readme', type: 'markdown', title: '项目说明', path: 'README.md'
+    }, { kind: 'text', text: '# 项目' }), /分离窗文本预览不可用/);
+    assert.equal(typeof main.openProjectDetachedWindow, 'function');
   });
 
   await test('页级快捷命令绑定产生时 Host/controller/page/revision，后台页不能抢占且精确清除', () => {

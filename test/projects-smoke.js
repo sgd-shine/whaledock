@@ -287,6 +287,19 @@ async function main() {
     // 同一文件夹再认领 → existing
     assert.strictEqual(store.adoptFolder(folderA).adopted, 'existing');
 
+    // 复制旁车不能在旧项目根仍有效时静默劫持同一个项目 id。
+    const copiedFolder = mkdir(path.join(tmp, 'work', '旅行图鉴-复制旁车'));
+    fs.cpSync(
+      path.join(folderA, projects.MANIFEST_DIRNAME),
+      path.join(copiedFolder, projects.MANIFEST_DIRNAME),
+      { recursive: true }
+    );
+    assert.throws(
+      () => store.adoptFolder(copiedFolder),
+      assertCode('ERR_PROJECT_IDENTITY_CONFLICT')
+    );
+    assert.strictEqual(store.get(a.id).folderTail, '旅行图鉴');
+
     // 搬家：把带旁车的文件夹移到新位置再认领 → relinked，id 不变
     const movedFolder = path.join(tmp, 'work', '旅行图鉴-搬家');
     fs.renameSync(folderA, movedFolder);

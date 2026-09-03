@@ -1,17 +1,20 @@
 # STATE.md — 鲸坞 WhaleDock 当前状态
 
-更新：2026-09-02（v0.10.0 仍是公开稳定版；v0.11 项目工作台批次 1–4 已完成源码开发与隔离 UI 复验，尚未打包或发布）
+更新：2026-09-02（v0.10.0 仍是公开稳定版；v0.11 项目工作台批次 1–5 已完成源码实现，`v0.11.0-alpha.1` 真机验收预发布链收口中）
 
 ## 阶段结论
 
 **v0.10.0 已公开发布并成为当前稳定版。发版 PR [#24](https://github.com/sgd-shine/whaledock/pull/24) 已合入 `main@1afcaa58`，三平台 CI、注解 tag、签名/公证、8 项公开资产与官方 macOS arm64 公共成品安装回读均已闭环；v0.9.1 线上更新提醒的人类结果与日志已回读，但提示截图缺失。Windows/Intel 真机、真实模型、正式版完整交互手感和系统 App 界面唯一可见性仍保持独立证据边界。**
 
-**v0.11 当前开发态：分支 `claude/v011-project-workbench` 已按 SGD 对 Q1–Q5 的拍板完成批次 1–4 源码；批次 5 仍是单独授权候选。全量回归为 1007 PASS / 55 个 ALL PASS 标记，context 固定包为 15 文件 / 998,730 B、digest `4120ef87ecf588829de06b9424c1f7f89d9526148504fb43609a9c5a749db8b5`。该结论是 macOS arm64 隔离源码态，不是 v0.11 安装包、CI、签名、公证或 Release。**
+**v0.11 当前开发态：SGD 已授权批次 5、安装与上传，批次 1–5 源码实现完成，源码版本为 `0.11.0-alpha.1` 真机验收 prerelease。统一回归实跑 1054 PASS / 56 个 ALL PASS 标记，context 固定包为 15 文件 / 1,062,446 B、digest `a486c9008d9d871d5ddf05dd9778de3256e706a47116326cb55c715af7921f0b`；CI、签名/公证、安装和上传状态仍必须等待本次真实回读，不能由源码结果代替。**
 
 - v0.11 已实现项目一等对象、控制室、1:1 会话绑定、三预设窗格、项目根限定的产物回流、模板落地、经典驾驶舱让位、快捷键切项目和旧配置 durable-once 迁移；页面不接收绝对路径，受管 dsh 继续只用 `userData/context-poc/v1/dsh-home`。
 - 1200×768 隔离源码 App 中，双栏/左叠右单/四宫格均真实点按；响应式重排后中栏 538px、单窗 508px、模板 482px，测点均无隐藏横向 overflow，右侧原生对话常驻。截图位于已排除的 `docs/验收证据-v0.11-项目工作台-2026-09-02/`。
-- `app-runtime:verify` 保持 52 包 / 830 文件、closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`；根依赖与 lockfile 未扩张。当前源码版本仍为 `0.10.0`，因为本批未获版本、打包或发布授权。
-- 仍需 SGD：安装 alpha 双项目/need 黄灯五分钟卡、真实 Agent 产物回流、真实 v0.10 数据升级。Windows/Intel、真实模型、钥匙串/TCC 与系统 App 界面继续单列；终端窗格未开始。
+- 批次 5 已实现 Host PTY 终端（项目根 cwd、环境白名单、能力令牌、生命周期重校验和限量净化输出）；页面不接收路径、环境、shell 或 pid。这里限制的是鲸坞接口，不是 OS 文件系统或网络沙箱，终端命令仍拥有当前用户本来的权限。
+- 原生皮肤只投影七个受校验颜色值；旁车继续默认不写，只有显式操作才把不含对话/绝对路径的 `.whaledock/project.json` 写入项目，并支持按旁车跨机/搬家重新认领；分离窗拒绝导航、权限、下载、任意网络与可执行 HTML。
+- 控制室 recent 只取 Host 事件流中的用户/助手文本，经过路径、URL、邮箱、凭据形态、控制字符和长度脱敏后下发；不读取 `face.history`，不暴露完整历史。
+- `app-runtime` 当前准备态仍为 52 包 / 830 文件、closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`；根运行时依赖未扩张。版本、lock 与合规清单已进入 `0.11.0-alpha.1` 候选收口，但打包成品必须再次验证。
+- 仍需 SGD：安装 alpha 双项目/need 黄灯五分钟卡、真实 Agent 产物回流、真实 v0.10 数据升级，以及批次 5 可见行为。Windows/Intel、真实模型、钥匙串/TCC 与系统 App 界面继续单列为 `NEEDS-HUMAN`；本次 CI、签名/公证、安装和 prerelease 上传也尚未在此处记为完成。
 
 - 发版 PR [#24](https://github.com/sgd-shine/whaledock/pull/24) 以 merge commit `1afcaa58d48029b2ae0322db8cd0a449a737b9c0` 进入 main；[PR CI 33266553784](https://github.com/sgd-shine/whaledock/actions/runs/33266553784) 与 [main CI 33266635690](https://github.com/sgd-shine/whaledock/actions/runs/33266635690) 均为 macOS、Ubuntu、Windows 全绿。
 - 注解 tag `v0.10.0` 的 tag object 为 `5162cc18991d8657585f4d880dc50ecfb76c5c21`，解引用到上述 merge commit。[Release run 33266723269](https://github.com/sgd-shine/whaledock/actions/runs/33266723269) attempt 1 只在空审批门按设计 fail-closed，没有提前创建 Release；attempt 2 的 [publish job 99215920691](https://github.com/sgd-shine/whaledock/actions/runs/33266723269/job/99215920691) 成功。

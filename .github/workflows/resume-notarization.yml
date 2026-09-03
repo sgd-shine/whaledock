@@ -10,7 +10,7 @@ on:
         required: true
         type: string
       release_tag:
-        description: "Exact release tag, for example v0.10.0"
+        description: "Exact release tag, for example v0.11.0-alpha.1"
         required: true
         type: string
 
@@ -28,11 +28,45 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.release_tag }}
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22.23.2
           cache: npm
+
+      - name: Verify source Release run identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        shell: bash
+        run: |
+          if [[ ! "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error title=Invalid source run::source_run_id must be numeric"
+            exit 1
+          fi
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error title=Invalid release tag::$RELEASE_TAG"
+            exit 1
+          fi
+          expected_sha="$(git rev-parse "refs/tags/$RELEASE_TAG^{}")"
+          export EXPECTED_SHA="$expected_sha"
+          run_json="$RUNNER_TEMP/whaledock-source-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > "$run_json"
+          node - "$run_json" <<'NODE'
+          const fs = require('fs');
+          const run = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const expected = {
+            name: 'Release', path: '.github/workflows/release.yml', event: 'push',
+            head_branch: process.env.RELEASE_TAG, head_sha: process.env.EXPECTED_SHA
+          };
+          for (const [key, value] of Object.entries(expected)) {
+            if (run[key] !== value) {
+              throw new Error(`SOURCE_RELEASE_RUN_MISMATCH ${key}`);
+            }
+          }
+          console.log(`SOURCE_RELEASE_RUN_VERIFIED id=${run.id} tag=${run.head_branch} sha=${run.head_sha}`);
+          NODE
 
       - name: Download preserved signed macOS assets
         uses: actions/download-artifact@v4
@@ -42,13 +76,24 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ inputs.source_run_id }}
 
-      - name: Validate preserved release and notarization manifest
+      - name: Verify source manifest and tag
         shell: bash
         run: |
           if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
             echo "::error title=Invalid release tag::$RELEASE_TAG"
             exit 1
           fi
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if [[ "$(git cat-file -t "refs/tags/$RELEASE_TAG")" != "tag" ]]; then
+            echo "::error title=Annotated release tag required::$RELEASE_TAG is not an annotated tag"
+            exit 1
+          fi
+          tag_commit="$(git rev-parse "refs/tags/$RELEASE_TAG^{}")"
+          if [[ "$(git rev-parse HEAD)" != "$tag_commit" ]] || ! git merge-base --is-ancestor "$tag_commit" origin/main; then
+            echo "::error title=Release tag is outside main::$RELEASE_TAG must resolve to the checked-out commit and be reachable from origin/main"
+            exit 1
+          fi
+          echo "RELEASE_TAG_MAIN_ANCESTOR_VERIFIED tag=$RELEASE_TAG commit=$tag_commit"
           node -e "const tag=process.env.RELEASE_TAG||'';const expected=tag.startsWith('v')?tag.slice(1):'';const p=require('./package.json'),l=require('./package-lock.json');if(!expected||p.version!==expected||l.version!==expected||!l.packages||!l.packages['']||l.packages[''].version!==expected)throw new Error('Resume tag/package/lock version mismatch: '+tag+' / '+p.version+' / '+l.version+' / '+(l.packages&&l.packages['']&&l.packages[''].version))"
           version="$RELEASE_TAG"; version="${version#v}"
           assets=(
@@ -140,6 +185,17 @@ jobs:
             node scripts/verify-packaged-app-runtime.js --app="$mount_dir/WhaleDock.app"
             hdiutil detach "$mount_dir"
             rmdir "$mount_dir"
+          done
+          for zip in "release/WhaleDock-${version}-arm64-mac.zip" "release/WhaleDock-${version}-x64-mac.zip"; do
+            extract_dir="$(mktemp -d "$RUNNER_TEMP/whaledock-zip-readback.XXXXXX")"
+            ditto -x -k "$zip" "$extract_dir"
+            test -d "$extract_dir/WhaleDock.app"
+            codesign --verify --deep --strict --verbose=2 "$extract_dir/WhaleDock.app"
+            spctl --assess --type execute --verbose=2 "$extract_dir/WhaleDock.app"
+            node scripts/context-poc-manifest.js --resources="$extract_dir/WhaleDock.app/Contents/Resources"
+            node scripts/verify-packaged-compliance.js --search="$extract_dir/WhaleDock.app/Contents/Resources" --minimum=1
+            node scripts/verify-packaged-app-runtime.js --app="$extract_dir/WhaleDock.app"
+            rm -rf "$extract_dir"
           done
           trap - EXIT
           rm -f "$key"
@@ -238,11 +294,13 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
-            ## v0.10.0 更新
+            ## v0.11.0-alpha.1 真机验收版
 
-            同屏创作台把左边选内容、中间推进任务、右边交给 AI 执行放在一屏，执行结果会回到这条内容。
-            v0.10 用鲸坞自己的会话数据目录，`~/.dsh` 不读不写不迁移，第一次进 AI 工作台可能要重新配一次模型。
-            Windows 仍为实验性支持（未真机验证）。
+            这是 v0.11 项目工作台的预发布验收包，不是稳定版。项目成为一等对象，可绑定对话、从控制室查看需要处理的状态，并在三个布局预设的安全窗格中接收 Markdown 与 `widget-result.json` 产物。
+
+            批次 5 增加了项目根目录终端、原生项目皮肤投影、已有项目跨机认领、显式旁车写入、受限产物分离窗，以及控制室最近消息的脱敏摘要。终端由 Host 持有能力令牌并固定到项目根目录与环境白名单；它仍是当前用户权限下的本地 shell，不是操作系统文件系统或网络沙箱。
+            本版继续使用鲸坞自己的受管 dsh 目录，`~/.dsh` 不读、不写、不迁移、不清理。真实旧数据升级、真实 Agent 产物回流与五分钟连续手感仍需用户本人完成。
+            Windows 仍为实验性支持（未签名、未真机验证）。
 
             ## macOS 安装
 
@@ -253,7 +311,7 @@ jobs:
             ## 重要平台边界
 
             - 手动启用 dsh SQLite 存储的用户须在升级前备份并保留旧 runtime：`0.1.1-rc.2` 的 opt-in SQLite schema 从 15 升到 17，当前没有迁移路径；鲸坞不会自动迁移、覆盖或清理。默认 JSONL 会话存储不受影响。
-            - 受控源码流程与自动化只证明鲸坞自身链路，不等于真实 dsh、上游模型或 SGD 人工手感验收；v0.10.0 同屏创作台的完整真实模型体验仍需用户亲手确认。
+            - 受控源码流程与自动化只证明鲸坞自身链路，不等于真实 dsh、上游模型、真实 Agent 回流或 SGD 人工手感验收；v0.11.0-alpha.1 的完整体验仍需用户亲手确认。
             - 飞书源码与成品自动验证不能代替真实平台验收；本版尚未完成真实企业租户、手机收发与人工绑定验证。
             - Windows x64 构建未签名，且为实验性支持，尚未完成 Windows 真机验证；SmartScreen 拦截时可选择“更多信息 → 仍要运行”。CI 通过不代表 Windows dsh/飞书真机已通过。
             - Intel x64 仅在 Apple Silicon + Rosetta 环境抽查，尚未完成 Intel Mac 真机验证。

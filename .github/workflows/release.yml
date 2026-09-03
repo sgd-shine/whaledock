@@ -1,8 +1,8 @@
 # 推送 SemVer tag 后构建 macOS/Windows 全部产物；公开 Release 另受绑定产物哈希的审批门控。
-# macOS 产物一律由 scripts/macos-codesign.js 打签名：默认 ad-hoc（无证书、无费用），
-# 仓库配好 MACOS_SIGN_* secrets 时自动升级为 Developer ID + Hardened Runtime + 公证。
+# macOS 产物一律由 scripts/macos-codesign.js 打签名；本地脚本仍可默认 ad-hoc，
+# 但 tag 发布必须具备完整 Developer ID + Hardened Runtime + 公证凭据，否则 fail-closed。
 # 不签名的 .app 下载后会被 Apple Silicon 判为「已损坏」，因此签名与校验是发布硬门。
-# v0.2.0-beta 会构建成包内版本 0.2.0-beta，并标记为 prerelease。
+# v0.11.0-alpha.1 构建为同名包内版本，并由 Release 标记为 prerelease。
 name: Release
 
 on:
@@ -18,6 +18,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -31,6 +33,47 @@ jobs:
         run: |
           node -e "const tag=process.env.GITHUB_REF_NAME||'';const expected=tag.startsWith('v')?tag.slice(1):'';const p=require('./package.json'),l=require('./package-lock.json');if(!expected||p.version!==expected||l.version!==expected||!l.packages||!l.packages['']||l.packages[''].version!==expected)throw new Error('Release tag/package/lock version mismatch: '+tag+' / '+p.version+' / '+l.version+' / '+(l.packages&&l.packages['']&&l.packages[''].version))"
 
+      - name: Verify annotated tag is reachable from main
+        shell: bash
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if [[ "$(git cat-file -t "$GITHUB_REF")" != "tag" ]]; then
+            echo "::error title=Annotated release tag required::$GITHUB_REF_NAME is not an annotated tag"
+            exit 1
+          fi
+          tag_commit="$(git rev-parse "$GITHUB_REF^{}")"
+          if [[ "$(git rev-parse HEAD)" != "$tag_commit" ]] || ! git merge-base --is-ancestor "$tag_commit" origin/main; then
+            echo "::error title=Release tag is outside main::$GITHUB_REF_NAME must resolve to the checked-out commit and be reachable from origin/main"
+            exit 1
+          fi
+          echo "RELEASE_TAG_MAIN_ANCESTOR_VERIFIED tag=$GITHUB_REF_NAME commit=$tag_commit"
+
+      - name: Verify macOS release credentials are present
+        env:
+          MACOS_SIGN_CERTIFICATE: ${{ secrets.MACOS_SIGN_CERTIFICATE }}
+          MACOS_SIGN_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SIGN_CERTIFICATE_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        shell: bash
+        run: |
+          required=(
+            MACOS_SIGN_CERTIFICATE
+            MACOS_SIGN_CERTIFICATE_PASSWORD
+            MACOS_SIGN_IDENTITY
+            MACOS_NOTARY_KEY
+            MACOS_NOTARY_KEY_ID
+            MACOS_NOTARY_ISSUER_ID
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error title=macOS release credentials missing::Required signing or notarization secret is incomplete"
+              exit 1
+            fi
+          done
+          echo "MACOS_RELEASE_CREDENTIALS_PRESENT"
+
       - name: Install dependencies
         run: npm ci
 
@@ -43,8 +86,7 @@ jobs:
       - name: Verify reproducible dsh UI forks
         run: npm run refork:dsh -- --check
 
-      # 可选：仓库配了 Developer ID 证书才会执行；没配就走 ad-hoc，构建照常通过。
-      - name: Import Developer ID certificate (optional)
+      - name: Import required Developer ID certificate
         id: mac-cert
         env:
           MACOS_SIGN_CERTIFICATE: ${{ secrets.MACOS_SIGN_CERTIFICATE }}
@@ -52,11 +94,9 @@ jobs:
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
         shell: bash
         run: |
-          if [[ -z "${MACOS_SIGN_CERTIFICATE:-}" || -z "${MACOS_SIGN_IDENTITY:-}" ]]; then
-            echo "identity=" >> "$GITHUB_OUTPUT"
-            echo "MACOS_SIGN_MODE=ad-hoc" >> "$GITHUB_ENV"
-            echo "未配置 Developer ID，本次使用 ad-hoc 签名。" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+          if [[ -z "${MACOS_SIGN_CERTIFICATE:-}" || -z "${MACOS_SIGN_CERTIFICATE_PASSWORD:-}" || -z "${MACOS_SIGN_IDENTITY:-}" ]]; then
+            echo "::error title=Developer ID missing::Tagged macOS releases require the complete signing credential set"
+            exit 1
           fi
           keychain="$RUNNER_TEMP/whaledock-signing.keychain-db"
           password="$(openssl rand -hex 24)"
@@ -83,7 +123,7 @@ jobs:
 
       - name: Build macOS arm64 DMG and ZIP
         # runtime 已在上一步按 inventory 核验；这里直接打包，避免 predist 再生成一次后绕过核验。
-        run: npx --no-install electron-builder --config electron-builder.v0.10.cjs --mac dmg zip --arm64 --publish never
+        run: npx --no-install electron-builder --config electron-builder.v0.11-alpha.1.cjs --mac dmg zip --arm64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
@@ -144,7 +184,7 @@ jobs:
 
       - name: Build macOS x64 DMG and ZIP
         # 同上，确保进入产物的就是刚核验过的 x64 runtime。
-        run: npx --no-install electron-builder --config electron-builder.v0.10.cjs --mac dmg zip --x64 --publish never
+        run: npx --no-install electron-builder --config electron-builder.v0.11-alpha.1.cjs --mac dmg zip --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
@@ -197,18 +237,18 @@ jobs:
           # A correctly signed but not-yet-notarized Developer ID app is expected to be rejected here.
           rm -rf "$workdir"
 
-      # 可选：配了 App Store Connect API Key 才执行。提交与等待分步，确保 Apple 长时间
-      # 排队时已签名成品和 submission id 会先作为私有 Actions artifact 保留下来。
-      - name: Submit macOS artifacts for notarization (optional)
+      # 提交与等待分步，确保 Apple 长时间排队时已签名成品和 submission id 会先作为
+      # 私有 Actions artifact 保留下来；正式 tag 不允许跳过公证。
+      - name: Submit macOS artifacts for notarization
         env:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
         shell: bash
         run: |
-          if [[ "${MACOS_SIGN_MODE:-ad-hoc}" != "developer-id" ]]; then
-            echo "未使用 Developer ID 签名，跳过公证。" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+          if [[ "${MACOS_SIGN_MODE:-}" != "developer-id" ]]; then
+            echo "::error title=Developer ID required::Tagged macOS releases cannot skip notarization"
+            exit 1
           fi
           if [[ -z "${MACOS_NOTARY_KEY:-}" || -z "${MACOS_NOTARY_KEY_ID:-}" || -z "${MACOS_NOTARY_ISSUER_ID:-}" ]]; then
             echo "::error title=Notarization missing::已用 Developer ID 签名但未配置公证密钥"
@@ -266,16 +306,16 @@ jobs:
 
       # 公证必须在算校验和之前完成，因为 stapler 会改写 dmg 字节。
       # 本步若遇 Apple 长队列失败，上一私有 artifact 可由 Resume Notarization 原样续跑。
-      - name: Wait for notarization and staple macOS artifacts (optional)
+      - name: Wait for notarization and staple macOS artifacts
         env:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
         shell: bash
         run: |
-          if [[ "${MACOS_SIGN_MODE:-ad-hoc}" != "developer-id" ]]; then
-            echo "未使用 Developer ID 签名，跳过公证。" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+          if [[ "${MACOS_SIGN_MODE:-}" != "developer-id" ]]; then
+            echo "::error title=Developer ID required::Tagged macOS releases cannot skip notarization"
+            exit 1
           fi
           if [[ -z "${MACOS_NOTARY_KEY:-}" || -z "${MACOS_NOTARY_KEY_ID:-}" || -z "${MACOS_NOTARY_ISSUER_ID:-}" ]]; then
             echo "::error title=Notarization missing::已用 Developer ID 签名但未配置公证密钥"
@@ -424,6 +464,8 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -436,6 +478,21 @@ jobs:
       - name: Verify tag matches committed package and lock versions
         run: |
           node -e "const tag=process.env.GITHUB_REF_NAME||'';const expected=tag.startsWith('v')?tag.slice(1):'';const p=require('./package.json'),l=require('./package-lock.json');if(!expected||p.version!==expected||l.version!==expected||!l.packages||!l.packages['']||l.packages[''].version!==expected)throw new Error('Release tag/package/lock version mismatch: '+tag+' / '+p.version+' / '+l.version+' / '+(l.packages&&l.packages['']&&l.packages[''].version))"
+
+      - name: Verify annotated tag is reachable from main
+        shell: bash
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if [[ "$(git cat-file -t "$GITHUB_REF")" != "tag" ]]; then
+            echo "::error title=Annotated release tag required::$GITHUB_REF_NAME is not an annotated tag"
+            exit 1
+          fi
+          tag_commit="$(git rev-parse "$GITHUB_REF^{}")"
+          if [[ "$(git rev-parse HEAD)" != "$tag_commit" ]] || ! git merge-base --is-ancestor "$tag_commit" origin/main; then
+            echo "::error title=Release tag is outside main::$GITHUB_REF_NAME must resolve to the checked-out commit and be reachable from origin/main"
+            exit 1
+          fi
+          echo "RELEASE_TAG_MAIN_ANCESTOR_VERIFIED tag=$GITHUB_REF_NAME commit=$tag_commit"
 
       - name: Install dependencies
         run: npm ci
@@ -460,7 +517,7 @@ jobs:
 
       - name: Build Windows installer and portable executable
         # runtime 已按 Windows inventory 核验，禁止 predist 重建后绕过材料门。
-        run: npx --no-install electron-builder --config electron-builder.v0.10.cjs --win nsis portable --x64 --publish never
+        run: npx --no-install electron-builder --config electron-builder.v0.11-alpha.1.cjs --win nsis portable --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
@@ -601,11 +658,13 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
-            ## v0.10.0 更新
+            ## v0.11.0-alpha.1 真机验收版
 
-            同屏创作台把左边选内容、中间推进任务、右边交给 AI 执行放在一屏，执行结果会回到这条内容。
-            v0.10 用鲸坞自己的会话数据目录，`~/.dsh` 不读不写不迁移，第一次进 AI 工作台可能要重新配一次模型。
-            Windows 仍为实验性支持（未真机验证）。
+            这是 v0.11 项目工作台的预发布验收包，不是稳定版。项目成为一等对象，可绑定对话、从控制室查看需要处理的状态，并在三个布局预设的安全窗格中接收 Markdown 与 `widget-result.json` 产物。
+
+            批次 5 增加了项目根目录终端、原生项目皮肤投影、已有项目跨机认领、显式旁车写入、受限产物分离窗，以及控制室最近消息的脱敏摘要。终端由 Host 持有能力令牌并固定到项目根目录与环境白名单；它仍是当前用户权限下的本地 shell，不是操作系统文件系统或网络沙箱。
+            本版继续使用鲸坞自己的受管 dsh 目录，`~/.dsh` 不读、不写、不迁移、不清理。真实旧数据升级、真实 Agent 产物回流与五分钟连续手感仍需用户本人完成。
+            Windows 仍为实验性支持（未签名、未真机验证）。
 
             ## macOS 安装
 
@@ -616,7 +675,7 @@ jobs:
             ## 重要平台边界
 
             - 手动启用 dsh SQLite 存储的用户须在升级前备份并保留旧 runtime：`0.1.1-rc.2` 的 opt-in SQLite schema 从 15 升到 17，当前没有迁移路径；鲸坞不会自动迁移、覆盖或清理。默认 JSONL 会话存储不受影响。
-            - 受控源码流程与自动化只证明鲸坞自身链路，不等于真实 dsh、上游模型或 SGD 人工手感验收；v0.10.0 同屏创作台的完整真实模型体验仍需用户亲手确认。
+            - 受控源码流程与自动化只证明鲸坞自身链路，不等于真实 dsh、上游模型、真实 Agent 回流或 SGD 人工手感验收；v0.11.0-alpha.1 的完整体验仍需用户亲手确认。
             - 飞书源码与成品自动验证不能代替真实平台验收；本版尚未完成真实企业租户、手机收发与人工绑定验证。
             - Windows x64 构建未签名，且为实验性支持，尚未完成 Windows 真机验证；SmartScreen 拦截时可选择“更多信息 → 仍要运行”。CI 通过不代表 Windows dsh/飞书真机已通过。
             - Intel x64 仅在 Apple Silicon + Rosetta 环境抽查，尚未完成 Intel Mac 真机验证。

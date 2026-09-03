@@ -42,6 +42,7 @@ const projectMigration = require('./lib/project-migration');
 const projectTemplates = require('./lib/project-templates');
 const projectRootRef = require('./lib/project-root-ref');
 const projectBootstrapTicket = require('./lib/project-bootstrap-ticket');
+const projectDetachedWindow = require('./lib/project-detached-window');
 const {
   contextPocExact,
   contextPocValidId,
@@ -104,6 +105,7 @@ let activeRegistryProjectGeneration = 0;
 let controlRoomNeedCount = null;
 const projectArtifactScans = new Map();
 const projectArtifactPreviewWindows = new Set();
+const projectDetachedWindows = new Set();
 const VERIFIED_PROJECT_ARTIFACT = Symbol('verified-project-artifact');
 const PROJECT_SWITCH_COMMAND_TTL_MS = 9000;
 const PROJECT_PANE_PREVIEW_TEXT_BYTES = 6 * 1024;
@@ -7239,7 +7241,11 @@ const projectStoreFacade = Object.freeze({
   reorder: (...args) => requireProjectStore().reorder(...args),
   folderOf: (...args) => requireProjectStore().folderOf(...args),
   folderExists: (...args) => requireProjectStore().folderExists(...args),
-  touchOpened: (...args) => requireProjectStore().touchOpened(...args)
+  touchOpened: (...args) => requireProjectStore().touchOpened(...args),
+  findByFolder: (...args) => requireProjectStore().findByFolder(...args),
+  readManifest: (...args) => requireProjectStore().readManifest(...args),
+  writeManifest: (...args) => requireProjectStore().writeManifest(...args),
+  adoptFolder: (...args) => requireProjectStore().adoptFolder(...args)
 });
 
 function contextPocProjectSessionRootRef(runtime, projectId, supplied = {}) {
@@ -7743,6 +7749,127 @@ function closeProjectArtifactPreviews() {
     try { if (!win.isDestroyed()) win.destroy(); } catch (_error) { /* 退出继续 */ }
   }
   projectArtifactPreviewWindows.clear();
+  for (const win of projectDetachedWindows) {
+    try { if (!win.isDestroyed()) win.destroy(); } catch (_error) { /* 退出继续 */ }
+  }
+  projectDetachedWindows.clear();
+}
+
+function projectDetachedTab(value, preview) {
+  const base = { id: value.id, type: value.type, title: value.title };
+  if (value.type === 'markdown' || value.type === 'text') {
+    if (!preview || preview.kind !== value.type) throw new Error('分离窗文本预览不可用');
+    return Object.freeze({ ...base, relativeRef: value.path, text: preview.text });
+  }
+  if (value.type === 'image') {
+    if (!preview || preview.kind !== 'image') throw new Error('分离窗图片预览不可用');
+    return Object.freeze({ ...base, relativeRef: value.path, dataUrl: preview.dataUrl });
+  }
+  if (value.type === 'browser') return Object.freeze({ ...base, url: value.url });
+  if (value.type === 'video-template') {
+    return Object.freeze({ ...base, templateId: value.templateId });
+  }
+  if (value.type === 'terminal') return Object.freeze({ ...base, text: '' });
+  if (value.type !== 'artifact' || value.locked !== true) {
+    throw new Error('分离窗标签类型无效');
+  }
+  const descriptor = value.descriptor;
+  const result = {
+    ...base,
+    locked: true,
+    artifactKind: descriptor.kind,
+    relativeRef: descriptor.path
+  };
+  if (descriptor.kind === 'markdown' || descriptor.kind === 'text') {
+    if (!preview || preview.kind !== descriptor.kind) throw new Error('分离窗产物预览不可用');
+    result.text = preview.text;
+  } else if (descriptor.kind === 'image') {
+    if (!preview || preview.kind !== 'image') throw new Error('分离窗产物图片不可用');
+    result.dataUrl = preview.dataUrl;
+  }
+  return Object.freeze(result);
+}
+
+async function openProjectDetachedWindow(value, supplied = {}) {
+  if (!isPlainObject(value) || !isPlainObject(value.project)
+      || typeof value.project.projectId !== 'string'
+      || !Number.isSafeInteger(value.window) || !isPlainObject(value.tab)) {
+    throw new TypeError('project detached window input invalid');
+  }
+  const BrowserWindowClass = supplied.BrowserWindowClass || BrowserWindow;
+  const store = supplied.projectStore || requireProjectStore();
+  const current = store.get(value.project.projectId);
+  if (!current) throw new Error('项目已失效');
+  const previews = projectPanePreviews(current, { projectStore: store });
+  const preview = previews.find((item) => (
+    item.window === value.window && item.tabId === value.tab.id
+  ))?.preview;
+  const document = projectDetachedWindow.createDetachedWindowDocument({
+    project: value.project,
+    window: value.window,
+    tab: projectDetachedTab(value.tab, preview),
+    appVersion: require('./package.json').version
+  });
+  const partition = `whaledock-artifact-${crypto.randomBytes(16).toString('hex')}`;
+  const win = new BrowserWindowClass({
+    ...projectArtifactWindowOptions(partition, null),
+    title: document.title,
+    width: 1180,
+    height: 820
+  });
+  const contents = win && win.webContents;
+  const detachedSession = contents && contents.session;
+  if (!contents || !detachedSession || typeof contents.loadURL !== 'function'
+      || typeof contents.on !== 'function'
+      || typeof contents.setWindowOpenHandler !== 'function'
+      || typeof detachedSession.setPermissionRequestHandler !== 'function'
+      || typeof detachedSession.setPermissionCheckHandler !== 'function'
+      || !detachedSession.webRequest
+      || typeof detachedSession.webRequest.onBeforeRequest !== 'function') {
+    try { if (win && !win.isDestroyed()) win.destroy(); } catch (_error) { /* fail closed */ }
+    throw new Error('分离窗安全能力不可用');
+  }
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  const fence = (event, url) => {
+    if (url !== document.dataUrl) event.preventDefault();
+  };
+  contents.on('will-navigate', fence);
+  contents.on('will-redirect', fence);
+  contents.on('will-frame-navigate', fence);
+  contents.on('will-attach-webview', (event) => event.preventDefault());
+  detachedSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  detachedSession.setPermissionCheckHandler(() => false);
+  if (typeof detachedSession.setDevicePermissionHandler === 'function') {
+    detachedSession.setDevicePermissionHandler(() => false);
+  }
+  if (typeof detachedSession.on === 'function') {
+    detachedSession.on('will-download', (event) => event.preventDefault());
+  }
+  detachedSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
+    const allowed = details.url === document.dataUrl || /^data:image\/(?:png|jpeg);base64,/.test(details.url);
+    callback({ cancel: !allowed });
+  });
+  projectDetachedWindows.add(win);
+  if (typeof win.once === 'function') {
+    win.once('closed', () => projectDetachedWindows.delete(win));
+  }
+  try {
+    await contents.loadURL(document.dataUrl);
+    if (!win.isDestroyed()) {
+      win.show();
+      if (typeof win.focus === 'function') win.focus();
+    }
+  } catch (error) {
+    projectDetachedWindows.delete(win);
+    try { if (!win.isDestroyed()) win.destroy(); } catch (_error) { /* fail closed */ }
+    throw error;
+  }
+  return Object.freeze({
+    destroy() {
+      projectDetachedWindows.delete(win);
+      try { if (!win.isDestroyed()) win.destroy(); } catch (_error) { /* best effort */ }
+    }
+  });
 }
 
 function managedProjectTemplateSource(templateId, supplied = {}) {
@@ -7782,6 +7909,13 @@ function managedProjectTemplate(templateId, supplied = {}) {
 function projectTemplateActionsFor(templateId, supplied = {}) {
   if (templateId === null || templateId === undefined) return Object.freeze([]);
   return managedProjectTemplate(templateId, supplied).actions;
+}
+
+function projectSkinForTemplate(templateId, supplied = {}) {
+  if (templateId === null || templateId === undefined) return null;
+  const theme = managedProjectTemplateSource(templateId, supplied).pkg.theme;
+  if (!theme) return null;
+  return Object.freeze({ base: theme.base, colors: Object.freeze({ ...theme.colors }) });
 }
 
 function projectTemplateCatalog(supplied = {}) {
@@ -8138,8 +8272,10 @@ const contextPocProjectOperations = projectOperationModel.createProjectOperation
   chooseFolder: chooseProjectFolder,
   createProject: createProjectAtFolder,
   templateActionsFor: projectTemplateActionsFor,
+  skinForTemplate: projectSkinForTemplate,
   templateCatalogFor: projectTemplateCatalog,
   previewForProject: projectPanePreviews,
+  onDetach: openProjectDetachedWindow,
   readSwitchCommand: readProjectSwitchCommand,
   bootstrapTicketFor: contextPocProjectBootstrapTicket,
   onProjectOpened: (projectId, switchCommandSeq) => {
@@ -13492,12 +13628,15 @@ if (MAIN_HELPER_TEST) {
     managedProjectTemplateSource,
     managedProjectTemplate,
     projectTemplateActionsFor,
+    projectSkinForTemplate,
     projectTemplateCatalog,
     projectPaneStateForTemplate,
     createProjectAtFolder,
     projectTextPreview,
     projectImagePreview,
     projectPanePreviews,
+    projectDetachedTab,
+    openProjectDetachedWindow,
     projectSwitchBindingKey,
     currentProjectSwitchBinding,
     queueProjectSwitchCommand,

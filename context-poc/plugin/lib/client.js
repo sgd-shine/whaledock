@@ -14,6 +14,7 @@ window.__ModuleLoader__.load({
     const PROJECT_OPEN_TOKEN_RE = /^project-open-[a-f0-9]{64}$/;
     const PROJECT_BOOTSTRAP_TICKET_RE = /^project-bootstrap-v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{16,10923}\.[A-Za-z0-9_-]{22}$/;
     const APP_PROJECT_ID_RE = /^proj_[a-f0-9]{32}$/;
+    const PROJECT_TERMINAL_REF_RE = /^terminal-[a-f0-9]{32}$/;
     const CONTROL_RE = /[\u0000-\u001f\u007f]/;
     const WORKSPACE_TEXT_CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
     const PREFLIGHT_TIMEOUT_MS = 2500;
@@ -33,11 +34,13 @@ window.__ModuleLoader__.load({
       'shoot.open', 'shoot.history.read',
       'receipts.read', 'receipts.ack', 'receipts.open',
       'projects.list', 'projects.create', 'projects.update', 'projects.remove',
-      'projects.bind', 'projects.reorder', 'projects.open', 'console.read'
+      'projects.bind', 'projects.reorder', 'projects.open', 'projects.adopt',
+      'projects.sidecar', 'projects.detach', 'console.read'
     ]);
     const PROJECT_OPERATIONS = new Set([
       'projects.list', 'projects.create', 'projects.update', 'projects.remove',
-      'projects.bind', 'projects.reorder', 'projects.open', 'console.read'
+      'projects.bind', 'projects.reorder', 'projects.open', 'projects.adopt',
+      'projects.sidecar', 'projects.detach', 'console.read'
     ]);
     const WORKSPACE_FILE_STATES = new Set([
       'queued', 'running', 'fulfilled', 'rejected', 'cancelled', 'expired'
@@ -47,7 +50,7 @@ window.__ModuleLoader__.load({
       'operation-timeout', 'operation-failed', 'operation-stale',
       'outcome-unknown', 'busy', 'cancelled', 'project-not-found',
       'project-folder-invalid', 'project-protected', 'project-duplicate-folder',
-      'project-limit'
+      'project-identity-conflict', 'project-limit'
     ]);
     const WORKSPACE_FILE_FORBIDDEN_KEYS = new Set([
       'absolutepath', 'relativepath', 'effectivepath', 'workspacekey', 'cwd',
@@ -109,10 +112,11 @@ window.__ModuleLoader__.load({
       'grid-four': Object.freeze(['left-top', 'left-bottom', 'right-top', 'right-bottom'])
     });
     const PROJECT_PANE_TYPES = new Set([
-      'markdown', 'text', 'image', 'browser', 'video-template', 'artifact'
+      'markdown', 'text', 'image', 'browser', 'video-template', 'terminal', 'artifact'
     ]);
     const PROJECT_ARTIFACT_KINDS = new Set(['markdown', 'text', 'image', 'html']);
     const PROJECT_SHA256_RE = /^[a-f0-9]{64}$/;
+    const PROJECT_TERMINAL_CODE_RE = /^[a-z][a-z0-9-]{0,47}$/;
     const MAX_PROJECT_PREVIEWS = 8;
     const MAX_PROJECT_PREVIEW_BYTES = 8 * 1024;
     const MAX_PROJECT_PREVIEW_TEXT_BYTES = 6 * 1024;
@@ -128,7 +132,7 @@ window.__ModuleLoader__.load({
     const SHOOT_CSS = `.wd10-shoot{display:flex;flex-direction:column;gap:12px}.wd10-shootHead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.wd10-shootHead h3,.wd10-shootRecord h4{margin:0 0 5px;color:var(--dsw-alias-fg-primary)}.wd10-shootHead h3{font-size:14px}.wd10-shootRecord h4{font-size:13px}.wd10-shootActions,.wd10-prompterControls,.wd10-prompterChoices{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}.wd10-shootActions button,.wd10-prompterControls button,.wd10-prompterChoices button{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:7px 10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:11px;cursor:pointer}.wd10-shootActions button:first-child{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);font-weight:600}.wd10-shootActions button:disabled,.wd10-prompterControls button:disabled,.wd10-prompterChoices button:disabled{opacity:.5;cursor:default}.wd10-prompterChoices button[aria-pressed=true]{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-tertiary)}.wd10-prompter{height:300px;overflow:auto;scroll-behavior:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:110px 18px;background:#111;color:#f7f7f7;margin-top:12px}.wd10-prompter pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:inherit;line-height:1.75}.wd10-prompter[data-font=medium] pre{font-size:26px}.wd10-prompter[data-font=large] pre{font-size:36px}.wd10-shootTruth{border-left:3px solid var(--dsw-alias-state-warn-primary);padding:8px 10px;border-radius:0 8px 8px 0;background:var(--dsw-alias-state-warn-tertiary)}.wd10-shootRecords{display:grid;gap:9px;margin-top:11px}.wd10-shootRecord{border:1px solid var(--dsw-alias-border-l1);border-radius:10px;padding:11px;background:var(--dsw-alias-bg-base)}.wd10-shootRecord[data-confirmed=true]{border-color:var(--dsw-alias-state-business-primary)}`;
     const BROWSER_PROMPTER_CSS = `.wd10-browserPrompt{min-width:0;height:100%;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base);border-right:1px solid var(--dsw-alias-border-l2);overflow:hidden}.wd10-browserPrompt textarea{box-sizing:border-box;width:100%;min-height:150px;resize:vertical;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:12px;line-height:1.55}.wd10-browserPromptMeta{display:flex;justify-content:space-between;gap:8px;margin-top:6px;font-size:10px;color:var(--dsw-alias-fg-tertiary)}`;
     const NARROW_SIDEBAR_CSS = `@media(max-width:1023px){[data-whaledock-left="sessions"] .wd10-switch{grid-template-columns:1fr;margin:8px 4px;padding:2px;gap:2px}[data-whaledock-left="sessions"] .wd10-switch button{padding:5px 2px;font-size:11px;white-space:nowrap}}`;
-    const PROJECT_SWITCH_CSS = `.wd10-switch.wd11-switch{grid-template-columns:repeat(3,minmax(0,1fr))}.wd10-switch.wd11-switch button{padding-inline:5px}.wd10-leftView>.wd11-projectDrawer{height:100%}.wd11-projectTools{grid-template-columns:repeat(6,minmax(0,1fr))}`;
+    const PROJECT_SWITCH_CSS = `.wd10-switch.wd11-switch{grid-template-columns:repeat(3,minmax(0,1fr))}.wd10-switch.wd11-switch button{padding-inline:5px}.wd10-leftView>.wd11-projectDrawer{height:100%}.wd11-projectTools{grid-template-columns:repeat(7,minmax(0,1fr))}`;
     const PROJECT_WORKBENCH_CSS = `.wd11-projectDrawer{min-height:0;flex:1;display:flex;flex-direction:column;overflow:hidden}.wd11-projectHead{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 14px 10px}.wd11-projectHead h2{margin:0;font-size:17px;color:var(--dsw-alias-fg-primary)}.wd11-projectHead button,.wd11-projectAdd,.wd11-projectRetry,.wd11-projectTools button,.wd11-bindOffer button{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-secondary);font:inherit;font-size:11px;cursor:pointer}.wd11-projectHead button{padding:5px 8px}.wd11-projectList{min-height:0;flex:1;overflow:auto;padding:0 9px 12px}.wd11-projectRow{margin:2px 0 6px;border:1px solid transparent;border-radius:11px}.wd11-projectRow[data-current=true]{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l2)}.wd11-projectMain{width:100%;display:grid;grid-template-columns:28px minmax(0,1fr) auto;align-items:center;gap:8px;border:0;border-radius:10px;padding:9px 8px;background:transparent;color:inherit;text-align:left;font:inherit;cursor:pointer}.wd11-projectMain:hover{background:var(--dsw-alias-bg-layer-1)}.wd11-projectMain:disabled,.wd11-projectHead button:disabled,.wd11-projectAdd:disabled,.wd11-projectTools button:disabled,.wd11-bindOffer button:disabled{opacity:.5;cursor:default}.wd11-projectIcon{font-size:19px;line-height:1;text-align:center}.wd11-projectName{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600;color:var(--dsw-alias-fg-primary)}.wd11-projectDots{display:flex;gap:4px}.wd11-dot{width:7px;height:7px;border-radius:50%;border:1px solid var(--dsw-alias-fg-tertiary);background:transparent}.wd11-dot[data-on=true]{border-color:#53d7a1;background:#53d7a1;box-shadow:0 0 7px rgba(83,215,161,.65)}.wd11-dot[data-unknown=true]{border-style:dashed}.wd11-projectTools{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:3px;padding:0 7px 7px}.wd11-projectTools button{padding:4px 2px}.wd11-projectState{margin:7px 12px;padding:9px 10px;border-radius:9px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-fg-secondary);font-size:11px;line-height:1.5}.wd11-projectState[data-tone=warn]{color:var(--dsw-alias-state-warn-primary)}.wd11-projectAdd{margin:8px 12px 4px;padding:9px 10px;color:var(--dsw-alias-fg-primary);font-weight:600}.wd11-projectRetry{margin-top:6px;padding:5px 8px}.wd11-projectFoot{margin:4px 14px 12px;color:var(--dsw-alias-fg-tertiary);font-size:10px;line-height:1.45}.wd11-bindOffer{margin:7px 11px;padding:9px;border:1px solid var(--dsw-alias-state-business-primary);border-radius:10px;background:var(--dsw-alias-state-business-tertiary);color:var(--dsw-alias-fg-primary);font-size:11px;line-height:1.5}.wd11-bindOffer div{display:flex;gap:5px;margin-top:7px}.wd11-bindOffer button{padding:5px 8px}.wd11-control{--wt-bg:#07111f;--wt-panel:rgba(13,31,52,.76);--wt-line:rgba(113,169,223,.14);--wt-fg:#edf7ff;--wt-muted:#86a5bf;min-width:0;height:100%;display:flex;flex-direction:column;overflow:hidden;color:var(--wt-fg);background-color:var(--wt-bg);background-image:linear-gradient(var(--wt-line) 1px,transparent 1px),linear-gradient(90deg,var(--wt-line) 1px,transparent 1px);background-size:28px 28px;border-right:1px solid rgba(122,173,217,.2)}.wd11-control[data-wt-theme=light]{--wt-bg:#eaf3f8;--wt-panel:rgba(255,255,255,.76);--wt-line:rgba(54,105,139,.13);--wt-fg:#102c3f;--wt-muted:#56758a}.wd11-controlHead{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:20px 22px 13px}.wd11-controlTitle h1{margin:2px 0 5px;font-size:23px;letter-spacing:.01em}.wd11-controlTitle p{margin:0;color:var(--wt-muted);font-size:11px;line-height:1.5}.wd11-controlEyebrow{font:600 10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.17em;color:#62b7f0}.wd11-controlMeta{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap}.wd11-controlCount{padding:4px 7px;border:1px solid rgba(131,180,219,.24);border-radius:999px;color:var(--wt-muted);font:600 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--wt-panel)}.wd11-theme{display:flex;gap:2px;padding:3px;border:1px solid rgba(131,180,219,.24);border-radius:9px;background:var(--wt-panel)}.wd11-theme button{width:28px;height:25px;border:0;border-radius:6px;background:transparent;color:var(--wt-muted);cursor:pointer}.wd11-theme button[aria-pressed=true]{background:rgba(93,171,228,.2);color:var(--wt-fg);box-shadow:inset 0 0 0 1px rgba(115,194,247,.34)}.wd11-controlBody{min-height:0;overflow:auto;padding:10px 22px 28px}.wd11-controlGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:clamp(16px,3vw,64px)}.wd11-agentCard,.wd11-controlAdd{position:relative;aspect-ratio:1;border:1px solid rgba(126,178,218,.26);border-radius:16px;background:var(--wt-panel);color:var(--wt-fg);padding:16px;text-align:left;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.16);backdrop-filter:blur(14px);font:inherit}.wd11-agentCard{display:flex;flex-direction:column;cursor:pointer}.wd11-agentCard:hover{border-color:rgba(116,195,249,.62)}.wd11-agentCard:disabled,.wd11-controlAdd:disabled{opacity:.58;cursor:default}.wd11-agentCard[data-glow=true][data-wt-status=need]{border-color:#f3c95e;box-shadow:0 0 0 1px rgba(243,201,94,.3),0 0 30px rgba(243,201,94,.32)}.wd11-agentCard[data-glow=true][data-wt-status=done]{border-color:#5ce2aa;box-shadow:0 0 0 1px rgba(92,226,170,.28),0 0 30px rgba(92,226,170,.28)}.wd11-cardTop{display:flex;align-items:center;justify-content:space-between;gap:9px}.wd11-cardProject{min-width:0;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:650}.wd11-cardProject span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.wd11-cardStatus{margin:auto 0 5px;font:700 clamp(21px,2.2vw,33px)/1.05 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:-.04em}.wd11-agentCard[data-wt-status=need] .wd11-cardStatus{color:#f3c95e}.wd11-agentCard[data-wt-status=done] .wd11-cardStatus{color:#5ce2aa}.wd11-agentCard[data-wt-status=busy] .wd11-cardStatus{color:#64bff7}.wd11-cardFacts{display:flex;gap:10px;color:var(--wt-muted);font:500 10px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace}.wd11-cardSession{margin:7px 0 0;color:var(--wt-muted);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wd11-controlAdd{display:grid;place-content:center;text-align:center;cursor:pointer;border-style:dashed;color:var(--wt-muted)}.wd11-controlAdd strong{display:block;margin-bottom:5px;color:var(--wt-fg);font-size:21px}.wd11-controlState{grid-column:1/-1;padding:22px;border:1px dashed rgba(126,178,218,.32);border-radius:14px;background:var(--wt-panel);color:var(--wt-muted);font-size:12px;line-height:1.6}.wd11-controlState button{margin-top:9px;border:1px solid rgba(126,178,218,.38);border-radius:8px;padding:6px 9px;background:transparent;color:var(--wt-fg);font:inherit;cursor:pointer}@media(prefers-color-scheme:light){.wd11-control[data-wt-theme=system]{--wt-bg:#eaf3f8;--wt-panel:rgba(255,255,255,.76);--wt-line:rgba(54,105,139,.13);--wt-fg:#102c3f;--wt-muted:#56758a}}@media(max-width:1260px){.wd11-controlGrid{gap:16px}.wd11-controlHead{padding-inline:16px}.wd11-controlBody{padding-inline:16px}.wd11-agentCard,.wd11-controlAdd{padding:13px}}@media(max-width:1050px){.wd11-controlGrid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(prefers-reduced-motion:no-preference){.wd11-agentCard[data-glow=true]{animation:wd11-breathe 1.8s ease-in-out infinite alternate}}@keyframes wd11-breathe{from{filter:brightness(.98)}to{filter:brightness(1.1)}}`;
     const PROJECT_PANES_CSS = `.wd11-paneSurface{min-width:0;height:100%;display:flex;flex-direction:column;overflow:hidden;background:var(--dsw-alias-bg-base);border-right:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-fg-primary)}.wd11-paneHead{flex:none;display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:18px 20px 13px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}.wd11-paneTitle{min-width:0}.wd11-paneTitle h1{margin:3px 0 4px;font-size:21px;line-height:1.25;outline:none}.wd11-paneTitle p{margin:0;color:var(--dsw-alias-fg-secondary);font-size:11px;line-height:1.5}.wd11-paneEyebrow{color:var(--dsw-alias-fg-tertiary);font:600 10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em}.wd11-paneActions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap}.wd11-paneActions button,.wd11-paneTabs button,.wd11-paneEmpty button,.wd11-paneState button{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 9px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-secondary);font:inherit;font-size:11px;cursor:pointer}.wd11-paneActions button[aria-pressed=true]{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-tertiary)}.wd11-paneActions button:disabled{opacity:.5;cursor:default}.wd11-paneNotice{flex:none;margin:10px 20px 0;padding:8px 10px;border-left:3px solid var(--dsw-alias-state-warn-primary);border-radius:0 8px 8px 0;background:var(--dsw-alias-state-warn-tertiary);color:var(--dsw-alias-fg-secondary);font-size:11px;line-height:1.5}.wd11-paneBody{min-height:0;flex:1;overflow:auto;padding:14px 18px 22px}.wd11-paneGrid{min-height:100%;display:grid;gap:10px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.wd11-paneGrid[data-preset=split-two]{grid-template-areas:'left right'}.wd11-paneGrid[data-preset=left-stack]{grid-template-areas:'left-top right' 'left-bottom right'}.wd11-paneGrid[data-preset=grid-four]{grid-template-areas:'left-top right-top' 'left-bottom right-bottom'}.wd11-paneWindow{min-width:0;min-height:210px;display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-l2);border-radius:13px;background:var(--dsw-alias-bg-layer-1);overflow:hidden;box-shadow:0 8px 22px rgba(0,0,0,.08)}.wd11-paneWindow[data-retained=true]{min-height:150px}.wd11-paneWindowHead{flex:none;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}.wd11-paneWindowHead strong{font-size:11px}.wd11-paneWindowHead span{color:var(--dsw-alias-fg-tertiary);font-size:10px}.wd11-paneTabs{display:flex;gap:3px;overflow:auto;padding:6px 8px;border-bottom:1px solid var(--dsw-alias-border-l1)}.wd11-paneTabs button{border:0;border-bottom:2px solid transparent;border-radius:5px;padding:5px 7px;background:transparent;white-space:nowrap}.wd11-paneTabs button[aria-selected=true]{border-bottom-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-fg-primary);background:var(--dsw-alias-bg-base)}.wd11-paneContent{min-height:0;flex:1;overflow:auto;padding:12px}.wd11-paneEmpty{height:100%;display:grid;place-content:center;text-align:center;color:var(--dsw-alias-fg-tertiary);font-size:11px;line-height:1.55}.wd11-paneEmpty strong{display:block;margin-bottom:4px;color:var(--dsw-alias-fg-secondary);font-size:12px}.wd11-paneRef{overflow-wrap:anywhere;margin:8px 0 0;padding:8px;border-radius:7px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:500 10px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}.wd11-artifact{height:100%;display:flex;flex-direction:column;gap:8px}.wd11-artifactBadge{align-self:flex-start;border-radius:999px;padding:3px 7px;background:var(--dsw-alias-state-business-tertiary);color:var(--dsw-alias-state-business-primary);font-size:10px;font-weight:650}.wd11-artifactMeta{display:grid;grid-template-columns:auto minmax(0,1fr);gap:5px 9px;margin:0;font-size:10px}.wd11-artifactMeta dt{color:var(--dsw-alias-fg-tertiary)}.wd11-artifactMeta dd{margin:0;min-width:0;overflow-wrap:anywhere;color:var(--dsw-alias-fg-secondary)}.wd11-browserFrame{box-sizing:border-box;width:100%;height:100%;min-height:190px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:#fff}.wd11-retained{margin-top:12px}.wd11-retained h2{margin:0 0 8px;color:var(--dsw-alias-fg-secondary);font-size:11px}.wd11-retainedGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.wd11-paneState{height:100%;display:grid;place-content:center;padding:24px;text-align:center;color:var(--dsw-alias-fg-secondary);font-size:12px;line-height:1.6}.wd11-paneState strong{display:block;margin-bottom:5px;color:var(--dsw-alias-fg-primary);font-size:15px}.wd11-paneState button{margin-top:10px}.wd11-paneSurface button:focus-visible,.wd11-paneSurface h1:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}@media(max-width:1180px){.wd11-paneHead{display:block;padding:14px}.wd11-paneActions{justify-content:flex-start;margin-top:10px}.wd11-paneBody{padding:10px}.wd11-paneGrid,.wd11-paneGrid[data-preset=split-two],.wd11-paneGrid[data-preset=left-stack],.wd11-paneGrid[data-preset=grid-four]{display:flex;flex-direction:column}.wd11-paneWindow{min-height:230px}.wd11-retainedGrid{grid-template-columns:1fr}}`;
     const PROJECT_PREVIEW_CSS = `.wd11-preview{min-width:0;display:flex;flex-direction:column;gap:8px}.wd11-previewText{box-sizing:border-box;width:100%;min-height:96px;margin:0;padding:11px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:400 11px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace}.wd11-previewImage{margin:0;display:grid;gap:6px;justify-items:center}.wd11-previewImage img{display:block;max-width:100%;max-height:360px;object-fit:contain;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-base)}.wd11-preview figcaption,.wd11-previewNote{color:var(--dsw-alias-fg-tertiary);font-size:10px;line-height:1.5}.wd11-previewUnavailable{padding:10px;border:1px dashed var(--dsw-alias-border-l2);border-radius:8px;color:var(--dsw-alias-fg-tertiary);font-size:11px;line-height:1.55}.wd11-paneDocument{min-width:0;display:flex;flex-direction:column;gap:10px}.wd11-paneDocument h3{margin:0;color:var(--dsw-alias-fg-secondary);font-size:12px}`;
@@ -137,6 +141,7 @@ window.__ModuleLoader__.load({
     // viewport media query 无法感知它的真实宽度，因此用容器查询收敛窗格。
     const PROJECT_CONTAINER_CSS = `.wd11-paneSurface{container-type:inline-size;container-name:wd11-pane}.wd11-paneWindow{container-type:inline-size;container-name:wd11-window}@container wd11-pane (max-width:720px){.wd11-paneHead{display:block;padding:14px}.wd11-paneActions{justify-content:flex-start;margin-top:10px}.wd11-paneBody{padding:10px}.wd11-paneGrid,.wd11-paneGrid[data-preset=split-two],.wd11-paneGrid[data-preset=left-stack],.wd11-paneGrid[data-preset=grid-four]{display:flex;flex-direction:column}.wd11-paneWindow{min-height:340px}.wd11-paneWindow[data-empty=true]{min-height:140px}.wd11-retainedGrid{grid-template-columns:1fr}.wd11-templateSurface{grid-template-columns:1fr;min-height:680px}.wd11-templateCatalog{max-height:210px;border-right:0;border-bottom:1px solid var(--dsw-alias-border-l1)}}@container wd11-window (max-width:600px){.wd11-templateSurface{grid-template-columns:1fr;min-height:680px}.wd11-templateCatalog{max-height:210px;border-right:0;border-bottom:1px solid var(--dsw-alias-border-l1)}.wd10-overviewMeta,.wd10-currentChoices{grid-template-columns:1fr}.wd10-scriptHead,.wd10-blockMeta,.wd10-publishHead,.wd10-reviewHead,.wd10-reviewMeta,.wd10-tacticMeta,.wd10-shootHead{align-items:flex-start;flex-wrap:wrap}}`;
     const PROJECT_CREATE_ACTION_CSS = `.wd11-createWizard{margin:8px 11px;padding:11px;border:1px solid var(--dsw-alias-state-business-primary);border-radius:11px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-fg-primary)}.wd11-createWizard h3{margin:0 0 5px;font-size:13px}.wd11-createWizard p{margin:0 0 9px;color:var(--dsw-alias-fg-secondary);font-size:10px;line-height:1.55}.wd11-createWizard label{display:grid;gap:5px;color:var(--dsw-alias-fg-secondary);font-size:10px}.wd11-createWizard select{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:7px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:inherit;font-size:11px}.wd11-createHint{display:block;min-height:30px;margin-top:6px;color:var(--dsw-alias-fg-tertiary);font-size:10px;line-height:1.45}.wd11-createActions{display:flex;gap:6px;margin-top:9px}.wd11-createActions button,.wd11-templateActions button{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 9px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-secondary);font:inherit;font-size:11px;cursor:pointer}.wd11-createActions button:first-child,.wd11-templateActions button{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary)}.wd11-createActions button:disabled,.wd11-templateActions button:disabled{opacity:.5;cursor:default}.wd11-templateActions{flex:none;display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:9px 20px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base)}.wd11-templateActions>strong{margin-right:2px;color:var(--dsw-alias-fg-secondary);font-size:11px}.wd11-templateActions>span{color:var(--dsw-alias-state-warn-primary);font-size:10px}@media(max-width:1180px){.wd11-templateActions{padding-inline:14px}}`;
+    const PROJECT_BATCH5_CSS = `.wd11-cardRecent{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;margin:7px 0 0;color:var(--wt-fg);font-size:10px;line-height:1.45;opacity:.88}.wd11-cardRecent span{color:var(--wt-muted)}.wd11-paneWindowHead>span{display:flex;align-items:center;gap:7px}.wd11-detach{border:1px solid var(--dsw-alias-border-l2);border-radius:6px;padding:3px 6px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-secondary);font:inherit;font-size:9px;cursor:pointer}.wd11-terminal{height:100%;display:flex;flex-direction:column;gap:8px}.wd11-terminalNotice{margin:0;padding:8px;border-left:3px solid var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-secondary);font-size:10px;line-height:1.45}.wd11-terminalOutput{min-height:120px;flex:1;overflow:auto;margin:0;padding:10px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:#07110c;color:#bceccf;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}.wd11-terminalStatus{min-height:1.4em;color:var(--dsw-alias-fg-secondary);font-size:10px}.wd11-terminalForm{display:flex;gap:6px}.wd11-terminalForm input{min-width:0;flex:1;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;padding:7px 8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-primary);font:11px ui-monospace,SFMono-Regular,Menlo,monospace}.wd11-terminalForm button,.wd11-terminalActions button{border:1px solid var(--dsw-alias-border-l2);border-radius:7px;padding:6px 8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-fg-secondary);font:inherit;font-size:10px;cursor:pointer}.wd11-terminalActions{display:flex;gap:6px}`;
 
     const CREATOR_TABS = Object.freeze([
       ['overview', '概览'], ['script', '脚本'], ['shoot', '拍摄'],
@@ -152,7 +157,7 @@ window.__ModuleLoader__.load({
       const tag = document.createElement('style');
       tag.dataset.plugin = '@whaledock/context-bridge-poc';
       tag.dataset.pluginCss = tagId;
-      tag.textContent = `${SHELL_CSS}${NARROW_SIDEBAR_CSS}${PROJECT_WORKBENCH_CSS}${PROJECT_PANES_CSS}${PROJECT_PREVIEW_CSS}${PROJECT_TEMPLATE_CSS}${PROJECT_CONTAINER_CSS}${PROJECT_CREATE_ACTION_CSS}${PROJECT_SWITCH_CSS}${SCRIPT_CSS}${PUBLISH_CSS}${REVIEW_CSS}${SHOOT_CSS}${BROWSER_PROMPTER_CSS}`;
+      tag.textContent = `${SHELL_CSS}${NARROW_SIDEBAR_CSS}${PROJECT_WORKBENCH_CSS}${PROJECT_PANES_CSS}${PROJECT_PREVIEW_CSS}${PROJECT_TEMPLATE_CSS}${PROJECT_CONTAINER_CSS}${PROJECT_CREATE_ACTION_CSS}${PROJECT_BATCH5_CSS}${PROJECT_SWITCH_CSS}${SCRIPT_CSS}${PUBLISH_CSS}${REVIEW_CSS}${SHOOT_CSS}${BROWSER_PROMPTER_CSS}`;
       document.head.appendChild(tag);
       return () => { tag.remove(); };
     }
@@ -3869,6 +3874,13 @@ window.__ModuleLoader__.load({
       if (counts.need + counts.done + counts.busy + counts.idle !== counts.total) return null;
       const cards = [];
       for (const raw of value.cards) {
+        const recent = raw.recent === null || raw.recent === undefined ? null
+          : projectUiExact(raw.recent, ['role', 'text', 'updatedAt'])
+            && ['user', 'assistant'].includes(raw.recent.role)
+            && typeof raw.recent.text === 'string' && raw.recent.text.trim()
+            && raw.recent.text.length <= 160 && !CONTROL_RE.test(raw.recent.text)
+            && Number.isSafeInteger(raw.recent.updatedAt) && raw.recent.updatedAt >= 0
+            ? Object.freeze({ ...raw.recent }) : undefined;
         if (!projectUiRecord(raw) || !APP_PROJECT_ID_RE.test(raw.projectId)
             || typeof raw.name !== 'string' || !raw.name.trim() || raw.name.length > 40
             || CONTROL_RE.test(raw.name)
@@ -3882,7 +3894,8 @@ window.__ModuleLoader__.load({
             || !Number.isSafeInteger(raw.kids) || raw.kids < 0 || raw.kids > 512
             || typeof raw.sessionTitle !== 'string' || raw.sessionTitle.length > 120
             || CONTROL_RE.test(raw.sessionTitle)
-            || typeof raw.pinned !== 'boolean' || typeof raw.hidden !== 'boolean') return null;
+            || typeof raw.pinned !== 'boolean' || typeof raw.hidden !== 'boolean'
+            || recent === undefined) return null;
         cards.push(Object.freeze({
           projectId: raw.projectId,
           name: raw.name.trim(),
@@ -3894,7 +3907,8 @@ window.__ModuleLoader__.load({
           glow: raw.glow,
           runtimeMs: raw.runtimeMs,
           kids: raw.kids,
-          sessionTitle: raw.sessionTitle
+          sessionTitle: raw.sessionTitle,
+          recent
         }));
       }
       return Object.freeze({
@@ -3998,6 +4012,10 @@ window.__ModuleLoader__.load({
         return projectUiExact(value, [...base, 'templateId']) && validTemplate
           ? Object.freeze({ id: value.id, type: 'video-template', title: value.title,
             templateId: value.templateId }) : null;
+      }
+      if (value.type === 'terminal') {
+        return projectUiExact(value, base)
+          ? Object.freeze({ id: value.id, type: 'terminal', title: value.title }) : null;
       }
       if (!projectUiExact(value, [...base, 'descriptor', 'locked']) || value.locked !== true
           || !projectUiRecord(value.descriptor)) return null;
@@ -4118,6 +4136,16 @@ window.__ModuleLoader__.load({
       return Object.freeze({ actions: Object.freeze(actions), capped });
     }
 
+    function projectSkinSurface(value) {
+      const keys = ['background', 'surface', 'border', 'primary', 'accent', 'text', 'textMuted'];
+      if (!projectUiExact(value, ['base', 'colors'])
+          || !['dark', 'light'].includes(value.base)
+          || !projectUiExact(value.colors, keys)
+          || keys.some((key) => typeof value.colors[key] !== 'string'
+            || !/^#[a-f0-9]{6}$/.test(value.colors[key]))) return null;
+      return Object.freeze({ base: value.base, colors: Object.freeze({ ...value.colors }) });
+    }
+
     function projectUiDetail(value) {
       const required = [
         'projectId', 'kind', 'name', 'icon', 'hasFolder', 'hasBinding', 'hidden', 'pinned',
@@ -4125,7 +4153,8 @@ window.__ModuleLoader__.load({
       ];
       const hasTemplateActions = Object.prototype.hasOwnProperty.call(value, 'templateActions');
       const hasTemplateCapped = Object.prototype.hasOwnProperty.call(value, 'templateActionsCapped');
-      if (!projectUiExact(value, required, ['templateActions', 'templateActionsCapped'])
+      const hasSkin = Object.prototype.hasOwnProperty.call(value, 'skin');
+      if (!projectUiExact(value, required, ['templateActions', 'templateActionsCapped', 'skin'])
           || typeof value.hasBinding !== 'boolean'
           || hasTemplateActions !== hasTemplateCapped) return null;
       const summary = projectUiSummary({
@@ -4144,10 +4173,11 @@ window.__ModuleLoader__.load({
       const actionSurface = hasTemplateActions
         ? projectTemplateActionSurface(value.templateActions, value.templateActionsCapped)
         : Object.freeze({ actions: Object.freeze([]), capped: false });
+      const skin = hasSkin ? projectSkinSurface(value.skin) : null;
       if (!summary || !folderTailValid || !templateValid || !layoutValid
           || (value.paneState !== null && paneState === null)
           || (paneState !== null && paneState.preset !== value.layoutPreset)
-          || actionSurface === null) return null;
+          || actionSurface === null || (hasSkin && skin === null)) return null;
       return Object.freeze({
         projectId: summary.projectId,
         kind: summary.kind,
@@ -4162,7 +4192,8 @@ window.__ModuleLoader__.load({
         layoutPreset: value.layoutPreset,
         paneState,
         templateActions: actionSurface.actions,
-        templateActionsCapped: actionSurface.capped
+        templateActionsCapped: actionSurface.capped,
+        ...(skin === null ? {} : { skin })
       });
     }
 
@@ -4277,6 +4308,9 @@ window.__ModuleLoader__.load({
       if (code === 'project-folder-invalid') return '这个项目文件夹不可用。';
       if (code === 'project-protected') return '这个系统位置不能作为项目。';
       if (code === 'project-duplicate-folder') return '这个文件夹已经有项目。';
+      if (code === 'project-identity-conflict') {
+        return '这个旁车身份已由另一个仍可用的项目文件夹占用，未重新认领。';
+      }
       if (code === 'project-limit') return '项目数已达上限。';
       if (code === 'busy') return '上一个操作还在进行，请稍等。';
       if (code === 'draft-not-empty') return '右侧当前对话已有草稿，未覆盖。';
@@ -4548,7 +4582,7 @@ window.__ModuleLoader__.load({
 
     function ProjectDrawer({ state, cards, currentSessionAvailable, onConsole, onProject,
       onAdd, onCreateTemplate, onCloseCreate, onBind, onDismissBind,
-      onRename, onIcon, onHide, onMove, onRefresh }) {
+      onRename, onIcon, onHide, onMove, onRefresh, onAdopt, onSidecar }) {
       const projectById = new Map(state.projects.items.map((project) => [project.projectId, project]));
       const consoleProject = projectById.get(CONTROL_PROJECT_ID) || Object.freeze({
         projectId: CONTROL_PROJECT_ID, kind: 'builtin', name: '控制室', icon: '🖥️',
@@ -4607,6 +4641,9 @@ window.__ModuleLoader__.load({
                   children: project.hasBinding ? '重绑' : '绑定' }),
                 react_jsx_runtime.jsx('button', { type: 'button', disabled: busy,
                   onClick: () => onHide(project), children: project.hidden ? '显示' : '隐藏' }),
+                react_jsx_runtime.jsx('button', { type: 'button', disabled: busy || !project.hasFolder,
+                  title: '显式写入 .whaledock/project.json，便于换机后认领',
+                  onClick: () => onSidecar(project), children: '旁车' }),
                 react_jsx_runtime.jsx('button', { type: 'button', disabled: busy || index === 0,
                   'aria-label': `${project.name} 上移`, onClick: () => onMove(project, -1), children: '↑' }),
                 react_jsx_runtime.jsx('button', { type: 'button',
@@ -4716,6 +4753,8 @@ window.__ModuleLoader__.load({
           }),
           react_jsx_runtime.jsx('button', { type: 'button', className: 'wd11-projectAdd',
             disabled: busy, onClick: onAdd, children: '＋ 添加项目' }),
+          react_jsx_runtime.jsx('button', { type: 'button', className: 'wd11-projectAdd',
+            disabled: busy, onClick: onAdopt, children: '↪ 认领已有文件夹' }),
           react_jsx_runtime.jsx('p', { className: 'wd11-projectFoot', children:
             '原生会话与设置一直可达；项目只管绑定和切换。'
           })
@@ -4797,6 +4836,14 @@ window.__ModuleLoader__.load({
                   ] }),
                   react_jsx_runtime.jsx('p', { className: 'wd11-cardSession', children:
                     card.sessionTitle || '尚未绑定对话'
+                  }),
+                  card.recent && react_jsx_runtime.jsxs('p', {
+                    className: 'wd11-cardRecent', children: [
+                      react_jsx_runtime.jsx('span', { children:
+                        card.recent.role === 'user' ? '你：' : 'AI：'
+                      }),
+                      card.recent.text
+                    ]
                   })
                 ]
               }, card.projectId)),
@@ -4823,6 +4870,33 @@ window.__ModuleLoader__.load({
       if (value < 1024) return `${value} B`;
       if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
       return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
+    }
+
+    function projectTerminalStatus(value) {
+      if (projectUiExact(value, ['kind']) && value.kind === 'running') {
+        return Object.freeze({ kind: 'running' });
+      }
+      if (!projectUiExact(value, ['kind', 'exitCode', 'signal']) || value.kind !== 'exited'
+          || !(value.exitCode === null || Number.isSafeInteger(value.exitCode))
+          || !(value.signal === null || (typeof value.signal === 'string'
+            && /^[A-Z][A-Z0-9]{2,15}$/.test(value.signal)))) return null;
+      return Object.freeze({ kind: 'exited', exitCode: value.exitCode, signal: value.signal });
+    }
+
+    function projectTerminalPage(value) {
+      if (!projectUiExact(value, [
+        'contentType', 'renderMode', 'text', 'fromSeq', 'nextSeq', 'endSeq',
+        'retainedBytes', 'truncated', 'hasMore'
+      ]) || value.contentType !== 'text/plain' || value.renderMode !== 'text-only'
+          || typeof value.text !== 'string' || utf8Bytes(value.text) > 32 * 1024
+          || WORKSPACE_TEXT_CONTROL_RE.test(value.text)
+          || !Number.isSafeInteger(value.fromSeq) || value.fromSeq < 0
+          || !Number.isSafeInteger(value.nextSeq) || value.nextSeq < value.fromSeq
+          || !Number.isSafeInteger(value.endSeq) || value.endSeq < value.nextSeq
+          || !Number.isSafeInteger(value.retainedBytes) || value.retainedBytes < 0
+          || value.retainedBytes > 512 * 1024
+          || typeof value.truncated !== 'boolean' || typeof value.hasMore !== 'boolean') return null;
+      return Object.freeze({ ...value });
     }
 
     function ProjectPreview({ preview, title }) {
@@ -4896,7 +4970,170 @@ window.__ModuleLoader__.load({
       });
     }
 
-    function ProjectTabContent({ tab, templateSurface }) {
+    function ProjectTerminal({ projectId, paneRef, service }) {
+      const [record, setRecord] = react.useState(null);
+      const [output, setOutput] = react.useState('');
+      const [message, setMessage] = react.useState('正在由 Host 打开本机 shell…');
+      const [command, setCommand] = react.useState('');
+      const recordRef = react.useRef(null);
+      const nextSeq = react.useRef(0);
+      const mountedRef = react.useRef(false);
+      const generationRef = react.useRef(0);
+      const controllerRef = react.useRef(null);
+      const timerRef = react.useRef(null);
+      const clearPump = react.useCallback(() => {
+        controllerRef.current?.abort();
+        controllerRef.current = null;
+        if (timerRef.current !== null) globalThis.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }, []);
+      const closeCredentials = react.useCallback((credentials) => {
+        if (credentials && service?.close) {
+          void service.close({ projectId, paneRef, ...credentials });
+        }
+      }, [paneRef, projectId, service]);
+      const open = react.useCallback(async () => {
+        const generation = generationRef.current + 1;
+        generationRef.current = generation;
+        clearPump();
+        const previous = recordRef.current;
+        recordRef.current = null;
+        if (previous) closeCredentials(previous);
+        setRecord(null);
+        setOutput('');
+        setMessage('正在由 Host 打开本机 shell…');
+        if (!service?.open) { setMessage('终端服务不可用。'); return; }
+        const controller = new AbortController();
+        controllerRef.current = controller;
+        // open 不绑定组件 AbortSignal：若界面在 Host 创建 PTY 期间卸载，仍等待凭据
+        // 回来并走下面的 generation 分支显式 close，避免留下无人持有令牌的会话。
+        const value = await service.open({ projectId, paneRef, cols: 100, rows: 28 });
+        const credentials = value?.opened && value.terminalRef && value.capability
+          ? Object.freeze({ terminalRef: value.terminalRef, capability: value.capability }) : null;
+        if (!mountedRef.current || controller.signal.aborted
+            || generationRef.current !== generation) {
+          closeCredentials(credentials);
+          return;
+        }
+        if (!credentials) {
+          setMessage('终端未打开：' + (value?.code || '服务不可用'));
+          return;
+        }
+        recordRef.current = credentials;
+        nextSeq.current = value.page?.nextSeq || 0;
+        setOutput(value.page?.text || '');
+        if (value.status?.kind !== 'running') {
+          recordRef.current = null;
+          closeCredentials(credentials);
+          setMessage('终端已退出');
+          return;
+        }
+        setRecord(credentials);
+        setMessage('已连接');
+        const pump = async () => {
+          const current = recordRef.current;
+          if (!mountedRef.current || controller.signal.aborted
+              || generationRef.current !== generation || current !== credentials
+              || !service?.read) return;
+          const result = await service.read({
+            projectId, paneRef, ...credentials,
+            afterSeq: nextSeq.current, maxBytes: 16 * 1024
+          }, controller.signal);
+          if (!mountedRef.current || controller.signal.aborted
+              || generationRef.current !== generation || recordRef.current !== credentials) return;
+          if (result?.accepted && result.page) {
+            nextSeq.current = result.page.nextSeq;
+            if (result.page.truncated) setOutput(`…[较早输出已截断]\n${result.page.text}`);
+            else if (result.page.text) setOutput((currentText) => (
+              `${currentText}${result.page.text}`.slice(-512 * 1024)
+            ));
+            if (result.status?.kind === 'exited') {
+              recordRef.current = null;
+              setRecord(null);
+              setMessage('终端已退出');
+              closeCredentials(credentials);
+              return;
+            }
+          } else if (result?.code) {
+            recordRef.current = null;
+            setRecord(null);
+            setMessage(`终端已停止：${result.code}`);
+            closeCredentials(credentials);
+            return;
+          }
+          timerRef.current = globalThis.setTimeout(
+            pump, result?.page?.hasMore ? 20 : 240
+          );
+        };
+        void pump();
+      }, [clearPump, closeCredentials, paneRef, projectId, service]);
+      react.useEffect(() => {
+        mountedRef.current = true;
+        void open();
+        return () => {
+          mountedRef.current = false;
+          generationRef.current += 1;
+          clearPump();
+          const current = recordRef.current;
+          recordRef.current = null;
+          closeCredentials(current);
+        };
+      }, [clearPump, closeCredentials, open]);
+      const submit = (event) => {
+        event.preventDefault();
+        const current = recordRef.current;
+        const data = `${command}\n`;
+        if (!current || !service?.write || !command || utf8Bytes(data) > 8 * 1024
+            || /[\u0000-\u0007\u000b\u000c\u000e-\u001f\u007f-\u009f]/.test(command)) return;
+        setCommand('');
+        void service.write({ projectId, paneRef, ...current, data });
+      };
+      const close = () => {
+        const current = recordRef.current;
+        if (!current || !service?.close) return;
+        const generation = generationRef.current + 1;
+        generationRef.current = generation;
+        clearPump();
+        recordRef.current = null;
+        setRecord(null);
+        setMessage('正在关闭…');
+        void service.close({ projectId, paneRef, ...current }).then((value) => {
+          if (!mountedRef.current || generationRef.current !== generation) return;
+          setMessage(value?.closed ? '已关闭' : `关闭未确认：${value?.code || '未知'}`);
+        }, () => {
+          if (mountedRef.current && generationRef.current === generation) {
+            setMessage('关闭未确认：服务不可用');
+          }
+        });
+      };
+      return react_jsx_runtime.jsxs('section', { className: 'wd11-terminal', children: [
+        react_jsx_runtime.jsx('p', { className: 'wd11-terminalNotice', children:
+          '这是你主动打开的本机 shell。起始目录固定为项目根，环境已清空并按白名单重建；但它仍可以读取当前 macOS/Windows 用户有权限的其他文件并访问网络。'
+        }),
+        react_jsx_runtime.jsx('pre', { className: 'wd11-terminalOutput', children: output }),
+        react_jsx_runtime.jsx('span', { className: 'wd11-terminalStatus', role: 'status',
+          children: message }),
+        react_jsx_runtime.jsx('form', { className: 'wd11-terminalForm', onSubmit: submit, children: [
+          react_jsx_runtime.jsx('input', { value: command, disabled: !record,
+            onChange: (event) => setCommand(event.target.value),
+            'aria-label': '终端命令', placeholder: message }),
+          react_jsx_runtime.jsx('button', { type: 'submit', disabled: !record || !command,
+            children: '运行' })
+        ] }),
+        react_jsx_runtime.jsxs('div', { className: 'wd11-terminalActions', children: [
+          react_jsx_runtime.jsx('button', { type: 'button', disabled: !record,
+            onClick: () => recordRef.current && service?.signal?.({
+              projectId, paneRef, ...recordRef.current, signal: 'SIGINT'
+            }), children: '中断' }),
+          react_jsx_runtime.jsx('button', { type: 'button', disabled: !record,
+            onClick: close, children: '关闭' }),
+          !record && react_jsx_runtime.jsx('button', { type: 'button', onClick: () => { void open(); },
+            children: '重新打开' })
+        ] })
+      ] });
+    }
+
+    function ProjectTabContent({ tab, templateSurface, terminalSurface }) {
       if (tab === undefined) {
         return react_jsx_runtime.jsxs('div', { className: 'wd11-paneEmpty', children: [
           react_jsx_runtime.jsx('strong', { children: '窗口已就绪' }),
@@ -4941,6 +5178,13 @@ window.__ModuleLoader__.load({
       if (tab.type === 'video-template') {
         return react_jsx_runtime.jsx(ProjectVideoTemplate, { tab, surface: templateSurface });
       }
+      if (tab.type === 'terminal') {
+        return react_jsx_runtime.jsx(ProjectTerminal, {
+          projectId: terminalSurface?.projectId,
+          paneRef: tab.id,
+          service: terminalSurface?.service
+        });
+      }
       return react_jsx_runtime.jsxs('article', { className: 'wd11-paneDocument', children: [
         react_jsx_runtime.jsx('h3', { children: `${projectPaneTypeLabel(tab.type)} · 只读预览` }),
         react_jsx_runtime.jsx('p', { className: 'wd11-paneRef', children: tab.relativeRef }),
@@ -4948,7 +5192,7 @@ window.__ModuleLoader__.load({
       ] });
     }
 
-    function PaneWindow({ pane, slot, retained, templateSurface }) {
+    function PaneWindow({ pane, slot, retained, templateSurface, terminalSurface, onDetach }) {
       const [activeId, setActiveId] = react.useState(() => pane.active);
       react.useEffect(() => { setActiveId(pane.active); }, [pane.window, pane.active]);
       const active = pane.tabs.find((tab) => tab.id === activeId)
@@ -4960,7 +5204,13 @@ window.__ModuleLoader__.load({
         'aria-label': pane.label, children: [
           react_jsx_runtime.jsxs('header', { className: 'wd11-paneWindowHead', children: [
             react_jsx_runtime.jsx('strong', { children: pane.label }),
-            react_jsx_runtime.jsx('span', { children: retained ? '已保留' : pane.collapsed ? '已折叠' : '可见' })
+            react_jsx_runtime.jsxs('span', { children: [
+              retained ? '已保留' : pane.collapsed ? '已折叠' : '可见',
+              active && active.type !== 'terminal' && react_jsx_runtime.jsx('button', { type: 'button',
+                className: 'wd11-detach', title: '在独立窗口显示当前标签',
+                onClick: () => onDetach(pane.window, active.id), children: '分离'
+              })
+            ] })
           ] }),
           pane.tabs.length > 1 && react_jsx_runtime.jsx('div', {
             className: 'wd11-paneTabs', role: 'tablist', 'aria-label': `${pane.label} 标签`,
@@ -4971,18 +5221,22 @@ window.__ModuleLoader__.load({
           }),
           !pane.collapsed && react_jsx_runtime.jsx('div', {
             className: 'wd11-paneContent', role: pane.tabs.length > 1 ? 'tabpanel' : undefined,
-            children: react_jsx_runtime.jsx(ProjectTabContent, { tab: active, templateSurface })
+            children: react_jsx_runtime.jsx(ProjectTabContent, {
+              tab: active, templateSurface, terminalSurface
+            })
           })
         ]
       });
     }
 
     function ProjectPane({ state, currentSessionAvailable, onControl, onBind, onPreset,
-      onRetry, onTemplateAction, templateSurface }) {
+      onRetry, onTemplateAction, onDetach, terminalService, templateSurface }) {
       const titleRef = react.useRef(null);
+      const [terminalVisible, setTerminalVisible] = react.useState(false);
       const detail = state.detail;
       const project = detail.project;
       react.useEffect(() => { titleRef.current?.focus(); }, [project?.projectId]);
+      react.useEffect(() => { setTerminalVisible(false); }, [project?.projectId]);
       if (project === null) {
         const message = detail.status === 'loading'
           ? '正在打开项目窗格…' : '项目详情暂时读不到。';
@@ -5004,14 +5258,43 @@ window.__ModuleLoader__.load({
       const paneByNumber = new Map((project.paneState?.windows || []).map((pane) => (
         [pane.window, pane]
       )));
+      const terminalWindowNumber = Array.from({ length: 16 }, (_value, index) => index + 1)
+        .find((number) => !paneByNumber.has(number)) || null;
+      const terminalPane = terminalVisible && terminalWindowNumber !== null
+        ? Object.freeze({
+          window: terminalWindowNumber,
+          label: `窗口${terminalWindowNumber}`,
+          tabs: Object.freeze([Object.freeze({
+            id: `terminal-window-${terminalWindowNumber}`, type: 'terminal', title: '终端'
+          })]),
+          active: `terminal-window-${terminalWindowNumber}`,
+          collapsed: false
+        }) : null;
       const activePanes = slots.map((_slot, index) => paneByNumber.get(index + 1)
+        || (terminalPane?.window === index + 1 ? terminalPane : null)
         || Object.freeze({ window: index + 1, label: `窗口${index + 1}`,
           tabs: Object.freeze([]), active: null, collapsed: false }));
       const retained = (project.paneState?.windows || []).filter((pane) => pane.window > slots.length);
+      if (terminalPane && terminalPane.window > slots.length) retained.push(terminalPane);
       const busy = state.action !== null || detail.status === 'refreshing';
+      const skinStyle = project.skin ? {
+        '--dsw-alias-bg-base': project.skin.colors.background,
+        '--dsw-alias-bg-layer-1': project.skin.colors.surface,
+        '--dsw-alias-border-l1': project.skin.colors.border,
+        '--dsw-alias-border-l2': project.skin.colors.border,
+        '--dsw-alias-state-business-primary': project.skin.colors.primary,
+        '--dsw-alias-state-business-tertiary': project.skin.colors.surface,
+        '--dsw-alias-fg-primary': project.skin.colors.text,
+        '--dsw-alias-fg-secondary': project.skin.colors.textMuted,
+        '--dsw-alias-fg-tertiary': project.skin.colors.textMuted,
+        '--wd11-template-accent': project.skin.colors.accent,
+        colorScheme: project.skin.base
+      } : undefined;
       return react_jsx_runtime.jsxs('section', {
         className: 'wd11-paneSurface', 'aria-label': `项目窗格：${project.name}`,
-        'data-project-pane': true, 'data-detail-state': detail.status, children: [
+        'data-project-pane': true, 'data-detail-state': detail.status,
+        'data-template-skin': project.skin ? project.skin.base : undefined,
+        style: skinStyle, children: [
           react_jsx_runtime.jsxs('header', { className: 'wd11-paneHead', children: [
             react_jsx_runtime.jsxs('div', { className: 'wd11-paneTitle', children: [
               react_jsx_runtime.jsx('div', { className: 'wd11-paneEyebrow', children:
@@ -5032,6 +5315,16 @@ window.__ModuleLoader__.load({
                 type: 'button', disabled: busy || !currentSessionAvailable,
                 title: currentSessionAvailable ? '绑定右侧当前对话' : '请先在「对话」选择一条会话',
                 onClick: () => onBind(project), children: '绑定当前对话'
+              }),
+              react_jsx_runtime.jsx('button', {
+                type: 'button', disabled: busy || !project.hasFolder || !project.hasBinding
+                  || (terminalWindowNumber === null && !terminalVisible),
+                'aria-pressed': terminalVisible,
+                title: project.hasFolder && project.hasBinding
+                  ? '在项目根启动环境白名单化的本机 shell'
+                  : '项目文件夹和对话都就绪后才可打开',
+                onClick: () => setTerminalVisible((value) => !value),
+                children: terminalVisible ? '收起终端' : '终端'
               }),
               ...PROJECT_PANE_PRESETS.map((value) => react_jsx_runtime.jsx('button', {
                 type: 'button', disabled: busy, 'aria-pressed': preset === value,
@@ -5073,7 +5366,8 @@ window.__ModuleLoader__.load({
           react_jsx_runtime.jsxs('div', { className: 'wd11-paneBody', children: [
             react_jsx_runtime.jsx('div', { className: 'wd11-paneGrid', 'data-preset': preset,
               children: activePanes.map((pane, index) => react_jsx_runtime.jsx(PaneWindow, {
-                pane, slot: slots[index], retained: false, templateSurface
+                pane, slot: slots[index], retained: false, templateSurface, onDetach,
+                terminalSurface: { projectId: project.projectId, service: terminalService }
               }, `window-${pane.window}`))
             }),
             retained.length > 0 && react_jsx_runtime.jsxs('section', {
@@ -5081,7 +5375,8 @@ window.__ModuleLoader__.load({
                 react_jsx_runtime.jsx('h2', { children: '已保留的其他窗口' }),
                 react_jsx_runtime.jsx('div', { className: 'wd11-retainedGrid', children:
                   retained.map((pane) => react_jsx_runtime.jsx(PaneWindow, {
-                    pane, retained: true, templateSurface
+                    pane, retained: true, templateSurface, onDetach,
+                    terminalSurface: { projectId: project.projectId, service: terminalService }
                   }, `retained-${pane.window}`))
                 })
               ]
@@ -5734,6 +6029,32 @@ window.__ModuleLoader__.load({
       const addProject = () => {
         dispatchWorkbench({ type: 'create:open' });
       };
+      const adoptProject = () => {
+        if (!whaledockProjects?.adopt) {
+          dispatchWorkbench({ type: 'notice', value: '项目认领服务暂时不可用。' });
+          return;
+        }
+        void performProjectAction('adopt', null,
+          (signal) => whaledockProjects.adopt(signal), (snapshot) => {
+            const result = snapshot?.state === 'fulfilled' ? snapshot.result : null;
+            const project = result?.kind === 'adopted' ? projectUiSummary(result.project) : null;
+            if (!project || !['existing', 'relinked', 'manifest', 'new'].includes(result.adopted)) {
+              return null;
+            }
+            const labels = {
+              existing: '该文件夹已在项目列表。',
+              relinked: '已按旁车身份重新连上搬家后的项目。',
+              manifest: '已从旁车恢复项目身份。',
+              new: '已认领为新项目；尚未写入旁车。'
+            };
+            return {
+              notice: labels[result.adopted], selectedProjectId: project.projectId,
+              bindOffer: project.hasBinding ? null : Object.freeze({
+                projectId: project.projectId, name: project.name
+              })
+            };
+          });
+      };
       const createProjectFromTemplate = (templateId) => {
         if (!whaledockProjects?.create) {
           dispatchWorkbench({ type: 'notice', value: '项目服务暂时不可用。' });
@@ -5768,6 +6089,22 @@ window.__ModuleLoader__.load({
             && snapshot.result?.kind === 'binding'
             && snapshot.result?.projectId === project.projectId
             ? { notice: `「${project.name}」已绑定当前对话。`, bindOffer: null }
+            : null);
+      };
+      const writeProjectSidecar = (project) => {
+        if (!whaledockProjects?.writeSidecar) {
+          dispatchWorkbench({ type: 'notice', value: '项目旁车服务暂时不可用。' });
+          return;
+        }
+        if (typeof globalThis.confirm !== 'function'
+            || !globalThis.confirm(`要在「${project.name}」文件夹写入 .whaledock/project.json 吗？\n\n它只保存项目身份、名称、图标和模板，不保存对话或绝对路径。`)) return;
+        void performProjectAction('sidecar', project.projectId,
+          (signal) => whaledockProjects.writeSidecar({ projectId: project.projectId }, signal),
+          (snapshot) => snapshot?.state === 'fulfilled'
+            && snapshot.result?.kind === 'sidecar'
+            && snapshot.result?.projectId === project.projectId
+            && snapshot.result?.written === true
+            ? { notice: '项目旁车已写入；换机后可用「认领已有文件夹」恢复。' }
             : null);
       };
       const updateProject = (project, changes, notice) => {
@@ -5948,6 +6285,21 @@ window.__ModuleLoader__.load({
           }, signal),
           (snapshot) => projectMutationResult(snapshot)
             ? { notice: '布局已更新，已有窗口与锁定产物保留。' } : null);
+      };
+      const detachProjectWindow = (windowNumber, tabId) => {
+        const project = workbench.detail.project;
+        if (!project || !whaledockProjects?.detach
+            || !Number.isSafeInteger(windowNumber) || windowNumber < 1 || windowNumber > 16
+            || typeof tabId !== 'string' || !tabId) return;
+        void performProjectAction('detach', project.projectId,
+          (signal) => whaledockProjects.detach({
+            projectId: project.projectId, window: windowNumber, tabId
+          }, signal),
+          (snapshot) => snapshot?.state === 'fulfilled'
+            && snapshot.result?.kind === 'detached'
+            && snapshot.result?.projectId === project.projectId
+            ? { notice: `已分离窗口${windowNumber}的当前标签。`, refresh: false }
+            : null);
       };
       const alignManagedProject = async () => {
         const project = activeRoutingProject;
@@ -6253,6 +6605,7 @@ window.__ModuleLoader__.load({
                   onConsole: () => openProject(CONTROL_PROJECT_ID),
                   onProject: openProject,
                   onAdd: addProject,
+                  onAdopt: adoptProject,
                   onCreateTemplate: createProjectFromTemplate,
                   onCloseCreate: () => dispatchWorkbench({ type: 'create:close' }),
                   onBind: bindProject,
@@ -6262,6 +6615,7 @@ window.__ModuleLoader__.load({
                   onHide: (project) => updateProject(project, { hidden: !project.hidden },
                     project.hidden ? '项目已恢复显示。' : '项目已隐藏。'),
                   onMove: moveProject,
+                  onSidecar: writeProjectSidecar,
                   onRefresh: refreshProjectWorkbench
                 }) }),
             react_jsx_runtime.jsx('div', { className: 'wd10-leftView',
@@ -6287,6 +6641,8 @@ window.__ModuleLoader__.load({
               },
               onBind: bindProject,
               onPreset: changeProjectLayout,
+              onDetach: detachProjectWindow,
+              terminalService: whaledockProjects?.terminal,
               onTemplateAction: runTemplateAction,
               onRetry: () => setDetailRefreshKey((current) => current + 1),
               templateSurface: projectTemplateSurfaceCurrent ? {
@@ -7067,7 +7423,93 @@ window.__ModuleLoader__.load({
         }
       };
       const invalidProjectCall = () => Promise.resolve(projectFailure('operation-invalid'));
+      const terminalCode = (value) => value === null
+        || (typeof value === 'string' && PROJECT_TERMINAL_CODE_RE.test(value));
+      const terminalIdentity = (value) => plain(value)
+        && APP_PROJECT_ID_RE.test(value.projectId || '')
+        && typeof value.paneRef === 'string'
+        && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value.paneRef);
+      const terminalCredentials = (value) => terminalIdentity(value)
+        && PROJECT_TERMINAL_REF_RE.test(value.terminalRef || '')
+        && TOKEN_RE.test(value.capability || '');
+      const terminalCall = async (endpoint, payload, signal) => {
+        if (!terminalIdentity(payload) || !projectOpenCurrent(payload.projectId)) return null;
+        const registered = await registerSelection(true);
+        if (registered?.ok !== true || registered.value?.state !== 'selected'
+            || !projectOpenCurrent(payload.projectId)) return null;
+        try {
+          const reply = await connection.rpc.call(CHANNEL, endpoint, {
+            ...preferenceAuth(), ...payload
+          }, signal || abort.signal);
+          return reply?.ok === true && plain(reply.value) ? reply.value : null;
+        } catch (_error) { return null; }
+      };
+      const terminal = Object.freeze({
+        async open(value, signal) {
+          if (!terminalIdentity(value) || !exact(value, ['projectId', 'paneRef', 'cols', 'rows'])
+              || !Number.isSafeInteger(value.cols) || value.cols < 20 || value.cols > 300
+              || !Number.isSafeInteger(value.rows) || value.rows < 5 || value.rows > 120) return null;
+          const result = await terminalCall('terminal.open', value, signal);
+          if (!exact(result, ['opened', 'code', 'terminalRef', 'capability', 'status', 'page'])
+              || typeof result.opened !== 'boolean' || !terminalCode(result.code)) return null;
+          if (!result.opened) {
+            return result.terminalRef === null && result.capability === null
+              && result.status === null && result.page === null ? Object.freeze({ ...result }) : null;
+          }
+          const status = projectTerminalStatus(result.status);
+          const page = projectTerminalPage(result.page);
+          return result.code === null && PROJECT_TERMINAL_REF_RE.test(result.terminalRef || '')
+            && TOKEN_RE.test(result.capability || '') && status && page
+            ? Object.freeze({ ...result, status, page }) : null;
+        },
+        async read(value, signal) {
+          if (!terminalCredentials(value)
+              || !exact(value, [
+                'projectId', 'paneRef', 'terminalRef', 'capability', 'afterSeq', 'maxBytes'
+              ]) || !Number.isSafeInteger(value.afterSeq) || value.afterSeq < 0
+              || !Number.isSafeInteger(value.maxBytes) || value.maxBytes < 4
+              || value.maxBytes > 32 * 1024) return null;
+          const result = await terminalCall('terminal.read', value, signal);
+          if (!exact(result, ['accepted', 'code', 'status', 'page'])
+              || typeof result.accepted !== 'boolean' || !terminalCode(result.code)) return null;
+          if (!result.accepted) return result.status === null && result.page === null
+            ? Object.freeze({ ...result }) : null;
+          const status = projectTerminalStatus(result.status);
+          const page = projectTerminalPage(result.page);
+          return result.code === null && status && page
+            ? Object.freeze({ ...result, status, page }) : null;
+        },
+        async write(value, signal) {
+          if (!terminalCredentials(value)
+              || !exact(value, [
+                'projectId', 'paneRef', 'terminalRef', 'capability', 'data'
+              ]) || typeof value.data !== 'string' || !value.data
+              || utf8Bytes(value.data) > 8 * 1024
+              || /[\u0000-\u0007\u000b\u000c\u000e-\u001f\u007f-\u009f]/.test(value.data)) return null;
+          const result = await terminalCall('terminal.write', value, signal);
+          return exact(result, ['accepted', 'code']) && typeof result.accepted === 'boolean'
+            && terminalCode(result.code) ? Object.freeze({ ...result }) : null;
+        },
+        async signal(value, signal) {
+          if (!terminalCredentials(value)
+              || !exact(value, [
+                'projectId', 'paneRef', 'terminalRef', 'capability', 'signal'
+              ]) || value.signal !== 'SIGINT') return null;
+          const result = await terminalCall('terminal.signal', value, signal);
+          return exact(result, ['delivered', 'code']) && typeof result.delivered === 'boolean'
+            && terminalCode(result.code) ? Object.freeze({ ...result }) : null;
+        },
+        async close(value, signal) {
+          if (!terminalCredentials(value)
+              || !exact(value, ['projectId', 'paneRef', 'terminalRef', 'capability'])) return null;
+          const result = await terminalCall('terminal.close', value, signal);
+          return exact(result, ['closed', 'quiescent', 'code'])
+            && typeof result.closed === 'boolean' && typeof result.quiescent === 'boolean'
+            && terminalCode(result.code) ? Object.freeze({ ...result }) : null;
+        }
+      });
       const whaledockProjects = Object.freeze({
+        terminal,
         list(value = {}, signal) {
           if (!plain(value) || Object.keys(value).some((key) => (
             key !== 'cursor' && key !== 'limit' && key !== 'includeHidden'
@@ -7085,6 +7527,9 @@ window.__ModuleLoader__.load({
           ))) return invalidProjectCall();
           return workspaceFiles.execute('projects.create', value, signal);
         },
+        adopt(signal) {
+          return workspaceFiles.execute('projects.adopt', {}, signal);
+        },
         update(value, signal) {
           if (!exact(value, ['projectId', 'changes']) || !APP_PROJECT_ID_RE.test(value.projectId)
               || !plain(value.changes) || Object.keys(value.changes).length < 1
@@ -7098,6 +7543,20 @@ window.__ModuleLoader__.load({
             return invalidProjectCall();
           }
           return workspaceFiles.execute('projects.remove', value, signal);
+        },
+        writeSidecar(value, signal) {
+          if (!exact(value, ['projectId']) || !APP_PROJECT_ID_RE.test(value.projectId)) {
+            return invalidProjectCall();
+          }
+          return workspaceFiles.execute('projects.sidecar', value, signal);
+        },
+        detach(value, signal) {
+          if (!exact(value, ['projectId', 'window', 'tabId'])
+              || !APP_PROJECT_ID_RE.test(value.projectId)
+              || !Number.isSafeInteger(value.window) || value.window < 1 || value.window > 16
+              || typeof value.tabId !== 'string' || !value.tabId || value.tabId.length > 128
+              || CONTROL_RE.test(value.tabId)) return invalidProjectCall();
+          return workspaceFiles.execute('projects.detach', value, signal);
         },
         async bindCurrent(value, signal) {
           if (!exact(value, ['projectId']) || !APP_PROJECT_ID_RE.test(value.projectId)) {

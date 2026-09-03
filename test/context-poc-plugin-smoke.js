@@ -5,6 +5,7 @@ const { createHash, createHmac } = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { PassThrough } = require('stream');
 const vm = require('vm');
 const { pathToFileURL } = require('url');
 const projectRootRef = require('../lib/project-root-ref');
@@ -148,7 +149,8 @@ async function main() {
       'shoot.open', 'shoot.history.read',
       'receipts.read', 'receipts.ack', 'receipts.open',
       'projects.list', 'projects.create', 'projects.update', 'projects.remove',
-      'projects.bind', 'projects.reorder', 'projects.open', 'console.read'
+      'projects.bind', 'projects.reorder', 'projects.open', 'projects.adopt',
+      'projects.sidecar', 'projects.detach', 'console.read'
     ];
     const operationSet = (source, name) => {
       const match = source.match(new RegExp(`const ${name} = new Set\\(\\[([\\s\\S]*?)\\]\\);`));
@@ -168,7 +170,7 @@ async function main() {
     );
     const projectOperations = operationSet(projectSource, 'PROJECT_OPERATION_NAMES');
     assert.equal(legacyOperations.length, 21, 'legacy operation 必须精确21项');
-    assert.equal(projectOperations.length, 8, 'project operation 必须精确8项');
+    assert.equal(projectOperations.length, 11, 'project operation 必须精确11项');
     assertOperationSet([...legacyOperations, ...projectOperations],
       'Main/Host/Client 三处 operation exact set 必须同步');
     assert.match(pluginClient, /const MAX_PROJECT_DETAIL_BYTES = 24 \* 1024;/);
@@ -273,6 +275,28 @@ async function main() {
     assert.match(pluginClient, /data:image\\\/\(\?:png\|jpeg\);base64/,
       '图片预览只接受主进程投影的 png/jpeg data URL');
     assert.doesNotMatch(pluginClient, /dangerouslySetInnerHTML/);
+    assert.match(pluginHost, /'project-terminal-v1'/,
+      'Host 握手必须显式声明受限终端能力');
+    assert.match(pluginHost,
+      /'\/usr\/bin\/env', '-i',[\s\S]{0,500}'\/bin\/bash', '--noprofile', '--norc', '-i'/,
+      'POSIX shell 必须经 env -i 且禁止 profile/rc');
+    assert.match(pluginHost,
+      /'powershell\.exe', '-NoLogo', '-NoProfile', '-NoExit', '-EncodedCommand'/,
+      'Windows shell 必须使用无 profile 的 EncodedCommand 清环境入口');
+    const terminalClient = pluginClient.slice(
+      pluginClient.indexOf('const terminalCall = async'),
+      pluginClient.indexOf('const whaledockProjects = Object.freeze')
+    );
+    for (const endpoint of [
+      'terminal.open', 'terminal.read', 'terminal.write', 'terminal.signal', 'terminal.close'
+    ]) assert.match(terminalClient, new RegExp(`'${endpoint.replace('.', '\\.')}'`));
+    assert.doesNotMatch(terminalClient, /\b(?:cwd|path|env|shell|pid)\s*:/i,
+      'Client 终端 RPC 不得上送路径、环境、shell 或 pid');
+    assert.match(terminalClient, /value\.signal !== 'SIGINT'/,
+      'Client 首版只允许 SIGINT');
+    assert.match(pluginClient,
+      /value\.contentType !== 'text\/plain' \|\| value\.renderMode !== 'text-only'/,
+      'Client 只接纳 text-only 输出页');
     assert.doesNotMatch(pluginClient, /安全通道尚未提供内容读取/,
       '批次3不得继续以相对引用占位冒充真实预览');
     assert.match(pluginClient, /在 Electron 受控子窗中打开/);
@@ -429,6 +453,8 @@ async function main() {
       '同一快捷 seq 只能消费一次');
     assert.equal(machine.projectActionFailureMessage({ code: 'workspace-unavailable' }, 'open'),
       '这个项目还没绑定可用对话。先选择右侧对话并绑定。');
+    assert.equal(machine.projectActionFailureMessage({ code: 'project-identity-conflict' }, 'adopt'),
+      '这个旁车身份已由另一个仍可用的项目文件夹占用，未重新认领。');
     const mismatchMessage = machine.projectActionFailureMessage(
       { code: 'workspace-mismatch' }, 'bind'
     );
@@ -491,6 +517,8 @@ async function main() {
       }
     };
     const detail = machine.projectOpenResult(detailSnapshot, 'open-committed');
+    assert.equal(Object.prototype.hasOwnProperty.call(detail, 'skin'), false,
+      '无皮肤项目规范化后必须保持字段省略，确保详情可重复解析');
     assert.equal(detail.paneState.windows[0].tabs[0].descriptor.relativeRef,
       'output/result.md');
     assert.equal(detail.paneState.windows[0].tabs[0].descriptor.preview.text, '# 已完成\n\n安全预览');
@@ -1726,7 +1754,8 @@ async function main() {
     assert.equal(contentShell.whaledockProjects, whaledockProjects,
       '可见 shell 必须消费同一个全局项目服务实例');
     assert.deepEqual(Object.keys(whaledockProjects).sort(), [
-      'bindCurrent', 'create', 'list', 'open', 'readConsole', 'remove', 'reorder', 'update'
+      'adopt', 'bindCurrent', 'create', 'detach', 'list', 'open', 'readConsole', 'remove',
+      'reorder', 'terminal', 'update', 'writeSidecar'
     ]);
     // 前半段历史 fixture 显式注入了外层 Object；文件协议会构造
     // 安全深拷贝，这里切回浏览器实际的同 realm Object/response。
@@ -1899,6 +1928,9 @@ async function main() {
     let prepareUnbound = false;
     let bootstrapReply = null;
     let bootstrapCalls = 0;
+    let invalidTerminalPage = false;
+    const terminalRef = `terminal-${'a'.repeat(32)}`;
+    const terminalCapability = 'b'.repeat(64);
     const resultFor = (request) => {
       if (request.operation === 'projects.list') {
         return {
@@ -2015,6 +2047,37 @@ async function main() {
               code: null,
               result: resultFor(request)
             } });
+          }
+          if (endpoint === 'terminal.open') {
+            return realm({ ok: true, value: {
+              opened: true, code: null, terminalRef, capability: terminalCapability,
+              status: { kind: 'running' },
+              page: {
+                contentType: 'text/plain', renderMode: 'text-only', text: '',
+                fromSeq: 0, nextSeq: 0, endSeq: 0, retainedBytes: 0,
+                truncated: false, hasMore: false
+              }
+            } });
+          }
+          if (endpoint === 'terminal.read') {
+            return realm({ ok: true, value: {
+              accepted: true, code: null, status: { kind: 'running' },
+              page: {
+                contentType: 'text/plain',
+                renderMode: invalidTerminalPage ? 'html' : 'text-only',
+                text: 'safe', fromSeq: 0, nextSeq: 4, endSeq: 4, retainedBytes: 4,
+                truncated: false, hasMore: false
+              }
+            } });
+          }
+          if (endpoint === 'terminal.write') {
+            return realm({ ok: true, value: { accepted: true, code: null } });
+          }
+          if (endpoint === 'terminal.signal') {
+            return realm({ ok: true, value: { delivered: true, code: null } });
+          }
+          if (endpoint === 'terminal.close') {
+            return realm({ ok: true, value: { closed: true, quiescent: true, code: null } });
           }
           if (endpoint === 'projects/session/resolve') {
             const candidateIndex = payload.candidateSessionIds.indexOf(rawA);
@@ -2161,6 +2224,51 @@ async function main() {
     assert.equal(reopenedAfterSelectionRace.state, 'fulfilled');
     assert.equal(contentShell.projectOpenCurrent(projectId, bindingA), true,
       'selection 竞态后也必须 fresh open 才能恢复');
+    assert(projectService.terminal, '全局项目服务必须提供受限终端');
+    const beforeForbiddenTerminal = calls.length;
+    assert.equal(await projectService.terminal.open(realm({
+      projectId, paneRef: 'terminal-main', cols: 100, rows: 28,
+      cwd: '/private/forbidden'
+    })), null);
+    assert.equal(calls.length, beforeForbiddenTerminal,
+      '带 cwd 的终端请求必须在 Client 本地拒绝');
+    const openedTerminal = await projectService.terminal.open(realm({
+      projectId, paneRef: 'terminal-main', cols: 100, rows: 28
+    }));
+    assert.equal(openedTerminal.opened, true);
+    const terminalCredentials = realm({
+      projectId, paneRef: 'terminal-main', terminalRef, capability: terminalCapability
+    });
+    assert.equal((await projectService.terminal.read(realm({
+      ...terminalCredentials, afterSeq: 0, maxBytes: 4096
+    }))).page.renderMode, 'text-only');
+    invalidTerminalPage = true;
+    assert.equal(await projectService.terminal.read(realm({
+      ...terminalCredentials, afterSeq: 0, maxBytes: 4096
+    })), null, 'Client 不得接纳非 text-only 输出页');
+    invalidTerminalPage = false;
+    assert.equal((await projectService.terminal.write(realm({
+      ...terminalCredentials, data: 'pwd\n'
+    }))).accepted, true);
+    const beforeBadSignal = calls.length;
+    assert.equal(await projectService.terminal.signal(realm({
+      ...terminalCredentials, signal: 'SIGTERM'
+    })), null);
+    assert.equal(calls.length, beforeBadSignal, 'Client 不得上送 SIGINT 之外的信号');
+    assert.equal((await projectService.terminal.signal(realm({
+      ...terminalCredentials, signal: 'SIGINT'
+    }))).delivered, true);
+    assert.equal((await projectService.terminal.close(terminalCredentials)).quiescent, true);
+    const terminalCalls = calls.filter((call) => call.endpoint.startsWith('terminal.'));
+    assert.deepEqual([...new Set(terminalCalls.map((call) => call.endpoint))].sort(), [
+      'terminal.close', 'terminal.open', 'terminal.read', 'terminal.signal', 'terminal.write'
+    ]);
+    for (const call of terminalCalls) {
+      for (const forbidden of ['cwd', 'path', 'env', 'shell', 'pid']) {
+        assert.equal(Object.prototype.hasOwnProperty.call(call.payload, forbidden), false,
+          `Client 终端 ${call.endpoint} 不得上送 ${forbidden}`);
+      }
+    }
     sessionSnapshot.current = rawB;
     sessionUpdate();
     assert.equal(contentShell.projectOpenCurrent(projectId, bindingA), false,
@@ -2379,6 +2487,322 @@ async function main() {
     const llm = await import(pathToFileURL(path.join(
       llmFixtureRoot, 'lib', 'index.js'
     )).href);
+
+    await test('Host 受限终端绑定 selection/root/owner，清洗分页并回收进程树', async () => {
+      assert.deepEqual(Array.from(hostPlugin.inject), [
+        'connection', 'systemPrompt', 'sessions', 'llm', 'apiProxy', 'agents', 'subprocess'
+      ]);
+      const roots = ['a', 'b', 'c', 'd'].map((suffix) => (
+        fs.mkdtempSync(path.join(tmp, `terminal-root-${suffix}-`))
+      ));
+      const sessions = new Map();
+      const agents = new Map();
+      const listeners = new Map();
+      const disposers = [];
+      const specs = [];
+      const handles = [];
+      const writes = [];
+      const signals = [];
+      let rpcHandler = null;
+      const makeHandle = () => {
+        const output = new PassThrough();
+        let settleDone;
+        let settled = false;
+        const handle = {
+          output,
+          done: new Promise((resolve) => { settleDone = resolve; }),
+          terminateCalls: 0,
+          async write(data) { writes.push(data); },
+          async signalForeground(signal) { signals.push(signal); return 700 + handles.length; },
+          async terminate() {
+            handle.terminateCalls += 1;
+            if (!settled) {
+              settled = true;
+              output.end();
+              settleDone({ exitCode: null, signal: 'SIGTERM' });
+            }
+          }
+        };
+        handles.push(handle);
+        return handle;
+      };
+      hostPlugin.apply({
+        connection: { rpc: { handle(_channel, handler) { rpcHandler = handler; } } },
+        systemPrompt: { context() {} },
+        sessions: { get(id) { return sessions.get(id); } },
+        agents: {
+          get(id) { return agents.get(id); },
+          withInitiator(agent, operation) {
+            assert.equal(agents.get(agent.id), agent);
+            return operation();
+          }
+        },
+        subprocess: {
+          async spawnTerminal(spec) {
+            specs.push(spec);
+            return makeHandle();
+          }
+        },
+        on(name, handler) { listeners.set(name, handler); },
+        effect(factory, label) {
+          assert.equal(label, 'whaledock project terminal teardown');
+          disposers.push(factory());
+        }
+      });
+      const register = async (suffix, root, revision = 1, pageSuffix = suffix) => {
+        const raw = `terminal-raw-${suffix}`;
+        const controllerId = `controller-terminal-${suffix}`;
+        const pageInstanceId = `page-terminal-${pageSuffix}`;
+        let session = sessions.get(raw);
+        if (!session) {
+          session = { id: raw, header: { id: raw, cwd: root } };
+          sessions.set(raw, session);
+          agents.set(raw, { id: raw, session });
+        }
+        const request = selectionRequest({
+          contract: CONTRACT,
+          controllerId,
+          pageInstanceId,
+          selectionRevision: revision,
+          currentSessionId: raw,
+          managed: true
+        });
+        const response = await rpcHandler('selection/register', request);
+        assert.equal(response.ok, true);
+        return {
+          raw,
+          session,
+          agent: agents.get(raw),
+          auth: {
+            contract: CONTRACT,
+            controllerId,
+            pageInstanceId,
+            selectionRevision: revision,
+            selectionToken: SELECTION_TOKEN,
+            controllerProof: request.controllerProof
+          }
+        };
+      };
+      const projectIds = ['1', '2', '3', '4'].map((digit) => `proj_${digit.repeat(32)}`);
+      const a = await register('a0000001', roots[0]);
+      const open = (owner, projectId, paneRef) => rpcHandler('terminal.open', {
+        ...owner.auth, projectId, paneRef, cols: 100, rows: 28
+      });
+      const beforePathInjection = specs.length;
+      assert.equal((await rpcHandler('terminal.open', {
+        ...a.auth,
+        projectId: projectIds[0], paneRef: 'terminal-main', cols: 100, rows: 28,
+        cwd: roots[0]
+      })).ok, false);
+      assert.equal(specs.length, beforePathInjection, '页面 cwd 不得到达 subprocess');
+
+      const first = await open(a, projectIds[0], 'terminal-main');
+      assert.equal(first.value.opened, true, JSON.stringify(first));
+      assert.deepEqual(Object.keys(first.value).sort(), [
+        'capability', 'code', 'opened', 'page', 'status', 'terminalRef'
+      ]);
+      assert.equal(first.value.page.renderMode, 'text-only');
+      assert.equal(first.value.page.contentType, 'text/plain');
+      assert.equal(/cwd|root|path|env|shell|pid/i.test(JSON.stringify(first.value)), false,
+        '公开绑定不得暴露 Host 路径或进程信息');
+      assert.equal(specs[0].cwd, fs.realpathSync(roots[0]));
+      assert.notEqual(specs[0].env.HOME, roots[0], 'HOME 不得污染项目根');
+      assert.equal(specs[0].env.HOME, specs[0].env.TMPDIR || specs[0].env.TEMP);
+      assert.equal(Object.prototype.hasOwnProperty.call(
+        specs[0].env, 'WHALEDOCK_TERMINAL_CANARY'
+      ), false, '未列入白名单的环境键不得下传');
+      if (process.platform === 'win32') {
+        assert.deepEqual(specs[0].argv.slice(0, 5), [
+          'powershell.exe', '-NoLogo', '-NoProfile', '-NoExit', '-EncodedCommand'
+        ]);
+        const bootstrap = Buffer.from(specs[0].argv[5], 'base64').toString('utf16le');
+        assert.match(bootstrap, /Get-ChildItem Env:/);
+        assert.match(bootstrap, /Remove-Item -LiteralPath/);
+        assert.doesNotMatch(bootstrap, /WHALEDOCK_TERMINAL_CANARY/);
+      } else {
+        assert.equal(specs[0].argv[0], '/usr/bin/env');
+        assert.equal(specs[0].argv[1], '-i');
+        assert.deepEqual(specs[0].argv.slice(-4), [
+          '/bin/bash', '--noprofile', '--norc', '-i'
+        ]);
+        assert.equal(specs[0].argv.some((value) => (
+          value.startsWith('WHALEDOCK_TERMINAL_CANARY=')
+        )), false);
+      }
+      const samePane = await open(a, projectIds[0], 'terminal-main');
+      assert.deepEqual(samePane.value, {
+        opened: false, code: 'terminal-busy', terminalRef: null,
+        capability: null, status: null, page: null
+      });
+      const second = await open(a, projectIds[0], 'terminal-secondary');
+      assert.equal(second.value.opened, true);
+      assert.equal((await open(a, projectIds[0], 'terminal-third')).value.code, 'terminal-busy');
+
+      const credentials = {
+        projectId: projectIds[0], paneRef: 'terminal-main',
+        terminalRef: first.value.terminalRef, capability: first.value.capability
+      };
+      const emoji = Buffer.from('😀');
+      handles[0].output.write(Buffer.from('plain'));
+      handles[0].output.write(emoji.subarray(0, 2));
+      handles[0].output.write(emoji.subarray(2));
+      handles[0].output.write(Buffer.from(
+        '\x1b]52;c;c2VjcmV0\x07\x1b]8;;https://evil.invalid\x07link\x1b]8;;\x07'
+        + '\x1b[31mred\x1b[0m\x1bPprivate-dcs\x1b\\'
+        + '\x1b_private-apc\x1b\\\x1b^private-pm\x1b\\tail'
+      ));
+      const read = await rpcHandler('terminal.read', {
+        ...a.auth, ...credentials, afterSeq: 0, maxBytes: 32768
+      });
+      assert.equal(read.value.accepted, true);
+      assert.match(read.value.page.text, /plain😀linkredtail/);
+      assert.doesNotMatch(read.value.page.text, /secret|evil|private|\x1b/);
+      assert.equal((await rpcHandler('terminal.read', {
+        ...a.auth, ...credentials, capability: 'f'.repeat(64), afterSeq: 0, maxBytes: 4096
+      })).ok, false, '能力 token 必须与 terminalRef 精确绑定');
+      assert.equal((await rpcHandler('terminal.write', {
+        ...a.auth, ...credentials, data: 'pwd\n'
+      })).value.accepted, true);
+      assert.deepEqual(writes, ['pwd\n']);
+      assert.equal((await rpcHandler('terminal.write', {
+        ...a.auth, ...credentials, data: '\x1b[2J'
+      })).ok, false, '页面不得注入终端控制序列');
+      assert.equal((await rpcHandler('terminal.signal', {
+        ...a.auth, ...credentials, signal: 'SIGTERM'
+      })).ok, false, '首版不得发送 SIGINT 之外的信号');
+      assert.equal((await rpcHandler('terminal.signal', {
+        ...a.auth, ...credentials, signal: 'SIGINT'
+      })).value.delivered, true);
+      assert.deepEqual(signals, ['SIGINT']);
+
+      handles[0].output.write(Buffer.from('😀'.repeat(131073)));
+      const truncated = await rpcHandler('terminal.read', {
+        ...a.auth, ...credentials, afterSeq: 0, maxBytes: 32768
+      });
+      assert.equal(truncated.value.page.truncated, true);
+      assert.equal(truncated.value.page.retainedBytes <= 512 * 1024, true);
+      assert.doesNotMatch(truncated.value.page.text, /�/,
+        '环形截断不得从 UTF-8 续字节中间开始');
+
+      const b = await register('b0000001', roots[1]);
+      const c = await register('c0000001', roots[2]);
+      assert.equal((await open(b, projectIds[1], 'terminal-main')).value.opened, true);
+      assert.equal((await open(c, projectIds[2], 'terminal-main')).value.opened, true);
+      const d = await register('d0000001', roots[3]);
+      assert.equal((await open(d, projectIds[3], 'terminal-main')).value.code, 'terminal-busy',
+        'Host 同时存活 terminal 不得超过4个');
+
+      await register('a0000001', roots[0], 2, 'a0000002');
+      listeners.get('session/disposed')(b.session);
+      listeners.get('agent/disposed')({ agent: c.agent });
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(handles.slice(0, 4).every((handle) => handle.terminateCalls >= 1), true,
+        'selection/page/session/agent 生命周期必须回收已发布进程树');
+      const reopenedD = await open(d, projectIds[3], 'terminal-main');
+      assert.equal(reopenedD.value.opened, true);
+      assert.equal(disposers.length, 1);
+      await disposers[0]();
+      assert.equal(handles.at(-1).terminateCalls >= 1, true,
+        'plugin unload 必须 await 最后一棵进程树');
+      for (const spec of specs) {
+        const privateHome = spec.env.HOME;
+        if (privateHome !== undefined) assert.equal(fs.existsSync(privateHome), false,
+          '只能删除 Host 创建的私有 terminal HOME');
+      }
+    });
+
+    await test('Host pending terminal open 计入限额并在 selection 换代时回滚', async () => {
+      const rootPath = fs.mkdtempSync(path.join(tmp, 'terminal-pending-root-'));
+      const raw = 'terminal-pending-raw';
+      const session = { id: raw, header: { id: raw, cwd: rootPath } };
+      const agent = { id: raw, session };
+      let rpcHandler = null;
+      let dispose = null;
+      let spawnSpec = null;
+      let resolveSpawn = null;
+      let resolveDone = null;
+      let terminated = 0;
+      const handle = {
+        output: new PassThrough(),
+        done: new Promise((resolve) => { resolveDone = resolve; }),
+        async write() {},
+        async signalForeground() { return 99; },
+        async terminate() {
+          terminated += 1;
+          handle.output.end();
+          resolveDone({ exitCode: null, signal: 'SIGTERM' });
+        }
+      };
+      hostPlugin.apply({
+        connection: { rpc: { handle(_channel, handler) { rpcHandler = handler; } } },
+        systemPrompt: { context() {} },
+        sessions: { get(id) { return id === raw ? session : null; } },
+        agents: {
+          get(id) { return id === raw ? agent : null; },
+          withInitiator(owner, operation) { assert.equal(owner, agent); return operation(); }
+        },
+        subprocess: {
+          spawnTerminal(spec) {
+            spawnSpec = spec;
+            return new Promise((resolve) => { resolveSpawn = resolve; });
+          }
+        },
+        on() {},
+        effect(factory) { dispose = factory(); }
+      });
+      const controllerId = 'controller-terminal-pending';
+      const firstRegistration = selectionRequest({
+        contract: CONTRACT,
+        controllerId,
+        pageInstanceId: 'page-terminal-pending1',
+        selectionRevision: 1,
+        currentSessionId: raw,
+        managed: true
+      });
+      assert.equal((await rpcHandler('selection/register', firstRegistration)).value.state,
+        'selected');
+      const auth = {
+        contract: CONTRACT,
+        controllerId,
+        pageInstanceId: 'page-terminal-pending1',
+        selectionRevision: 1,
+        selectionToken: SELECTION_TOKEN,
+        controllerProof: firstRegistration.controllerProof
+      };
+      const request = {
+        ...auth,
+        projectId: `proj_${'9'.repeat(32)}`,
+        paneRef: 'terminal-main',
+        cols: 80,
+        rows: 24
+      };
+      const opening = rpcHandler('terminal.open', request);
+      assert.equal(typeof resolveSpawn, 'function');
+      assert.equal((await rpcHandler('terminal.open', request)).value.code, 'terminal-busy',
+        '未发布 spawn 必须占用同一 pane 限额');
+      const nextRegistration = selectionRequest({
+        contract: CONTRACT,
+        controllerId,
+        pageInstanceId: 'page-terminal-pending2',
+        selectionRevision: 2,
+        currentSessionId: raw,
+        managed: true
+      });
+      assert.equal((await rpcHandler('selection/register', nextRegistration)).value.state,
+        'selected');
+      assert.equal(spawnSpec.signal.aborted, true,
+        'selection 换代必须先 abort 未发布终端');
+      resolveSpawn(handle);
+      const result = await opening;
+      assert.deepEqual(result.value, {
+        opened: false, code: 'terminal-stale', terminalRef: null,
+        capability: null, status: null, page: null
+      });
+      assert.equal(terminated >= 1, true, '竞态中已分配的进程树必须 await terminate');
+      assert.equal(fs.existsSync(spawnSpec.env.HOME), false,
+        '回滚后必须只删除本次私有 HOME');
+      await dispose();
+    });
 
     await test('register nonce/时效/接管 proof fail-closed，公共回包不含 sessionRef', async () => {
       let rpcHandler = null;
@@ -2802,6 +3226,7 @@ async function main() {
         { header: { id: rawA, cwd: cwdA } },
         { header: { id: rawB, cwd: cwdB } }
       ];
+      let sessionEvent = null;
       hostPlugin.apply({
         connection: { rpc: { handle(_channel, handler) { rpcHandler = handler; } } },
         sessions: {
@@ -2809,7 +3234,9 @@ async function main() {
           get(id) { return liveSessions.find((entry) => entry.header.id === id) || null; }
         },
         systemPrompt: { context() {} },
-        on() {}
+        on(name, handler) {
+          if (name === 'session/event') sessionEvent = handler;
+        }
       });
       const clientNonce = '2b'.repeat(32);
       const hello = await rpcHandler('handshake', handshakeRequest(clientNonce));
@@ -2921,6 +3348,18 @@ async function main() {
         jobsBySession: [],
         current: null
       };
+      const recentPathSamples = [
+        '请看 "/Users/example/My Folder/report final.txt" 后继续',
+        '读取 /Users/example/My Folder/report final.txt 然后继续',
+        '配置位于 ~/.dsh/Private Folder/config.json 然后继续',
+        "Windows 在 'C:\\Users\\Shine\\My Folder\\secret.txt' 后继续"
+      ];
+      recentPathSamples.forEach((text, index) => sessionEvent({
+        id: rawSnapshot.byId[index].sessionId
+      }, {
+        type: index % 2 === 0 ? 'user/message' : 'assistant/message',
+        data: { message: { content: [{ type: 'text', text }] } }
+      }));
       assert.equal(Buffer.byteLength(JSON.stringify({ snapshot: rawSnapshot })) > 4096, true);
       const consoleRequest = await queue('console.read', { snapshot: rawSnapshot });
       const serializedConsoleRequest = JSON.stringify(consoleRequest);
@@ -2930,6 +3369,15 @@ async function main() {
         /^session-binding-[a-f0-9]{64}$/);
       assert.equal(Object.keys(consoleRequest.input.snapshot.byId)[0].length, 80,
         'console.read 单项允许 80 字符稳定 key');
+      for (let index = 0; index < recentPathSamples.length; index += 1) {
+        const recent = consoleRequest.input.snapshot.byId[
+          sessionBindingRef(rawSnapshot.byId[index].sessionId)
+        ].recent;
+        assert(recent && recent.text.includes('[路径]'));
+        assert.doesNotMatch(recent.text,
+          /Users|My Folder|report final|~\/\.dsh|Private Folder|secret\.txt/i,
+          '带空格的引号/未引号绝对路径与 tilde 路径不得泄露尾部');
+      }
       await finish(consoleRequest, {
         kind: 'console', revision: 1, cards: [],
         counts: { need: 0, done: 0, busy: 0, idle: 0, total: 0, glowing: 0 }

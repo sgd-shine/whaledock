@@ -6,9 +6,13 @@
 
 > ⚠️ 本项目是社区作品，与 DeepSeek 官方无关（Unofficial）。DeepSeek Harness 本体以 MIT 协议开源。本项目原名 Harness Desktop，自 v0.1.1 起更名为鲸坞 WhaleDock。
 
-## 当前状态（2026-08-30）
+## 当前状态（2026-09-02）
 
 - **公开稳定版是 [v0.10.0](https://github.com/sgd-shine/whaledock/releases/tag/v0.10.0)**：发版改动由 [PR #24](https://github.com/sgd-shine/whaledock/pull/24) 以 merge commit `1afcaa58` 进入 `main`，合并后 [main CI 33266635690](https://github.com/sgd-shine/whaledock/actions/runs/33266635690) 三平台全绿；[Release run 33266723269](https://github.com/sgd-shine/whaledock/actions/runs/33266723269) attempt 2 成功，公开 Release 为非 draft、非 prerelease，共 8 项资产（6 个安装产物 + 2 份校验和）。
+- **v0.11.0-alpha.1 是正在收口的真机验收候选，不是新的稳定版**：项目工作台批次 1–5 已完成源码实现；统一 smoke 实跑 **1054 PASS / 56 个 ALL PASS 标记**，context-poc 固定包为 **15 文件 / 1,062,446 B**，digest `a486c9008d9d871d5ddf05dd9778de3256e706a47116326cb55c715af7921f0b`。CI、签名/公证、安装与预发布上传仍需按各自证据回读后才能宣称完成。
+- **批次 5 补齐项目级桌面能力**：终端由 Host 创建 PTY，以项目根为 cwd、只下发环境白名单，并用绑定项目/窗格/页面生命周期的能力令牌保护读写；页面不接收路径、环境、shell 或 pid。这个边界限制的是鲸坞接口，**不是操作系统文件系统或网络沙箱**，终端命令仍拥有当前登录用户本来就有的文件与网络权限。
+- **项目可搬、可换肤、可分离查看**：原生皮肤只投影七个数据化颜色值到鲸坞窗格；旁车只有用户明确点击后才写入 `.whaledock/project.json`，跨机器或搬家后可从旁车重新认领；分离窗使用受限本地窗口，不把任意网页或 HTML 当作可执行内容。
+- **控制室只显示脱敏近况**：recent 摘要来自 Host 已观察到的事件流，经过长度限制与路径、邮箱、URL、凭据形态脱敏；不读取 `face.history`，也不把完整对话历史交给页面。
 - **同屏创作台已进入正式版**：左边选内容、中间推进概览/脚本/拍摄/发布/复盘，右边交给 AI 执行，结果回到原内容。首次进入和从「对话记录」返回时会自动复用或打开对应会话；异常时才显示人话说明与可执行按钮。
 - **受管 dsh 数据与用户旧环境完全分开**：v0.10.0 使用鲸坞自己的 `userData/context-poc/v1/dsh-home`，跨后端、App 重启和工作区切换保留会话等数据；绝不读取、写入、迁移、覆盖或清理 `~/.dsh`。旧数据不会自动导入，首次进入 AI 工作台可能需要重新配置一次模型。
 - **发版前本地门全过**：统一 `npm run smoke` 实跑 **860 PASS / 44 个 ALL PASS**，context-poc 基线为 **15 个文件 / 810,828 B**，digest `16ffc4198355b93a1950965eece991d4b615d5005f63b3ab2da6933038496fb1`；两个 dsh UI fork 可从锁定的 `0.1.1-rc.2` 上游材料与精确 patch 重现。

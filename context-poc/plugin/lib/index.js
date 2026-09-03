@@ -1,12 +1,16 @@
 import {
   createDecipheriv, createHash, createHmac, randomUUID, timingSafeEqual
 } from 'node:crypto';
-import { realpathSync, statSync } from 'node:fs';
+import { chmodSync, mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import * as path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { isAgentLoopRequest } from '@deepseek-ai/dsh-llm';
 
 export const name = 'whaledock-context-bridge-poc';
-export const inject = ['connection', 'systemPrompt', 'sessions', 'llm', 'apiProxy'];
+export const inject = [
+  'connection', 'systemPrompt', 'sessions', 'llm', 'apiProxy', 'agents', 'subprocess'
+];
 
 const CONTRACT = 'whaledock.context-bridge/v1';
 const CHANNEL = '/whaledock.context';
@@ -22,7 +26,8 @@ const CAPABILITIES = Object.freeze([
   'ui-preferences-v1',
   'workspace-files-v1',
   'project-workbench-v1',
-  'project-session-bootstrap-v1'
+  'project-session-bootstrap-v1',
+  'project-terminal-v1'
 ]);
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 const SESSION_REF_RE = /^session-[a-f0-9]{64}$/;
@@ -34,6 +39,8 @@ const PROJECT_BOOTSTRAP_NONCE_RE = /^[a-f0-9]{32}$/;
 const DELIVERY_TARGET_REF_RE = /^delivery-target-[a-f0-9]{64}$/;
 const PROJECT_ID_RE = /^wdp1_[a-f0-9]{32}$/;
 const APP_PROJECT_ID_RE = /^proj_[a-f0-9]{32}$/;
+const PROJECT_TERMINAL_REF_RE = /^terminal-[a-f0-9]{32}$/;
+const PROJECT_TERMINAL_PANE_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const PROJECT_REVISION_RE = /^[a-f0-9]{64}$/;
 const WORKBENCH_ID_RE = /^(?:builtin|user):[A-Za-z0-9][A-Za-z0-9._-]{0,87}$/;
 const TOKEN_RE = /^[a-f0-9]{64}$/;
@@ -64,11 +71,13 @@ const WORKSPACE_FILE_OPERATIONS = new Set([
   'shoot.open', 'shoot.history.read',
   'receipts.read', 'receipts.ack', 'receipts.open',
   'projects.list', 'projects.create', 'projects.update', 'projects.remove',
-  'projects.bind', 'projects.reorder', 'projects.open', 'console.read'
+  'projects.bind', 'projects.reorder', 'projects.open', 'projects.adopt',
+  'projects.sidecar', 'projects.detach', 'console.read'
 ]);
 const PROJECT_OPERATIONS = new Set([
   'projects.list', 'projects.create', 'projects.update', 'projects.remove',
-  'projects.bind', 'projects.reorder', 'projects.open', 'console.read'
+  'projects.bind', 'projects.reorder', 'projects.open', 'projects.adopt',
+  'projects.sidecar', 'projects.detach', 'console.read'
 ]);
 const WORKSPACE_FILE_DELIVERY_OPERATIONS = new Set([
   'project.action.prepare', 'project.action.submit',
@@ -81,7 +90,7 @@ const WORKSPACE_FILE_REJECT_CODES = new Set([
   'workspace-unavailable', 'workspace-mismatch', 'operation-invalid',
   'operation-timeout', 'operation-failed', 'operation-stale', 'outcome-unknown', 'busy',
   'cancelled', 'project-not-found', 'project-folder-invalid', 'project-protected',
-  'project-duplicate-folder', 'project-limit'
+  'project-duplicate-folder', 'project-identity-conflict', 'project-limit'
 ]);
 const WORKSPACE_FILE_FORBIDDEN_KEYS = new Set([
   'absolutepath', 'relativepath', 'effectivepath', 'workspacekey', 'cwd',
@@ -100,6 +109,7 @@ const MAX_PROJECT_LIST_BYTES = 32 * 1024;
 const MAX_PROJECT_CONSOLE_BYTES = 48 * 1024;
 const MAX_PROJECT_RESULT_BYTES = 64 * 1024;
 const MAX_PROJECT_CONSOLE_SESSIONS = 512;
+const MAX_PROJECT_RECENT_CHARS = 160;
 const MAX_WORKSPACE_FILE_JOBS = 64;
 const MAX_WORKSPACE_FILE_QUEUED = 32;
 const MAX_WORKSPACE_FILE_PER_CONTROLLER = 4;
@@ -117,6 +127,22 @@ const PROJECT_BOOTSTRAP_CLOCK_SKEW_MS = 1000;
 const MAX_PROJECT_BOOTSTRAP_TICKET_BYTES = 8192;
 const MAX_PROJECT_BOOTSTRAP_REPLAYS = 128;
 const PROJECT_BOOTSTRAP_SESSION_PREFIX = 'session-whaledock-project-';
+const PROJECT_TERMINAL_LIMITS = Object.freeze({
+  host: 4,
+  project: 2,
+  pane: 1,
+  outputBytes: 512 * 1024,
+  readBytes: 32 * 1024,
+  inputBytes: 8 * 1024,
+  minCols: 20,
+  maxCols: 300,
+  minRows: 5,
+  maxRows: 120,
+  graceMs: 4000
+});
+const PROJECT_TERMINAL_INPUT_CONTROL_RE = /[\u0000-\u0007\u000b\u000c\u000e-\u001f\u007f-\u009f]/;
+const PROJECT_TERMINAL_BIDI_RE = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
+const PROJECT_TERMINAL_HOME_PREFIX = 'whaledock-project-terminal-';
 const ENDPOINT_RATES = Object.freeze({
   handshake: 16,
   'selection/register': 256,
@@ -137,7 +163,12 @@ const ENDPOINT_RATES = Object.freeze({
   'workspace/files/authorize': 32,
   'workspace/files/settle': 32,
   'projects/session/resolve': 16,
-  'projects/session/bootstrap': 8
+  'projects/session/bootstrap': 8,
+  'terminal.open': 8,
+  'terminal.read': 128,
+  'terminal.write': 64,
+  'terminal.signal': 16,
+  'terminal.close': 16
 });
 
 function plain(value) {
@@ -192,6 +223,291 @@ function canonicalSessionRoot(value) {
     return process.platform === 'win32'
       ? normalized.toLocaleLowerCase('en-US') : normalized;
   } catch (_error) { return null; }
+}
+
+function projectTerminalRootIdentity(root) {
+  if (typeof root !== 'string' || !root) return null;
+  try {
+    const stat = statSync(root);
+    if (!stat?.isDirectory()) return null;
+    const field = (value) => {
+      if (typeof value === 'bigint') return value >= 0n ? String(value) : null;
+      return Number.isSafeInteger(value) && value >= 0 ? String(value) : null;
+    };
+    const dev = field(stat.dev);
+    const ino = field(stat.ino);
+    return dev === null || ino === null ? null : `${dev}:${ino}`;
+  } catch (_error) { return null; }
+}
+
+function projectTerminalRootGeneration(secret, hostInstanceId, root, identity) {
+  if (typeof root !== 'string' || typeof identity !== 'string') return null;
+  return createHmac('sha256', secret)
+    .update(`whaledock-project-terminal-root/v1\0${hostInstanceId}\0${root}\0${identity}`)
+    .digest('hex');
+}
+
+class ProjectTerminalSanitizer {
+  constructor() {
+    this.state = 'text';
+    this.pendingCr = false;
+    this.finished = false;
+  }
+
+  write(value) {
+    if (this.finished || typeof value !== 'string') return '';
+    let output = '';
+    const append = (character) => {
+      if (this.pendingCr) {
+        output += '\n';
+        this.pendingCr = false;
+        if (character === '\n') return;
+      }
+      if (character === '\r') { this.pendingCr = true; return; }
+      if (character === '\n' || character === '\t') { output += character; return; }
+      const code = character.charCodeAt(0);
+      if (code < 0x20 || (code >= 0x7f && code <= 0x9f)
+          || PROJECT_TERMINAL_BIDI_RE.test(character)) return;
+      output += character;
+    };
+    for (const character of value) {
+      const code = character.charCodeAt(0);
+      if (this.state === 'text') {
+        if (code === 0x1b) { this.state = 'escape'; continue; }
+        if (code === 0x9b) { this.state = 'csi'; continue; }
+        if ([0x90, 0x98, 0x9d, 0x9e, 0x9f].includes(code)) {
+          this.state = 'control-string';
+          continue;
+        }
+        if (code === 0x9c) continue;
+        append(character);
+        continue;
+      }
+      if (this.state === 'escape') {
+        if (character === '[') this.state = 'csi';
+        else if ([']', 'P', 'X', '^', '_'].includes(character)) {
+          this.state = 'control-string';
+        } else if (code === 0x1b) this.state = 'escape';
+        else if (code >= 0x30 && code <= 0x7e) this.state = 'text';
+        continue;
+      }
+      if (this.state === 'csi') {
+        if (code === 0x1b) this.state = 'escape';
+        else if (code >= 0x40 && code <= 0x7e) this.state = 'text';
+        continue;
+      }
+      if (this.state === 'control-string') {
+        if (code === 0x07 || code === 0x9c) this.state = 'text';
+        else if (code === 0x1b) this.state = 'control-string-escape';
+        continue;
+      }
+      if (this.state === 'control-string-escape') {
+        if (character === '\\' || code === 0x9c) this.state = 'text';
+        else if (code !== 0x1b) this.state = 'control-string';
+      }
+    }
+    return output;
+  }
+
+  finish() {
+    if (this.finished) return '';
+    this.finished = true;
+    const output = this.pendingCr ? '\n' : '';
+    this.pendingCr = false;
+    this.state = 'text';
+    return output;
+  }
+}
+
+function projectTerminalContinuationByte(value) {
+  return (value & 0xc0) === 0x80;
+}
+
+function projectTerminalUtf8Prefix(value, maximum) {
+  if (value.length <= maximum) return value;
+  let end = maximum;
+  while (end > 0 && projectTerminalContinuationByte(value[end])) end -= 1;
+  return value.subarray(0, end);
+}
+
+class ProjectTerminalBuffer {
+  constructor() {
+    this.chunks = [];
+    this.retainedBytes = 0;
+    this.startSeq = 0;
+    this.endSeq = 0;
+    this.truncated = false;
+    this.closed = false;
+    this.sanitizer = new ProjectTerminalSanitizer();
+  }
+
+  appendClean(clean) {
+    const bytes = Buffer.from(clean, 'utf8');
+    this.endSeq += bytes.length;
+    if (bytes.length) {
+      this.chunks.push(bytes);
+      this.retainedBytes += bytes.length;
+    }
+    while (this.retainedBytes > PROJECT_TERMINAL_LIMITS.outputBytes
+        && this.chunks.length) {
+      const excess = this.retainedBytes - PROJECT_TERMINAL_LIMITS.outputBytes;
+      const first = this.chunks[0];
+      if (first.length <= excess) {
+        this.chunks.shift();
+        this.retainedBytes -= first.length;
+        this.startSeq += first.length;
+        this.truncated = true;
+        continue;
+      }
+      let cut = excess;
+      while (cut < first.length && projectTerminalContinuationByte(first[cut])) cut += 1;
+      this.chunks[0] = first.subarray(cut);
+      this.retainedBytes -= cut;
+      this.startSeq += cut;
+      this.truncated = true;
+    }
+  }
+
+  append(value) {
+    if (this.closed || typeof value !== 'string') return;
+    this.appendClean(this.sanitizer.write(value));
+  }
+
+  finish() {
+    if (this.closed) return;
+    const tail = this.sanitizer.finish();
+    this.appendClean(tail);
+    this.closed = true;
+  }
+
+  page(afterSeq, maxBytes) {
+    if (!Number.isSafeInteger(afterSeq) || afterSeq < 0 || afterSeq > this.endSeq
+        || !Number.isSafeInteger(maxBytes) || maxBytes < 4
+        || maxBytes > PROJECT_TERMINAL_LIMITS.readBytes) return null;
+    const retained = this.chunks.length ? Buffer.concat(this.chunks) : Buffer.alloc(0);
+    let offset = Math.max(afterSeq, this.startSeq) - this.startSeq;
+    while (offset < retained.length && projectTerminalContinuationByte(retained[offset])) {
+      offset += 1;
+    }
+    const fromSeq = this.startSeq + offset;
+    const selected = projectTerminalUtf8Prefix(retained.subarray(offset), maxBytes);
+    const nextSeq = fromSeq + selected.length;
+    return Object.freeze({
+      contentType: 'text/plain',
+      renderMode: 'text-only',
+      text: selected.toString('utf8'),
+      fromSeq,
+      nextSeq,
+      endSeq: this.endSeq,
+      retainedBytes: this.retainedBytes,
+      truncated: afterSeq < this.startSeq,
+      hasMore: nextSeq < this.endSeq
+    });
+  }
+}
+
+function createProjectTerminalHome() {
+  let created = null;
+  try {
+    const resolver = typeof realpathSync.native === 'function' ? realpathSync.native : realpathSync;
+    const parent = resolver(tmpdir());
+    created = mkdtempSync(path.join(parent, PROJECT_TERMINAL_HOME_PREFIX));
+    chmodSync(created, 0o700);
+    const canonical = resolver(created);
+    if (path.dirname(canonical) !== parent
+        || !path.basename(canonical).startsWith(PROJECT_TERMINAL_HOME_PREFIX)) {
+      throw new Error('terminal home escaped private parent');
+    }
+    return Object.freeze({ path: canonical, parent });
+  } catch (_error) {
+    if (created !== null) {
+      try { rmSync(created, { recursive: true, force: true }); } catch (_cleanupError) {}
+    }
+    return null;
+  }
+}
+
+function removeProjectTerminalHome(home) {
+  if (!home || typeof home.path !== 'string' || typeof home.parent !== 'string'
+      || path.dirname(home.path) !== home.parent
+      || !path.basename(home.path).startsWith(PROJECT_TERMINAL_HOME_PREFIX)) return false;
+  try {
+    rmSync(home.path, { recursive: true, force: true });
+    return true;
+  } catch (_error) { return false; }
+}
+
+function projectTerminalLaunchPlan(root, privateHome) {
+  if (typeof privateHome !== 'string' || !privateHome) return null;
+  if (process.platform === 'darwin' || process.platform === 'linux') {
+    const environment = Object.freeze({
+      PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+      HOME: privateHome,
+      TMPDIR: privateHome,
+      LANG: 'C.UTF-8',
+      LC_ALL: 'C.UTF-8',
+      TERM: 'xterm-256color',
+      COLORTERM: 'truecolor',
+      SHELL: '/bin/bash',
+      HISTFILE: '/dev/null'
+    });
+    const order = [
+      'PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'TERM', 'COLORTERM', 'SHELL', 'HISTFILE'
+    ];
+    return Object.freeze({
+      argv: Object.freeze([
+        '/usr/bin/env', '-i', ...order.map((key) => `${key}=${environment[key]}`),
+        '/bin/bash', '--noprofile', '--norc', '-i'
+      ]),
+      cwd: root,
+      env: environment
+    });
+  }
+  if (process.platform !== 'win32') return null;
+  const systemRoot = 'C:\\Windows';
+  const environment = Object.freeze({
+    PATH: `${systemRoot}\\System32;${systemRoot};${systemRoot}\\System32\\Wbem;${systemRoot}\\System32\\WindowsPowerShell\\v1.0`,
+    HOME: privateHome,
+    USERPROFILE: privateHome,
+    TEMP: privateHome,
+    TMP: privateHome,
+    SystemRoot: systemRoot,
+    WINDIR: systemRoot,
+    COMSPEC: `${systemRoot}\\System32\\cmd.exe`,
+    PATHEXT: '.COM;.EXE;.BAT;.CMD',
+    TERM: 'xterm-256color',
+    COLORTERM: 'truecolor',
+    POWERSHELL_TELEMETRY_OPTOUT: '1',
+    POWERSHELL_UPDATECHECK: 'Off'
+  });
+  const names = Object.keys(environment)
+    .map((name) => `'${name.replaceAll("'", "''")}'`).join(',');
+  const bootstrap = [
+    `$wdNames = @(${names})`,
+    '$wdValues = @{}',
+    'foreach ($wdName in $wdNames) {',
+    "  $wdValues[$wdName] = [Environment]::GetEnvironmentVariable($wdName, 'Process')",
+    '}',
+    'Get-ChildItem Env: | ForEach-Object {',
+    "  Remove-Item -LiteralPath ('Env:' + $_.Name) -ErrorAction SilentlyContinue",
+    '}',
+    'foreach ($wdName in $wdNames) {',
+    '  $wdValue = $wdValues[$wdName]',
+    '  if ($null -ne $wdValue) {',
+    "    [Environment]::SetEnvironmentVariable($wdName, [string]$wdValue, 'Process')",
+    '  }',
+    '}',
+    'Set-PSReadLineOption -HistorySaveStyle SaveNothing -ErrorAction SilentlyContinue',
+    'Remove-Variable wdName, wdNames, wdValue, wdValues -ErrorAction SilentlyContinue'
+  ].join('\r\n');
+  return Object.freeze({
+    argv: Object.freeze([
+      'powershell.exe', '-NoLogo', '-NoProfile', '-NoExit', '-EncodedCommand',
+      Buffer.from(bootstrap, 'utf16le').toString('base64')
+    ]),
+    cwd: root,
+    env: environment
+  });
 }
 
 function sessionRootRef(secret, hostInstanceId, cwd) {
@@ -415,9 +731,48 @@ function validBoundRawSession(value) {
   return value !== null && validRawSession(value);
 }
 
+function redactRecentPaths(value) {
+  if (typeof value !== 'string' || !value) return value;
+  // 引号内路径可以精确找到边界；未引号路径包含空格时无法
+  // 区分后续是文件名还是自然语言，因此从绝对/tilde 起点保守隐去到行尾。
+  return value
+    .replace(/(["'`])(?:~[\\/]|\/{1,2}|[A-Za-z]:[\\/]|\\\\)[^"'`\r\n]*\1/g,
+      '[路径]')
+    .replace(/(^|[^A-Za-z0-9])(?:~[\\/]|\/{1,2}|[A-Za-z]:[\\/]|\\\\)[^\r\n]*/g,
+      '$1[路径]');
+}
+
 // Client 先把官方 snapshot 收窄成数组，Host 再把所有 raw id 换成稳定 bindingRef；
 // 这样 main/项目 operation 永远看不到 dsh 原始 session id，也避开长 opaque id 作为 JSON key。
-function projectConsoleSnapshot(value) {
+function redactedRecentMessage(event, now = Date.now()) {
+  if (!event || !['user/message', 'assistant/message'].includes(event.type)
+      || !Number.isSafeInteger(now) || now < 0) return null;
+  const content = event.data?.message?.content;
+  if (!Array.isArray(content)) return null;
+  let text = content.filter((part) => plain(part) && part.type === 'text'
+    && typeof part.text === 'string').map((part) => part.text).join(' ');
+  if (!text) return null;
+  text = text
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\b(?:https?|ftp):\/\/\S+/gi, '[链接]')
+    .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, '[邮箱]');
+  text = redactRecentPaths(text)
+    .replace(/\b(?:token|secret|password|passwd|api[_-]?key|authorization)\s*[:=]\s*\S+/gi,
+      '[凭据字段]=[已隐去]')
+    .replace(/\b(?:sk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{12,}\b/g, '[凭据]')
+    .replace(/\b[A-Za-z0-9_-]{40,}\b/g, '[长凭据]')
+    .replace(/\s+/g, ' ').trim();
+  if (!text) return null;
+  let clipped = text.slice(0, MAX_PROJECT_RECENT_CHARS);
+  if (/[\ud800-\udbff]$/.test(clipped)) clipped = clipped.slice(0, -1);
+  return Object.freeze({
+    role: event.type === 'user/message' ? 'user' : 'assistant',
+    text: clipped.length < text.length ? `${clipped.slice(0, -1)}…` : clipped,
+    updatedAt: now
+  });
+}
+
+function projectConsoleSnapshot(value, recentMessages = new Map()) {
   if (!exact(value, ['byId', 'subagentsByParent', 'jobsBySession', 'current'])
       || !Array.isArray(value.byId) || value.byId.length > MAX_PROJECT_CONSOLE_SESSIONS
       || !Array.isArray(value.subagentsByParent)
@@ -443,6 +798,8 @@ function projectConsoleSnapshot(value) {
         || !Number.isSafeInteger(entry.updatedAt) || entry.updatedAt < 0) return null;
     seen.add(entry.sessionId);
     const bindingRef = sessionBindingRef(entry.sessionId);
+    const recent = recentMessages.has(entry.sessionId)
+      ? recentMessages.get(entry.sessionId) : null;
     byId[bindingRef] = Object.freeze({
       id: bindingRef,
       running: entry.running,
@@ -450,7 +807,8 @@ function projectConsoleSnapshot(value) {
       pendingInteraction: entry.pendingInteraction,
       parentId: entry.parentId === null ? null : sessionBindingRef(entry.parentId),
       displayTitle: entry.displayTitle,
-      updatedAt: entry.updatedAt
+      updatedAt: entry.updatedAt,
+      ...(recent === null ? {} : { recent })
     });
   }
   const subagentsByParent = {};
@@ -562,6 +920,11 @@ export function apply(ctx) {
   const pendingPreferences = new Map();
   const workspaceFileJobs = new Map();
   const projectBootstrapReplays = new Map();
+  const projectRecentMessages = new Map();
+  const projectTerminals = new Map();
+  const projectTerminalAllocations = new Set();
+  let projectTerminalDisposed = false;
+  let revokeTerminalsForController = () => {};
   let workspaceFileRequestSeq = 0;
   let preferences = Object.freeze({
     revision: 0,
@@ -618,7 +981,10 @@ export function apply(ctx) {
 
   const sweep = (now = Date.now()) => {
     for (const [controllerId, selection] of controllers) {
-      if (now - selection.seenAt >= LEASE_MS) controllers.delete(controllerId);
+      if (now - selection.seenAt >= LEASE_MS) {
+        revokeTerminalsForController(controllerId, 'selection-expired');
+        controllers.delete(controllerId);
+      }
     }
     for (const [sessionRef, record] of recordsByRef) {
       const owner = controllers.get(record.ownerControllerId);
@@ -744,6 +1110,7 @@ export function apply(ctx) {
       sessionRef: raw === null ? null : mintSessionRef(raw),
       seenAt: Date.now()
     };
+    if (previous) revokeTerminalsForController(previous.controllerId, 'selection-changed');
     controllers.set(selection.controllerId, selection);
     if (raw !== null) {
       const record = {
@@ -766,6 +1133,11 @@ export function apply(ctx) {
     }
     sweep();
     const current = resolveSelectionState(selection);
+    if (raw !== null && current.state !== 'selected') {
+      for (const owner of activeSelectionsFor(raw)) {
+        revokeTerminalsForController(owner.controllerId, 'selection-conflict');
+      }
+    }
     return ok({
       state: current.state,
       code: current.code,
@@ -807,6 +1179,534 @@ export function apply(ctx) {
         || selection.selectionRevision !== payload.selectionRevision
         || !tokenMatches(payload.controllerProof, selection.controllerProof)) return null;
     return selection;
+  };
+
+  const terminalOpenFailure = (code) => ok(Object.freeze({
+    opened: false,
+    code,
+    terminalRef: null,
+    capability: null,
+    status: null,
+    page: null
+  }));
+
+  const terminalReadFailure = (code) => ok(Object.freeze({
+    accepted: false,
+    code,
+    status: null,
+    page: null
+  }));
+
+  const terminalStatus = (entry) => {
+    if (entry?.status?.kind === 'exited') {
+      return Object.freeze({
+        kind: 'exited',
+        exitCode: Number.isSafeInteger(entry.status.exitCode) ? entry.status.exitCode : null,
+        signal: typeof entry.status.signal === 'string'
+          && /^[A-Z][A-Z0-9]{2,15}$/.test(entry.status.signal)
+          ? entry.status.signal : null
+      });
+    }
+    return Object.freeze({ kind: 'running' });
+  };
+
+  const terminalAuthorityFor = (selection) => {
+    const resolved = resolveSelectionState(selection);
+    if (!selection || selection.managed !== true || resolved.state !== 'selected'
+        || resolved.sessionRef !== selection.sessionRef
+        || !validBoundRawSession(selection.raw)) return null;
+    let session = null;
+    let owner = null;
+    try {
+      session = ctx.sessions?.get?.(selection.raw) || null;
+      owner = ctx.agents?.get?.(selection.raw) || null;
+    } catch (_error) { return null; }
+    if (!session || !owner || String(session.id) !== selection.raw
+        || owner.id !== selection.raw || owner.session !== session) return null;
+    const root = canonicalSessionRoot(session.header?.cwd);
+    if (root === null) return null;
+    const rootIdentity = projectTerminalRootIdentity(root);
+    const rootRef = sessionRootRef(authToken, hostInstanceId, root);
+    const rootGeneration = rootIdentity === null ? null
+      : projectTerminalRootGeneration(authToken, hostInstanceId, root, rootIdentity);
+    if (rootIdentity === null || !SESSION_ROOT_REF_RE.test(String(rootRef || ''))
+        || !TOKEN_RE.test(String(rootGeneration || ''))) return null;
+    return Object.freeze({
+      selection,
+      session,
+      owner,
+      raw: selection.raw,
+      root,
+      rootIdentity,
+      rootRef,
+      rootGeneration
+    });
+  };
+
+  const terminalCapabilityFor = (entry) => createHmac('sha256', authToken)
+    .update([
+      'whaledock-project-terminal-capability/v1', hostInstanceId,
+      entry.controllerId, entry.pageInstanceId, entry.selectionRevision,
+      entry.sessionRef, entry.raw, entry.rootRef, entry.rootGeneration,
+      entry.projectId, entry.paneRef, entry.terminalRef, entry.nonce
+    ].join('\0'))
+    .digest('hex');
+
+  const terminalEntryFor = (payload) => {
+    if (!PROJECT_TERMINAL_REF_RE.test(String(payload.terminalRef || ''))
+        || !TOKEN_RE.test(String(payload.capability || ''))) return null;
+    const entry = projectTerminals.get(payload.terminalRef);
+    if (!entry || entry.projectId !== payload.projectId || entry.paneRef !== payload.paneRef) {
+      return null;
+    }
+    const expected = terminalCapabilityFor(entry);
+    return tokenMatches(entry.capability, expected)
+      && tokenMatches(payload.capability, expected) ? entry : null;
+  };
+
+  const terminalEntryCurrent = (entry, selection) => {
+    const authority = terminalAuthorityFor(selection);
+    return authority && selection === controllers.get(entry.controllerId)
+      && entry.controllerId === selection.controllerId
+      && entry.pageInstanceId === selection.pageInstanceId
+      && entry.selectionRevision === selection.selectionRevision
+      && entry.sessionRef === selection.sessionRef
+      && entry.raw === authority.raw
+      && entry.session === authority.session
+      && entry.owner === authority.owner
+      && entry.root === authority.root
+      && entry.rootIdentity === authority.rootIdentity
+      && entry.rootRef === authority.rootRef
+      && entry.rootGeneration === authority.rootGeneration
+      ? authority : null;
+  };
+
+  const finishTerminalOutput = (entry) => {
+    if (!entry || entry.outputFinished) return;
+    entry.outputFinished = true;
+    try {
+      const tail = entry.decoder.end();
+      if (tail) entry.buffer.append(tail);
+    } catch (_error) {}
+    entry.buffer.finish();
+  };
+
+  const detachTerminalOutput = (entry) => {
+    if (!entry || entry.outputDetached) return;
+    entry.outputDetached = true;
+    const output = entry.handle?.output;
+    if (output && typeof output.off === 'function') {
+      output.off('data', entry.onOutputData);
+      output.off('end', entry.onOutputEnd);
+      output.off('close', entry.onOutputEnd);
+      output.off('error', entry.onOutputError);
+    }
+    finishTerminalOutput(entry);
+  };
+
+  const closeTerminalEntry = async (entry) => {
+    if (!entry) return false;
+    entry.revoked = true;
+    if (entry.leaseTimer) {
+      clearTimeout(entry.leaseTimer);
+      entry.leaseTimer = null;
+    }
+    detachTerminalOutput(entry);
+    if (entry.quiescent) {
+      if (!entry.homeRemoved) {
+        entry.homeRemoved = removeProjectTerminalHome(entry.privateHome);
+      }
+      if (projectTerminals.get(entry.terminalRef) === entry) {
+        projectTerminals.delete(entry.terminalRef);
+      }
+      return true;
+    }
+    if (entry.closing) return entry.closing;
+    entry.closing = (async () => {
+      try {
+        await entry.handle.terminate();
+        entry.quiescent = true;
+        entry.homeRemoved = removeProjectTerminalHome(entry.privateHome);
+        if (projectTerminals.get(entry.terminalRef) === entry) {
+          projectTerminals.delete(entry.terminalRef);
+        }
+        return true;
+      } catch (_error) { return false; }
+      finally {
+        if (!entry.quiescent) entry.closing = null;
+      }
+    })();
+    return entry.closing;
+  };
+
+  const scheduleTerminalLeaseCheck = (record) => {
+    if (!record) return;
+    if (record.leaseTimer) clearTimeout(record.leaseTimer);
+    const check = () => {
+      record.leaseTimer = null;
+      const published = projectTerminals.get(record.terminalRef) === record;
+      const allocating = projectTerminalAllocations.has(record);
+      if (!published && !allocating) return;
+      const selection = controllers.get(record.controllerId);
+      const now = Date.now();
+      const sameGeneration = Boolean(selection
+        && selection.pageInstanceId === record.pageInstanceId
+        && selection.selectionRevision === record.selectionRevision
+        && selection.sessionRef === record.sessionRef
+        && selection.raw === record.raw);
+      const remaining = selection ? LEASE_MS - (now - selection.seenAt) : 0;
+      if (!sameGeneration || remaining <= 0) {
+        if (allocating) record.abort.abort();
+        if (published) void closeTerminalEntry(record);
+        sweep(now);
+        return;
+      }
+      record.leaseTimer = setTimeout(check, Math.max(1, remaining));
+      if (typeof record.leaseTimer.unref === 'function') record.leaseTimer.unref();
+    };
+    const selection = controllers.get(record.controllerId);
+    const delay = selection ? Math.max(1, LEASE_MS - (Date.now() - selection.seenAt)) : 1;
+    record.leaseTimer = setTimeout(check, delay);
+    if (typeof record.leaseTimer.unref === 'function') record.leaseTimer.unref();
+  };
+
+  const appendTerminalDecoded = (entry, value) => {
+    if (entry.revoked || typeof value !== 'string' || !value) return;
+    let offset = 0;
+    while (offset < value.length) {
+      let end = Math.min(value.length, offset + 65536);
+      if (end < value.length && /[\ud800-\udbff]/.test(value[end - 1])) end -= 1;
+      if (end <= offset) end = Math.min(value.length, offset + 2);
+      entry.buffer.append(value.slice(offset, end));
+      offset = end;
+    }
+  };
+
+  const attachTerminalOutput = (entry) => {
+    entry.onOutputData = (chunk) => {
+      if (entry.revoked) return;
+      try {
+        if (typeof chunk === 'string') {
+          appendTerminalDecoded(entry, chunk);
+          return;
+        }
+        if (!Buffer.isBuffer(chunk) && !(chunk instanceof Uint8Array)) {
+          void closeTerminalEntry(entry);
+          return;
+        }
+        const bytes = Buffer.isBuffer(chunk)
+          ? chunk : Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+        for (let offset = 0; offset < bytes.length; offset += 65536) {
+          appendTerminalDecoded(entry, entry.decoder.write(bytes.subarray(
+            offset, Math.min(bytes.length, offset + 65536)
+          )));
+        }
+      } catch (_error) { void closeTerminalEntry(entry); }
+    };
+    entry.onOutputEnd = () => finishTerminalOutput(entry);
+    entry.onOutputError = () => {
+      finishTerminalOutput(entry);
+      if (entry.status.kind !== 'exited') {
+        entry.status = Object.freeze({ kind: 'exited', exitCode: null, signal: null });
+      }
+      void Promise.resolve(entry.handle.terminate()).catch(() => {});
+    };
+    entry.handle.output.on('data', entry.onOutputData);
+    entry.handle.output.on('end', entry.onOutputEnd);
+    entry.handle.output.on('close', entry.onOutputEnd);
+    entry.handle.output.on('error', entry.onOutputError);
+    Promise.resolve(entry.handle.done).then((outcome) => {
+      entry.status = Object.freeze({
+        kind: 'exited',
+        exitCode: Number.isSafeInteger(outcome?.exitCode) ? outcome.exitCode : null,
+        signal: typeof outcome?.signal === 'string' ? outcome.signal : null
+      });
+    }, () => {
+      entry.status = Object.freeze({ kind: 'exited', exitCode: null, signal: null });
+      void Promise.resolve(entry.handle.terminate()).catch(() => {});
+    });
+  };
+
+  const terminalReservationCount = (predicate) => {
+    let count = 0;
+    for (const entry of projectTerminals.values()) if (predicate(entry)) count += 1;
+    for (const entry of projectTerminalAllocations) if (predicate(entry)) count += 1;
+    return count;
+  };
+
+  const revokeTerminalsWhere = (predicate) => {
+    for (const allocation of projectTerminalAllocations) {
+      if (predicate(allocation)) allocation.abort.abort();
+    }
+    for (const entry of projectTerminals.values()) {
+      if (predicate(entry)) void closeTerminalEntry(entry);
+    }
+  };
+
+  revokeTerminalsForController = (controllerId) => {
+    revokeTerminalsWhere((entry) => entry.controllerId === controllerId);
+  };
+
+  const validTerminalIdentity = (payload) => APP_PROJECT_ID_RE.test(payload.projectId || '')
+    && typeof payload.paneRef === 'string'
+    && PROJECT_TERMINAL_PANE_REF_RE.test(payload.paneRef);
+
+  const openProjectTerminal = async (payload) => {
+    const selection = preferencePageSelection(payload, ['projectId', 'paneRef', 'cols', 'rows']);
+    if (!selection || !validTerminalIdentity(payload)
+        || !Number.isSafeInteger(payload.cols)
+        || payload.cols < PROJECT_TERMINAL_LIMITS.minCols
+        || payload.cols > PROJECT_TERMINAL_LIMITS.maxCols
+        || !Number.isSafeInteger(payload.rows)
+        || payload.rows < PROJECT_TERMINAL_LIMITS.minRows
+        || payload.rows > PROJECT_TERMINAL_LIMITS.maxRows) return bad();
+    if (!takeEndpointBudget('terminal.open')) return bad();
+    const authority = terminalAuthorityFor(selection);
+    if (!authority || projectTerminalDisposed
+        || typeof ctx.subprocess?.spawnTerminal !== 'function'
+        || typeof ctx.agents?.withInitiator !== 'function') {
+      return terminalOpenFailure('terminal-unavailable');
+    }
+    if (terminalReservationCount(() => true) >= PROJECT_TERMINAL_LIMITS.host
+        || terminalReservationCount((entry) => (
+          entry.rootGeneration === authority.rootGeneration
+        )) >= PROJECT_TERMINAL_LIMITS.project
+        || terminalReservationCount((entry) => (
+          entry.rootGeneration === authority.rootGeneration && entry.paneRef === payload.paneRef
+        )) >= PROJECT_TERMINAL_LIMITS.pane) {
+      return terminalOpenFailure('terminal-busy');
+    }
+    const privateHome = createProjectTerminalHome();
+    if (!privateHome) return terminalOpenFailure('terminal-unavailable');
+    const launch = projectTerminalLaunchPlan(authority.root, privateHome.path);
+    if (!launch) {
+      removeProjectTerminalHome(privateHome);
+      return terminalOpenFailure('terminal-unavailable');
+    }
+    let terminalRef = null;
+    for (let attempt = 0; attempt < 4 && terminalRef === null; attempt += 1) {
+      const candidate = `terminal-${randomUUID().replaceAll('-', '')}`;
+      const reserved = [...projectTerminalAllocations].some((entry) => (
+        entry.terminalRef === candidate
+      ));
+      if (PROJECT_TERMINAL_REF_RE.test(candidate)
+          && !projectTerminals.has(candidate) && !reserved) terminalRef = candidate;
+    }
+    if (terminalRef === null) {
+      removeProjectTerminalHome(privateHome);
+      return internal();
+    }
+    let settleAllocation;
+    const allocation = {
+      terminalRef,
+      nonce: randomUUID().replaceAll('-', ''),
+      projectId: payload.projectId,
+      paneRef: payload.paneRef,
+      controllerId: selection.controllerId,
+      pageInstanceId: selection.pageInstanceId,
+      selectionRevision: selection.selectionRevision,
+      sessionRef: selection.sessionRef,
+      raw: authority.raw,
+      session: authority.session,
+      owner: authority.owner,
+      root: authority.root,
+      rootIdentity: authority.rootIdentity,
+      rootRef: authority.rootRef,
+      rootGeneration: authority.rootGeneration,
+      privateHome,
+      abort: new AbortController(),
+      leaseTimer: null,
+      finished: new Promise((resolve) => { settleAllocation = resolve; })
+    };
+    projectTerminalAllocations.add(allocation);
+    scheduleTerminalLeaseCheck(allocation);
+    let handle = null;
+    let published = false;
+    let rollbackQuiescent = false;
+    try {
+      handle = await ctx.agents.withInitiator(authority.owner, () => (
+        ctx.subprocess.spawnTerminal({
+          argv: [...launch.argv],
+          cwd: launch.cwd,
+          env: { ...launch.env },
+          rows: payload.rows,
+          cols: payload.cols,
+          graceMs: PROJECT_TERMINAL_LIMITS.graceMs,
+          signal: allocation.abort.signal
+        })
+      ));
+      const currentSelection = controllers.get(selection.controllerId);
+      const current = terminalEntryCurrent(allocation, currentSelection);
+      const validHandle = handle && typeof handle.write === 'function'
+        && typeof handle.signalForeground === 'function'
+        && typeof handle.terminate === 'function'
+        && handle.output && typeof handle.output.on === 'function'
+        && typeof handle.output.off === 'function'
+        && handle.done && typeof handle.done.then === 'function';
+      if (!current || !validHandle || allocation.abort.signal.aborted
+          || projectTerminalDisposed) {
+        if (handle && typeof handle.terminate === 'function') {
+          try { await handle.terminate(); rollbackQuiescent = true; } catch (_error) {}
+        }
+        return terminalOpenFailure(current ? 'terminal-unavailable' : 'terminal-stale');
+      }
+      const entry = {
+        ...allocation,
+        handle,
+        decoder: new StringDecoder('utf8'),
+        buffer: new ProjectTerminalBuffer(),
+        status: Object.freeze({ kind: 'running' }),
+        capability: null,
+        revoked: false,
+        quiescent: false,
+        closing: null,
+        outputFinished: false,
+        outputDetached: false,
+        inputBusy: false,
+        signalBusy: false
+      };
+      if (allocation.leaseTimer) {
+        clearTimeout(allocation.leaseTimer);
+        allocation.leaseTimer = null;
+      }
+      entry.leaseTimer = null;
+      entry.capability = terminalCapabilityFor(entry);
+      if (!TOKEN_RE.test(entry.capability)) {
+        try { await handle.terminate(); rollbackQuiescent = true; } catch (_error) {}
+        return terminalOpenFailure('terminal-unavailable');
+      }
+      projectTerminals.set(entry.terminalRef, entry);
+      published = true;
+      scheduleTerminalLeaseCheck(entry);
+      attachTerminalOutput(entry);
+      return ok(Object.freeze({
+        opened: true,
+        code: null,
+        terminalRef: entry.terminalRef,
+        capability: entry.capability,
+        status: terminalStatus(entry),
+        page: entry.buffer.page(0, PROJECT_TERMINAL_LIMITS.readBytes)
+      }));
+    } catch (_error) {
+      if (handle && typeof handle.terminate === 'function') {
+        try { await handle.terminate(); rollbackQuiescent = true; } catch (_cleanupError) {}
+      }
+      return terminalOpenFailure(allocation.abort.signal.aborted
+        ? 'terminal-stale' : 'terminal-unavailable');
+    } finally {
+      projectTerminalAllocations.delete(allocation);
+      if (allocation.leaseTimer) clearTimeout(allocation.leaseTimer);
+      if (!published && (handle === null || rollbackQuiescent)) {
+        removeProjectTerminalHome(privateHome);
+      }
+      settleAllocation();
+    }
+  };
+
+  const readProjectTerminal = (payload) => {
+    const selection = preferencePageSelection(payload, [
+      'projectId', 'paneRef', 'terminalRef', 'capability', 'afterSeq', 'maxBytes'
+    ]);
+    if (!selection || !validTerminalIdentity(payload)
+        || !Number.isSafeInteger(payload.afterSeq) || payload.afterSeq < 0
+        || !Number.isSafeInteger(payload.maxBytes) || payload.maxBytes < 4
+        || payload.maxBytes > PROJECT_TERMINAL_LIMITS.readBytes) return bad();
+    const entry = terminalEntryFor(payload);
+    if (!entry) return bad();
+    if (!takeEndpointBudget('terminal.read')) return bad();
+    if (entry.revoked || !terminalEntryCurrent(entry, selection)) {
+      void closeTerminalEntry(entry);
+      return terminalReadFailure('terminal-stale');
+    }
+    const page = entry.buffer.page(payload.afterSeq, payload.maxBytes);
+    if (!page) return bad();
+    return ok(Object.freeze({
+      accepted: true,
+      code: null,
+      status: terminalStatus(entry),
+      page
+    }));
+  };
+
+  const writeProjectTerminal = async (payload) => {
+    const selection = preferencePageSelection(payload, [
+      'projectId', 'paneRef', 'terminalRef', 'capability', 'data'
+    ]);
+    if (!selection || !validTerminalIdentity(payload)
+        || typeof payload.data !== 'string' || !payload.data
+        || Buffer.byteLength(payload.data, 'utf8') > PROJECT_TERMINAL_LIMITS.inputBytes
+        || PROJECT_TERMINAL_INPUT_CONTROL_RE.test(payload.data)) return bad();
+    const entry = terminalEntryFor(payload);
+    if (!entry) return bad();
+    if (!takeEndpointBudget('terminal.write')) return bad();
+    if (entry.revoked || !terminalEntryCurrent(entry, selection)) {
+      void closeTerminalEntry(entry);
+      return ok({ accepted: false, code: 'terminal-stale' });
+    }
+    if (entry.status.kind === 'exited') {
+      return ok({ accepted: false, code: 'terminal-exited' });
+    }
+    if (entry.inputBusy) return ok({ accepted: false, code: 'terminal-busy' });
+    entry.inputBusy = true;
+    try {
+      await entry.handle.write(payload.data);
+      if (!terminalEntryCurrent(entry, controllers.get(entry.controllerId))) {
+        void closeTerminalEntry(entry);
+        return ok({ accepted: false, code: 'outcome-unknown' });
+      }
+      return ok({ accepted: true, code: null });
+    } catch (_error) {
+      return ok({ accepted: false, code: 'terminal-write-failed' });
+    } finally { entry.inputBusy = false; }
+  };
+
+  const signalProjectTerminal = async (payload) => {
+    const selection = preferencePageSelection(payload, [
+      'projectId', 'paneRef', 'terminalRef', 'capability', 'signal'
+    ]);
+    if (!selection || !validTerminalIdentity(payload) || payload.signal !== 'SIGINT') return bad();
+    const entry = terminalEntryFor(payload);
+    if (!entry) return bad();
+    if (!takeEndpointBudget('terminal.signal')) return bad();
+    if (entry.revoked || !terminalEntryCurrent(entry, selection)) {
+      void closeTerminalEntry(entry);
+      return ok({ delivered: false, code: 'terminal-stale' });
+    }
+    if (entry.status.kind === 'exited') {
+      return ok({ delivered: false, code: 'terminal-exited' });
+    }
+    if (entry.signalBusy) return ok({ delivered: false, code: 'terminal-busy' });
+    entry.signalBusy = true;
+    try {
+      const group = await entry.handle.signalForeground('SIGINT');
+      if (!Number.isSafeInteger(group) || group < 1) {
+        return ok({ delivered: false, code: 'terminal-signal-failed' });
+      }
+      if (!terminalEntryCurrent(entry, controllers.get(entry.controllerId))) {
+        void closeTerminalEntry(entry);
+        return ok({ delivered: false, code: 'outcome-unknown' });
+      }
+      return ok({ delivered: true, code: null });
+    } catch (_error) {
+      return ok({ delivered: false, code: 'terminal-signal-failed' });
+    } finally { entry.signalBusy = false; }
+  };
+
+  const closeProjectTerminal = async (payload) => {
+    const selection = preferencePageSelection(payload, [
+      'projectId', 'paneRef', 'terminalRef', 'capability'
+    ]);
+    if (!selection || !validTerminalIdentity(payload)) return bad();
+    const entry = terminalEntryFor(payload);
+    if (!entry) return bad();
+    if (!takeEndpointBudget('terminal.close')) return bad();
+    const current = terminalEntryCurrent(entry, selection);
+    const quiescent = await closeTerminalEntry(entry);
+    return ok(Object.freeze({
+      closed: quiescent,
+      quiescent,
+      code: quiescent ? (current ? null : 'terminal-stale') : 'terminal-close-failed'
+    }));
   };
 
   const syncPreferences = (payload) => {
@@ -978,6 +1878,9 @@ export function apply(ctx) {
       ))) return { code: 'operation-invalid' };
       return { input };
     }
+    if (operation === 'projects.adopt') {
+      return exact(input, []) ? { input } : { code: 'operation-invalid' };
+    }
     if (operation === 'projects.update') {
       if (!exact(input, ['projectId', 'changes']) || !APP_PROJECT_ID_RE.test(input.projectId)
           || !plain(input.changes) || Object.keys(input.changes).length < 1
@@ -988,6 +1891,18 @@ export function apply(ctx) {
     }
     if (operation === 'projects.remove') {
       return exact(input, ['projectId']) && APP_PROJECT_ID_RE.test(input.projectId)
+        ? { input } : { code: 'operation-invalid' };
+    }
+    if (operation === 'projects.sidecar') {
+      return exact(input, ['projectId']) && APP_PROJECT_ID_RE.test(input.projectId)
+        ? { input } : { code: 'operation-invalid' };
+    }
+    if (operation === 'projects.detach') {
+      return exact(input, ['projectId', 'window', 'tabId'])
+        && APP_PROJECT_ID_RE.test(input.projectId)
+        && Number.isSafeInteger(input.window) && input.window >= 1 && input.window <= 16
+        && typeof input.tabId === 'string' && input.tabId.length >= 1
+        && input.tabId.length <= 128 && !CONTROL_RE.test(input.tabId)
         ? { input } : { code: 'operation-invalid' };
     }
     if (operation === 'projects.bind') {
@@ -1060,7 +1975,7 @@ export function apply(ctx) {
     }
     if (operation === 'console.read') {
       if (!exact(input, ['snapshot'])) return { code: 'operation-invalid' };
-      const snapshot = projectConsoleSnapshot(input.snapshot);
+      const snapshot = projectConsoleSnapshot(input.snapshot, projectRecentMessages);
       return snapshot ? { input: Object.freeze({ snapshot }) } : { code: 'operation-invalid' };
     }
     return { code: 'operation-invalid' };
@@ -1985,6 +2900,11 @@ export function apply(ctx) {
       if (endpoint === 'ui/preferences/read') return readPreferences(payload);
       if (endpoint === 'ui/preferences/sync') return syncPreferences(payload);
       if (endpoint === 'ui/preferences/settle') return settlePreferences(payload);
+      if (endpoint === 'terminal.open') return openProjectTerminal(payload);
+      if (endpoint === 'terminal.read') return readProjectTerminal(payload);
+      if (endpoint === 'terminal.write') return writeProjectTerminal(payload);
+      if (endpoint === 'terminal.signal') return signalProjectTerminal(payload);
+      if (endpoint === 'terminal.close') return closeProjectTerminal(payload);
       if (endpoint === 'projects/session/bootstrap') return bootstrapProjectSession(payload);
       if (endpoint === 'projects/session/resolve') return resolveProjectSession(payload);
       if (endpoint === 'workspace/files/request') return requestWorkspaceFile(payload);
@@ -2031,9 +2951,40 @@ export function apply(ctx) {
     }
   });
 
+  ctx.on('session/disposed', (session) => {
+    const raw = typeof session?.id === 'string' ? session.id : null;
+    if (raw === null) return;
+    projectRecentMessages.delete(raw);
+    revokeTerminalsWhere((entry) => entry.raw === raw && entry.session === session);
+  });
+
+  ctx.on('agent/disposed', ({ agent } = {}) => {
+    if (!agent || typeof agent.id !== 'string') return;
+    revokeTerminalsWhere((entry) => entry.raw === agent.id && entry.owner === agent);
+  });
+
+  if (typeof ctx.effect === 'function') {
+    ctx.effect(() => async () => {
+      projectTerminalDisposed = true;
+      const allocations = [...projectTerminalAllocations];
+      for (const allocation of allocations) allocation.abort.abort();
+      await Promise.allSettled(allocations.map((allocation) => allocation.finished));
+      await Promise.allSettled([...projectTerminals.values()].map(closeTerminalEntry));
+    }, 'whaledock project terminal teardown');
+  }
+
   ctx.on('session/event', (session, event) => {
     sweep();
-    const record = recordsByRaw.get(String(session.id));
+    const rawSessionId = String(session.id);
+    const recent = redactedRecentMessage(event);
+    if (recent) {
+      projectRecentMessages.delete(rawSessionId);
+      while (projectRecentMessages.size >= MAX_PROJECT_CONSOLE_SESSIONS) {
+        projectRecentMessages.delete(projectRecentMessages.keys().next().value);
+      }
+      projectRecentMessages.set(rawSessionId, recent);
+    }
+    const record = recordsByRaw.get(rawSessionId);
     if (!record) return;
     if (event.type === 'turn/start') {
       if (!Number.isSafeInteger(event.data?.turn) || event.data.turn < 1) return;

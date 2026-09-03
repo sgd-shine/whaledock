@@ -45,9 +45,9 @@
       "forks/ui-conversation/lib/client.js"
     ],
     "fileCount": 15,
-    "totalBytes": 998730,
-    "digest": "4120ef87ecf588829de06b9424c1f7f89d9526148504fb43609a9c5a749db8b5",
-    "canonicalSha256": "c058272d1f566d52ded7d37e04b6912a6e66bad72690a0b6fb934e10fb55e4ac"
+    "totalBytes": 1062446,
+    "digest": "a486c9008d9d871d5ddf05dd9778de3256e706a47116326cb55c715af7921f0b",
+    "canonicalSha256": "b4620c1a26109851d183dd1d0e50f25a3a10ed9f7bdac09a0f1c946d940a3223"
   },
   "components": [
     {

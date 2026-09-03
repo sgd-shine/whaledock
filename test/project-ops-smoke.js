@@ -8,7 +8,8 @@ const layout = require('../lib/project-layout');
 
 const PROJECT_NAMES = [
   'projects.list', 'projects.create', 'projects.update', 'projects.remove',
-  'projects.bind', 'projects.reorder', 'projects.open', 'console.read'
+  'projects.bind', 'projects.reorder', 'projects.open', 'projects.adopt',
+  'projects.sidecar', 'projects.detach', 'console.read'
 ];
 const CONSOLE_ID = `proj_${'0'.repeat(31)}1`;
 const PROJECT_A = `proj_${'a'.repeat(32)}`;
@@ -17,6 +18,18 @@ const BINDING_A = `session-binding-${'a'.repeat(64)}`;
 const BINDING_B = `session-binding-${'b'.repeat(64)}`;
 const ROOT_REF_A = `session-root-${'a'.repeat(64)}`;
 const ROOT_REF_B = `session-root-${'b'.repeat(64)}`;
+const SAFE_SKIN = Object.freeze({
+  base: 'dark',
+  colors: Object.freeze({
+    background: '#07111b',
+    surface: '#0b1926',
+    border: '#1f3a4a',
+    primary: '#e9f4fb',
+    accent: '#35b6d4',
+    text: '#e9f4fb',
+    textMuted: '#9cb3c3'
+  })
+});
 
 let passed = 0;
 
@@ -100,7 +113,10 @@ function createStore() {
       folder: '/missing', folderTail: 'missing', order: 2, hidden: true
     })
   ];
-  const calls = { create: [], update: [], remove: [], bind: [], reorder: [], touch: [] };
+  const calls = {
+    create: [], adopt: [], update: [], remove: [], sidecar: [],
+    bind: [], reorder: [], touch: []
+  };
   const find = (id) => records.find((entry) => entry.id === id) || null;
   const store = {
     get revision() { return revision; },
@@ -129,6 +145,10 @@ function createStore() {
       revision += 1;
       return { ...next };
     },
+    adoptFolder(folder) {
+      calls.adopt.push(folder);
+      return { adopted: 'existing', project: { ...find(PROJECT_A) } };
+    },
     update(id, changes) {
       calls.update.push({ id, changes });
       const hit = find(id);
@@ -144,6 +164,11 @@ function createStore() {
       if (hit.kind === 'builtin') throw operationError('ERR_PROJECT_BUILTIN');
       records = records.filter((entry) => entry.id !== id);
       revision += 1;
+      return true;
+    },
+    writeManifest(id) {
+      calls.sidecar.push(id);
+      if (!find(id)) throw operationError('ERR_PROJECT_NOT_FOUND');
       return true;
     },
     bindSession(id, bindingRef) {
@@ -226,7 +251,10 @@ function currentContext(sequence, overrides = {}) {
 }
 
 function createRoom() {
-  const logs = { sanitized: [], builds: [], outputs: [], acks: [], status: 'need' };
+  const logs = {
+    sanitized: [], builds: [], outputs: [], acks: [], status: 'need',
+    recent: Object.freeze({ role: 'assistant', text: '已生成初稿，请确认。', updatedAt: 999_000 })
+  };
   let buildNumber = 0;
   const room = {
     sanitizeSnapshot(raw) {
@@ -256,6 +284,7 @@ function createRoom() {
           runtimeMs: 3000,
           kids: 1,
           sessionTitle: '需要确认',
+          recent: logs.recent,
           cwd: '/private/secret/cwd',
           folder: '/private/secret/folder'
         }],
@@ -292,6 +321,7 @@ function createFixture(overrides = {}) {
   const needs = [];
   const consoleEvents = [];
   const opened = [];
+  const detached = [];
   const module = loadModule();
   const operations = module.createProjectOperations({
     projectStore: store,
@@ -303,6 +333,7 @@ function createFixture(overrides = {}) {
     templateActionsFor: overrides.templateActionsFor || (() => []),
     templateCatalogFor: overrides.templateCatalogFor || (() => []),
     previewForProject: overrides.previewForProject || (() => []),
+    skinForTemplate: overrides.skinForTemplate || (() => null),
     readSwitchCommand: overrides.readSwitchCommand || (() => null),
     bootstrapTicketFor: overrides.bootstrapTicketFor || (() => null),
     onProjectOpened: (projectId, seq) => {
@@ -315,6 +346,10 @@ function createFixture(overrides = {}) {
     ...(overrides.onProjectOpenOutcomeUnknown ? {
       onProjectOpenOutcomeUnknown: overrides.onProjectOpenOutcomeUnknown
     } : {}),
+    onDetach: (value) => {
+      detached.push(value);
+      return typeof overrides.onDetach === 'function' ? overrides.onDetach(value) : undefined;
+    },
     onNeedCount: (count) => needs.push(count),
     onConsoleResult: (event) => {
       consoleEvents.push(event);
@@ -323,7 +358,7 @@ function createFixture(overrides = {}) {
     }
   });
   return {
-    module, operations, store, calls, room, logs, clock, needs, consoleEvents, opened
+    module, operations, store, calls, room, logs, clock, needs, consoleEvents, opened, detached
   };
 }
 
@@ -365,12 +400,15 @@ async function invokeThroughBroker(broker, binding, operation, input) {
 }
 
 async function main() {
-  await test('导出精确 8 项与完整 descriptor，模块保持纯 Node 边界', async () => {
+  await test('导出精确 11 项与完整 descriptor，模块保持纯 Node 边界', async () => {
     const source = fs.readFileSync(path.join(__dirname, '..', 'lib', 'project-ops.js'), 'utf8');
     assert.doesNotMatch(source, /require\(['"](?:electron|fs)['"]\)/);
     const fixture = createFixture();
-    assert.deepEqual([...fixture.module.PROJECT_OPERATION_NAMES], PROJECT_NAMES);
-    assert.deepEqual(Object.keys(fixture.operations), PROJECT_NAMES);
+    assert.equal(fixture.module.PROJECT_OPERATION_NAMES.size, 11);
+    assert.deepEqual(
+      [...fixture.module.PROJECT_OPERATION_NAMES].sort(), [...PROJECT_NAMES].sort()
+    );
+    assert.deepEqual(Object.keys(fixture.operations).sort(), [...PROJECT_NAMES].sort());
     assert(Object.isFrozen(fixture.operations));
     for (const descriptor of Object.values(fixture.operations)) {
       assert(Object.isFrozen(descriptor));
@@ -410,7 +448,10 @@ async function main() {
     const { operations } = createFixture();
     assert.doesNotThrow(() => operations['projects.list'].validate({}));
     assert.doesNotThrow(() => operations['projects.create'].validate({}));
-    for (const name of PROJECT_NAMES.filter((entry) => !['projects.list', 'projects.create'].includes(entry))) {
+    assert.doesNotThrow(() => operations['projects.adopt'].validate({}));
+    for (const name of PROJECT_NAMES.filter((entry) => (
+      !['projects.list', 'projects.create', 'projects.adopt'].includes(entry)
+    ))) {
       assert.throws(() => operations[name].validate({}));
     }
     const valid = {
@@ -421,6 +462,9 @@ async function main() {
       'projects.bind': { projectId: PROJECT_A, bindingRef: BINDING_A },
       'projects.reorder': { ids: [PROJECT_A] },
       'projects.open': { phase: 'prepare', projectId: PROJECT_A },
+      'projects.adopt': {},
+      'projects.sidecar': { projectId: PROJECT_A },
+      'projects.detach': { projectId: PROJECT_A, window: 1, tabId: 'draft' },
       'console.read': { snapshot: { byId: {}, subagentsByParent: {}, jobsBySession: {}, current: null } }
     };
     for (const name of PROJECT_NAMES) {
@@ -542,6 +586,71 @@ async function main() {
     assert.equal(result.project.projectId, `proj_${'c'.repeat(32)}`);
   });
 
+  await test('projects.adopt 只认 chooser 文件夹，返回脱敏认领模式并在缺能力时关闭', async () => {
+    const cancelled = createFixture({ chooseFolder: async () => null });
+    let error = await captureError(() => invoke(cancelled, 'projects.adopt', {}));
+    assert.equal(cancelled.operations['projects.adopt'].errorCode(error), 'cancelled');
+    assert.deepEqual(cancelled.calls.adopt, []);
+
+    const invalidFolder = createFixture({ chooseFolder: async () => '/chosen/bad\u0000folder' });
+    error = await captureError(() => invoke(invalidFolder, 'projects.adopt', {}));
+    assert.equal(invalidFolder.operations['projects.adopt'].errorCode(error), 'project-folder-invalid');
+    assert.deepEqual(invalidFolder.calls.adopt, []);
+
+    const stale = createFixture({ chooseFolder: async () => '/chosen/stale-adopt' });
+    error = await captureError(() => invoke(stale, 'projects.adopt', {}, {
+      context: currentContext([true, false])
+    }));
+    assert.equal(stale.operations['projects.adopt'].errorCode(error), 'operation-stale');
+    assert.deepEqual(stale.calls.adopt, [], 'chooser 返回后 stale 不得认领目录');
+
+    const storeFixture = createStore();
+    storeFixture.store.adoptFolder = (folder) => {
+      storeFixture.calls.adopt.push(folder);
+      return { adopted: 'manifest', project: storeFixture.store.get(PROJECT_A) };
+    };
+    const fixture = createFixture({
+      storeFixture,
+      chooseFolder: async () => '/private/chosen/from-sidecar'
+    });
+    const result = await invoke(fixture, 'projects.adopt', {});
+    assert.deepEqual(storeFixture.calls.adopt, ['/private/chosen/from-sidecar']);
+    assert.deepEqual(Object.keys(result), ['kind', 'revision', 'adopted', 'project']);
+    assert.equal(result.kind, 'adopted');
+    assert.equal(result.adopted, 'manifest');
+    assert.equal(result.project.projectId, PROJECT_A);
+    assert.deepEqual(Object.keys(result.project), [
+      'projectId', 'kind', 'name', 'icon', 'hasFolder', 'hasBinding', 'hidden', 'pinned'
+    ]);
+    assert(!JSON.stringify(result).includes('/private/'), '认领结果不得回传选择器路径');
+    for (const adopted of ['existing', 'relinked', 'manifest', 'new']) {
+      assert.equal(fixture.operations['projects.adopt'].redact({ ...result, adopted }).adopted, adopted);
+    }
+    assert.throws(() => fixture.operations['projects.adopt'].redact({
+      ...result, adopted: 'imported'
+    }));
+    assert.throws(() => fixture.operations['projects.adopt'].redact({
+      ...result, absolutePath: '/private/chosen/from-sidecar'
+    }));
+
+    const unavailableStore = createStore();
+    delete unavailableStore.store.adoptFolder;
+    const unavailable = createFixture({ storeFixture: unavailableStore });
+    error = await captureError(() => invoke(unavailable, 'projects.adopt', {}));
+    assert.equal(unavailable.operations['projects.adopt'].errorCode(error), 'operation-failed');
+
+    const conflictStore = createStore();
+    conflictStore.store.adoptFolder = () => {
+      const conflict = new Error('旁车 id 已占用');
+      conflict.code = 'ERR_PROJECT_IDENTITY_CONFLICT';
+      throw conflict;
+    };
+    const conflict = createFixture({ storeFixture: conflictStore });
+    error = await captureError(() => invoke(conflict, 'projects.adopt', {}));
+    assert.equal(conflict.operations['projects.adopt'].errorCode(error),
+      'project-identity-conflict');
+  });
+
   await test('projects.update 仅接受严格普通 paneState，页面不能伪造 artifact/locked', async () => {
     const fixture = createFixture();
     const descriptor = fixture.operations['projects.update'];
@@ -630,6 +739,37 @@ async function main() {
     assert.equal(fixture.operations['projects.bind'].errorCode(
       operationError('ERR_PROJECT_ROOT_MISMATCH')
     ), 'workspace-mismatch');
+  });
+
+  await test('projects.sidecar 只按 projectId 写旁车，结果不泄漏目录且缺能力即失败', async () => {
+    const fixture = createFixture();
+    const result = await invoke(fixture, 'projects.sidecar', { projectId: PROJECT_A });
+    assert.deepEqual(fixture.calls.sidecar, [PROJECT_A]);
+    assert.deepEqual(result, {
+      kind: 'sidecar', revision: 7, projectId: PROJECT_A, written: true
+    });
+    assert(Object.isFrozen(result));
+    assert(!JSON.stringify(result).includes('/private/'));
+    assert.throws(() => fixture.operations['projects.sidecar'].redact({
+      ...result, written: false
+    }));
+    assert.throws(() => fixture.operations['projects.sidecar'].redact({
+      ...result, manifestPath: '/private/project/.whaledock/project.json'
+    }));
+
+    let error = await captureError(() => invoke(fixture, 'projects.sidecar', {
+      projectId: `proj_${'f'.repeat(32)}`
+    }));
+    assert.equal(fixture.operations['projects.sidecar'].errorCode(error), 'project-not-found');
+    assert.deepEqual(fixture.calls.sidecar, [PROJECT_A], '不存在项目不得尝试写旁车');
+
+    const unavailableStore = createStore();
+    delete unavailableStore.store.writeManifest;
+    const unavailable = createFixture({ storeFixture: unavailableStore });
+    error = await captureError(() => invoke(unavailable, 'projects.sidecar', {
+      projectId: PROJECT_A
+    }));
+    assert.equal(unavailable.operations['projects.sidecar'].errorCode(error), 'operation-failed');
   });
 
   await test('bootstrap bind 用 prepare openToken 做 CAS，跨页、重放与并发新绑定均不覆盖', async () => {
@@ -1067,6 +1207,60 @@ async function main() {
     assert.equal(commitStale.calls.touch.length, 0, 'commit action await 后 stale 不得 touch');
   });
 
+  await test('projects.open 的可选 skin 只投影固定色票，非法/读取失败时安全省略', async () => {
+    const requested = [];
+    const fixture = createFixture({
+      skinForTemplate: async (templateId) => {
+        requested.push(templateId);
+        return SAFE_SKIN;
+      }
+    });
+    const prepared = await invoke(fixture, 'projects.open', {
+      phase: 'prepare', projectId: PROJECT_A
+    });
+    assert.deepEqual(requested, ['builtin:short-video']);
+    assert.deepEqual(prepared.project.skin, SAFE_SKIN);
+    assert(Object.isFrozen(prepared.project.skin));
+    assert(Object.isFrozen(prepared.project.skin.colors));
+    assert.deepEqual(Object.keys(prepared.project.skin.colors), [
+      'background', 'surface', 'border', 'primary', 'accent', 'text', 'textMuted'
+    ]);
+    const serialized = JSON.stringify(prepared.project.skin);
+    for (const forbidden of ['path', 'css', 'font', 'url', '/private/']) {
+      assert(!serialized.includes(forbidden), `skin 不得包含 ${forbidden}`);
+    }
+
+    const invalid = createFixture({
+      skinForTemplate: () => ({
+        base: 'dark', colors: { ...SAFE_SKIN.colors, accent: '#35B6D4', rawCss: 'body{}' }
+      })
+    });
+    const dropped = await invoke(invalid, 'projects.open', {
+      phase: 'prepare', projectId: PROJECT_A
+    });
+    assert.equal(Object.prototype.hasOwnProperty.call(dropped.project, 'skin'), false);
+
+    const failed = createFixture({
+      skinForTemplate: () => { throw operationError('ERR_SKIN_READ', '/private/theme.json'); }
+    });
+    const fallback = await invoke(failed, 'projects.open', {
+      phase: 'prepare', projectId: PROJECT_A
+    });
+    assert.equal(Object.prototype.hasOwnProperty.call(fallback.project, 'skin'), false);
+    assert(!JSON.stringify(fallback).includes('/private/theme.json'));
+
+    let commandCalls = 0;
+    const stale = createFixture({
+      skinForTemplate: async () => SAFE_SKIN,
+      readSwitchCommand: () => { commandCalls += 1; return null; }
+    });
+    const error = await captureError(() => invoke(stale, 'projects.open', {
+      phase: 'prepare', projectId: PROJECT_A
+    }, { context: currentContext([true, true, true, false]) }));
+    assert.equal(stale.operations['projects.open'].errorCode(error), 'operation-stale');
+    assert.equal(commandCalls, 0, 'skin await 后 stale 不得继续读取快捷命令');
+  });
+
   await test('projects.open token TTL 到期 fail-closed 且不 touch', async () => {
     const fixture = createFixture();
     const prepared = await invoke(fixture, 'projects.open', {
@@ -1131,6 +1325,86 @@ async function main() {
     assert(text.includes('"relativeRef":"output/result.md"'));
   });
 
+  await test('projects.detach 只按现存 window/tab 定位，并仅向 Host 交付安全项目身份', async () => {
+    const storeFixture = createStore();
+    storeFixture.store.update(PROJECT_A, { paneState: ordinaryPaneState() });
+    const fixture = createFixture({ storeFixture });
+    const result = await invoke(fixture, 'projects.detach', {
+      projectId: PROJECT_A, window: 1, tabId: 'draft'
+    });
+    assert.deepEqual(result, {
+      kind: 'detached', projectId: PROJECT_A, window: 1, tabId: 'draft'
+    });
+    assert(Object.isFrozen(result));
+    assert.equal(fixture.detached.length, 1);
+    const payload = fixture.detached[0];
+    assert(Object.isFrozen(payload));
+    assert(Object.isFrozen(payload.project));
+    assert(Object.isFrozen(payload.tab));
+    assert.deepEqual(Object.keys(payload), ['project', 'window', 'tab']);
+    assert.deepEqual(payload.project, {
+      projectId: PROJECT_A, name: '旅行 Atlas', icon: '🌍'
+    });
+    assert.deepEqual(payload.tab, {
+      id: 'draft', type: 'text', title: '草稿', path: 'drafts/current.txt'
+    });
+    const payloadText = JSON.stringify(payload);
+    for (const forbidden of ['/private/', 'folder', 'boundSession', 'bindingRef']) {
+      assert(!payloadText.includes(forbidden), `分离窗 Host 输入泄漏 ${forbidden}`);
+    }
+    assert(!JSON.stringify(result).includes('drafts/current.txt'), '页面结果不得回传相对文件引用');
+
+    let error = await captureError(() => invoke(fixture, 'projects.detach', {
+      projectId: PROJECT_A, window: 2, tabId: 'draft'
+    }));
+    assert.equal(fixture.operations['projects.detach'].errorCode(error), 'operation-invalid');
+    assert.equal(fixture.detached.length, 1, '失效目标不得打开窗口');
+    for (const input of [
+      { projectId: PROJECT_A, window: 0, tabId: 'draft' },
+      { projectId: PROJECT_A, window: 17, tabId: 'draft' },
+      { projectId: PROJECT_A, window: 1, tabId: 'bad\u0000tab' },
+      { projectId: PROJECT_A, window: 1, tabId: 'draft', relativeRef: 'drafts/current.txt' }
+    ]) {
+      assert.throws(() => fixture.operations['projects.detach'].validate(input));
+    }
+    assert.throws(() => fixture.operations['projects.detach'].redact({
+      ...result, path: '/private/secret'
+    }));
+
+    const artifactStore = createStore();
+    const artifactPane = JSON.parse(JSON.stringify(layout.createPaneState()));
+    artifactPane.windows[0] = layout.lockArtifact(artifactPane.windows[0], {
+      window: 1,
+      path: 'output/final.md',
+      kind: 'markdown',
+      fingerprint: { size: 8, mtime: 42, sha256: 'f'.repeat(64) }
+    });
+    artifactStore.store.update(PROJECT_A, { paneState: artifactPane });
+    const artifactFixture = createFixture({ storeFixture: artifactStore });
+    const artifactTabId = artifactPane.windows[0].tabs[0].id;
+    await invoke(artifactFixture, 'projects.detach', {
+      projectId: PROJECT_A, window: 1, tabId: artifactTabId
+    });
+    assert.equal(artifactFixture.detached[0].tab.locked, true);
+    assert.equal(artifactFixture.detached[0].tab.descriptor.kind, 'markdown');
+    assert.equal(artifactFixture.detached[0].tab.descriptor.path, 'output/final.md');
+
+    const staleStore = createStore();
+    staleStore.store.update(PROJECT_A, { paneState: ordinaryPaneState() });
+    let staleWindowDestroyed = 0;
+    const stale = createFixture({
+      storeFixture: staleStore,
+      onDetach: async () => ({
+        destroy() { staleWindowDestroyed += 1; }
+      })
+    });
+    error = await captureError(() => invoke(stale, 'projects.detach', {
+      projectId: PROJECT_A, window: 1, tabId: 'draft'
+    }, { context: currentContext([true, false]) }));
+    assert.equal(stale.operations['projects.detach'].errorCode(error), 'operation-stale');
+    assert.equal(staleWindowDestroyed, 1, 'await 后 stale 必须撤销已打开的分离窗');
+  });
+
   await test('console.read 二次消毒、复合 binding 缓存/TTL 与 need 回调均有界', async () => {
     const fixture = createFixture();
     const raw = {
@@ -1140,6 +1414,10 @@ async function main() {
     const first = await invoke(fixture, 'console.read', { snapshot: raw });
     assert.equal(fixture.logs.sanitized[0].byId[BINDING_A].cwd, '/private/raw/cwd');
     assert.deepEqual(fixture.needs, [1]);
+    assert.deepEqual(first.cards[0].recent, {
+      role: 'assistant', text: '已生成初稿，请确认。', updatedAt: 999_000
+    });
+    assert(Object.isFrozen(first.cards[0].recent));
     const text = JSON.stringify(first);
     for (const secret of ['/private/', 'cwd', 'folder', 'boundSession', 'bindingRef']) {
       assert(!text.includes(secret), `控制室结果泄漏 ${secret}`);
@@ -1166,6 +1444,14 @@ async function main() {
       snapshot: { byId: { [BINDING_A]: { displayTitle: '中'.repeat(17_000) } }, subagentsByParent: {}, jobsBySession: {}, current: null }
     };
     assert.throws(() => fixture.operations['console.read'].validate(oversized));
+
+    fixture.logs.recent = {
+      role: 'assistant', text: '安全摘要', updatedAt: 999_001,
+      privatePath: '/private/should-not-pass'
+    };
+    const error = await captureError(() => invoke(fixture, 'console.read', { snapshot: raw }));
+    assert.equal(fixture.operations['console.read'].errorCode(error), 'operation-failed',
+      'control-room 输出的 recent 也必须二次精确校验');
   });
 
   await test('console.read 只在已绑定项目新进入 done 时触发扫描回调', async () => {
@@ -1197,6 +1483,10 @@ async function main() {
           running: true,
           pendingInteraction: 'question',
           displayTitle: '需要确认',
+          recent: {
+            role: 'assistant', text: '  已完成草稿，请确认  ', updatedAt: 999_000,
+            privatePath: '/private/never-return'
+          },
           cwd: '/private/never-return'
         }
       },
@@ -1206,7 +1496,29 @@ async function main() {
     assert.deepEqual(result.counts, {
       need: 1, done: 0, busy: 0, idle: 2, total: 3, glowing: 1
     });
+    const card = result.cards.find((entry) => entry.projectId === PROJECT_A);
+    assert.deepEqual(card.recent, {
+      role: 'assistant', text: '已完成草稿，请确认', updatedAt: 999_000
+    });
+    assert.deepEqual(Object.keys(card.recent), ['role', 'text', 'updatedAt']);
     assert(!JSON.stringify(result).includes('/private/never-return'));
+
+    const invalidRecent = await invoke(actualFixture, 'console.read', {
+      snapshot: {
+        ...snapshot,
+        byId: {
+          [BINDING_A]: {
+            ...snapshot.byId[BINDING_A],
+            recent: { role: 'tool', text: '不应显示', updatedAt: 999_001 }
+          }
+        }
+      }
+    });
+    assert.equal(
+      invalidRecent.cards.find((entry) => entry.projectId === PROJECT_A).recent,
+      null,
+      '未知角色的 recent 必须降为 null'
+    );
 
     const fixture = createFixture();
     const empty = { byId: {}, subagentsByParent: {}, jobsBySession: {}, current: null };

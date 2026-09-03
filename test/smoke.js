@@ -14,7 +14,7 @@ const log = require('../lib/log');
 const update = require('../lib/update');
 const hotfixBuild = require('../scripts/hotfix-build-config');
 const contextPocManifest = require('../scripts/context-poc-manifest');
-const formalBuild = require('../electron-builder.v0.10.cjs');
+const alphaBuild = require('../electron-builder.v0.11-alpha.1.cjs');
 const macosBuildVisibility = require('../scripts/macos-build-visibility');
 const macosCodesign = require('../scripts/macos-codesign');
 
@@ -282,45 +282,45 @@ async function main() {
 
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
   const sourceContextResources = pkg.build.extraResources.filter(hotfixBuild.isContextPocResource);
-  const formalContextResources = formalBuild.extraResources.filter(hotfixBuild.isContextPocResource);
-  const formalScripts = [
+  const alphaContextResources = alphaBuild.extraResources.filter(hotfixBuild.isContextPocResource);
+  const alphaScripts = [
     pkg.scripts['dist:mac:arm64'],
     pkg.scripts['dist:mac:x64'],
     pkg.scripts['dist:win']
   ];
-  check('packaging: v0.10 正式身份、release 输出与 context-poc 携带合同',
-    pkg.version === '0.10.0'
-      && formalBuild.directories.output === 'release'
+  check('packaging: v0.11 alpha 精确身份、release 输出与 context-poc 携带合同',
+    pkg.version === '0.11.0-alpha.1'
+      && alphaBuild.directories.output === 'release'
       && sourceContextResources.length === 1
-      && formalContextResources.length === 1
-      && formalScripts.every((script) =>
-        script.includes('--config electron-builder.v0.10.cjs')
+      && alphaContextResources.length === 1
+      && alphaScripts.every((script) =>
+        script.includes('--config electron-builder.v0.11-alpha.1.cjs')
           && script.includes('--publish never')));
-  const previewSource = fs.readFileSync(
-    path.join(__dirname, '..', 'electron-builder.v0.10-preview.cjs'),
+  const alphaSource = fs.readFileSync(
+    path.join(__dirname, '..', 'electron-builder.v0.11-alpha.1.cjs'),
     'utf8'
   );
-  check('packaging: v0.10 alpha 预览配置保留独立版本锁与输出目录',
-    previewSource.includes("const PREVIEW_VERSION = '0.10.0-alpha.2';")
-      && previewSource.includes("output: 'release-preview'"));
+  check('packaging: v0.11 alpha 配置保留独立精确版本锁与发布输出目录',
+    alphaSource.includes("const ALPHA_VERSION = '0.11.0-alpha.1';")
+      && alphaSource.includes("output: 'release'"));
 
   const packageModulePath = require.resolve('../package.json');
-  const formalModulePath = require.resolve('../electron-builder.v0.10.cjs');
+  const alphaModulePath = require.resolve('../electron-builder.v0.11-alpha.1.cjs');
   const committedPackageExports = require.cache[packageModulePath].exports;
-  let wrongFormalVersionRejected = false;
+  let wrongAlphaVersionRejected = false;
   try {
-    delete require.cache[formalModulePath];
-    require.cache[packageModulePath].exports = { ...committedPackageExports, version: '0.10.1' };
-    require(formalModulePath);
+    delete require.cache[alphaModulePath];
+    require.cache[packageModulePath].exports = { ...committedPackageExports, version: '0.11.0-alpha.2' };
+    require(alphaModulePath);
   } catch (_error) {
-    wrongFormalVersionRejected = true;
+    wrongAlphaVersionRejected = true;
   } finally {
     require.cache[packageModulePath].exports = committedPackageExports;
-    delete require.cache[formalModulePath];
+    delete require.cache[alphaModulePath];
   }
-  check('packaging: v0.10 正式配置拒绝错版 package', wrongFormalVersionRejected);
+  check('packaging: v0.11 alpha 配置拒绝错版 package', wrongAlphaVersionRejected);
 
-  const packagedResources = path.join(tmp, 'v010-packaged-resources');
+  const packagedResources = path.join(tmp, 'v011-alpha-packaged-resources');
   fs.mkdirSync(packagedResources, { recursive: true });
   fs.cpSync(
     path.join(__dirname, '..', 'context-poc'),
@@ -342,7 +342,7 @@ async function main() {
   let missingPackagedFileRejected = false;
   try { contextPocManifest.verifyPackagedResources(packagedResources); }
   catch (_error) { missingPackagedFileRejected = true; }
-  check('packaging: v0.10 成品 context-poc 精确树与逐字节信任根 fail-closed',
+  check('packaging: v0.11 alpha 成品 context-poc 精确树与逐字节信任根 fail-closed',
     packagedReceipt.files === contextPocManifest.SOURCE_FILES.length
       && packagedReceipt.digest === contextPocManifest.readBaseline().digest
       && extraPackagedFileRejected
@@ -425,23 +425,46 @@ async function main() {
   );
   const publishStepOffset = releaseWorkflow.indexOf('  publish-release:');
   const publishStep = releaseWorkflow.slice(publishStepOffset);
-  const formalConfigUseCount = (releaseWorkflow.match(/--config electron-builder\.v0\.10\.cjs/g) || []).length;
+  const alphaConfigUseCount = (releaseWorkflow.match(/--config electron-builder\.v0\.11-alpha\.1\.cjs/g) || []).length;
   const legacyConfigUseCount = (releaseWorkflow.match(/--config electron-builder\.v0\.9\.1\.cjs/g) || []).length;
   const hotfixReadbackCount = (releaseWorkflow.match(/hotfix-build-config\.js "?--resources/g) || []).length;
   const contextReadbackCount = (releaseWorkflow.match(/context-poc-manifest\.js "?--resources/g) || []).length;
-  const requiredSessionSentence = 'v0.10 用鲸坞自己的会话数据目录，`~/.dsh` 不读不写不迁移，第一次进 AI 工作台可能要重新配一次模型。';
-  check('packaging: v0.10 三平台构建与全载体回读都经过 context-poc 包含校验门',
-    formalConfigUseCount === 3
+  const requiredIntroSentence = '这是 v0.11 项目工作台的预发布验收包，不是稳定版。项目成为一等对象，可绑定对话、从控制室查看需要处理的状态，并在三个布局预设的安全窗格中接收 Markdown 与 `widget-result.json` 产物。';
+  const requiredSessionSentence = '本版继续使用鲸坞自己的受管 dsh 目录，`~/.dsh` 不读、不写、不迁移、不清理。真实旧数据升级、真实 Agent 产物回流与五分钟连续手感仍需用户本人完成。';
+  const requiredWindowsSentence = 'Windows 仍为实验性支持（未签名、未真机验证）。';
+  check('packaging: v0.11 alpha 三平台构建与全载体回读都经过 context-poc 包含校验门',
+    alphaConfigUseCount === 3
       && legacyConfigUseCount === 0
       && hotfixReadbackCount === 0
       && contextReadbackCount >= 8
-      && publishStep.includes('同屏创作台把左边选内容、中间推进任务、右边交给 AI 执行放在一屏，执行结果会回到这条内容。')
+      && publishStep.includes('## v0.11.0-alpha.1 真机验收版')
+      && publishStep.includes(requiredIntroSentence)
       && publishStep.includes(requiredSessionSentence)
-      && publishStep.includes('Windows 仍为实验性支持（未真机验证）。')
-      && !publishStep.includes('本版不含 v0.10 实验功能')
+      && publishStep.includes(requiredWindowsSentence)
+      && publishStep.includes("prerelease: ${{ contains(github.ref_name, '-') }}")
       && resumeWorkflow.includes('context-poc-manifest.js --resources="$mount_dir/WhaleDock.app/Contents/Resources"')
       && !resumeWorkflow.includes('hotfix-build-config.js --resources=')
-      && resumeWorkflow.includes(requiredSessionSentence));
+      && resumeWorkflow.includes('## v0.11.0-alpha.1 真机验收版')
+      && resumeWorkflow.includes(requiredIntroSentence)
+      && resumeWorkflow.includes(requiredSessionSentence)
+      && resumeWorkflow.includes(requiredWindowsSentence)
+      && resumeWorkflow.includes("prerelease: ${{ contains(inputs.release_tag, '-') }}"));
+  check('packaging: v0.11 alpha tag 必须是 main 可达的注解 tag',
+    (releaseWorkflow.match(/Verify annotated tag is reachable from main/g) || []).length === 2
+      && releaseWorkflow.includes('git merge-base --is-ancestor "$tag_commit" origin/main')
+      && resumeWorkflow.includes('Verify source manifest and tag')
+      && resumeWorkflow.includes('Verify source Release run identity')
+      && resumeWorkflow.includes("path: '.github/workflows/release.yml'")
+      && resumeWorkflow.includes("event: 'push'")
+      && resumeWorkflow.includes('head_sha: process.env.EXPECTED_SHA')
+      && resumeWorkflow.includes('git merge-base --is-ancestor "$tag_commit" origin/main'));
+  check('packaging: v0.11 alpha macOS tag 发布缺签名或公证凭据即 fail-closed',
+    releaseWorkflow.includes('- name: Verify macOS release credentials are present')
+      && releaseWorkflow.includes('MACOS_RELEASE_CREDENTIALS_PRESENT')
+      && releaseWorkflow.includes('- name: Import required Developer ID certificate')
+      && submitStep.includes('Tagged macOS releases cannot skip notarization')
+      && notarizeStep.includes('Tagged macOS releases cannot skip notarization')
+      && !releaseWorkflow.includes('MACOS_SIGN_MODE=ad-hoc'));
   check('packaging: 发布仅下载 final macOS 与 Windows 成品，排除 pending 覆盖',
     publishStepOffset > 0
       && publishStep.includes('name: whaledock-mac-${{ github.ref_name }}')
@@ -1177,10 +1200,12 @@ async function main() {
   // v0.11 项目工作台：项目注册表与控制室状态镜像先以纯 Node 落地，再接界面。
   for (const [file, label] of [
     ['context-workspace-ops-smoke.js', '21 项 workspace operation 纯 Node 合同'],
-    ['project-ops-smoke.js', '8 项全局项目 operation 与两阶段打开'],
+    ['project-ops-smoke.js', '11 项全局项目 operation 与两阶段打开'],
     ['projects-smoke.js', '项目注册表、稳定身份与文件夹契约'],
     ['control-room-smoke.js', '控制室会话快照镜像与提醒 ack 生命周期'],
     ['project-layout-smoke.js', '项目窗格布局、预设与锁定窗格边界'],
+    ['project-terminal-smoke.js', '受限本机终端合同、输出清洗与环境白名单'],
+    ['project-detached-window-smoke.js', '分离窗静态文档、CSP 与恢复身份'],
     ['project-artifacts-smoke.js', '项目成果卡、安全预览与文件读取边界'],
     ['project-templates-smoke.js', '模板目录、初始化文件与动作契约'],
     ['project-migration-smoke.js', '零概念首次路径与一次性迁移标记'],

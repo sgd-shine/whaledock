@@ -106,7 +106,7 @@ async function mainTest() {
     assert.equal(layout.ensureTargetWindow(null, 4, 'grid-four').windows.length, 4);
   });
 
-  await test('paneState 接受六种受控内容，browser 只允许 http/https', () => {
+  await test('paneState 接受七种受控内容，terminal 无路径且 browser 只允许 http/https', () => {
     const state = mutable(layout.createPaneState('split-two'));
     const tabs = [
       { id: 'md', type: 'markdown', title: 'Markdown', path: 'a/readme.md' },
@@ -117,6 +117,7 @@ async function mainTest() {
         id: 'video', type: 'video-template', title: '短视频',
         templateId: 'builtin:短视频创作台'
       },
+      { id: 'terminal', type: 'terminal', title: '终端' },
       {
         id: 'artifact', type: 'artifact', title: '产物', descriptor: descriptor(1), locked: true
       }
@@ -134,6 +135,14 @@ async function mainTest() {
     }];
     invalid.windows[0].active = 'ftp';
     assert.throws(() => layout.validatePaneState(invalid),
+      assertCode(layout.ERROR_CODES.invalid));
+
+    const terminalWithPath = mutable(state);
+    terminalWithPath.windows[0].tabs = [{
+      id: 'terminal', type: 'terminal', title: '终端', path: '/private/project'
+    }];
+    terminalWithPath.windows[0].active = 'terminal';
+    assert.throws(() => layout.validatePaneState(terminalWithPath),
       assertCode(layout.ERROR_CODES.invalid));
   });
 
