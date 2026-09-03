@@ -9,17 +9,17 @@
 ## 当前状态（2026-09-02）
 
 - **公开稳定版是 [v0.10.0](https://github.com/sgd-shine/whaledock/releases/tag/v0.10.0)**：发版改动由 [PR #24](https://github.com/sgd-shine/whaledock/pull/24) 以 merge commit `1afcaa58` 进入 `main`，合并后 [main CI 33266635690](https://github.com/sgd-shine/whaledock/actions/runs/33266635690) 三平台全绿；[Release run 33266723269](https://github.com/sgd-shine/whaledock/actions/runs/33266723269) attempt 2 成功，公开 Release 为非 draft、非 prerelease，共 8 项资产（6 个安装产物 + 2 份校验和）。
-- **v0.11.0-alpha.1 是正在收口的真机验收候选，不是新的稳定版**：项目工作台批次 1–5 已完成源码实现；统一 smoke 实跑 **1054 PASS / 56 个 ALL PASS 标记**，context-poc 固定包为 **15 文件 / 1,063,154 B**，digest `9a820510e6c63518a813c3dcd2c783cb662caed265c43db634fd3f293bbaa247`。CI、签名/公证、安装与预发布上传仍需按各自证据回读后才能宣称完成。
+- **[v0.11.0-alpha.1](https://github.com/sgd-shine/whaledock/releases/tag/v0.11.0-alpha.1) 已发布并安装为真机验收候选，不是新的稳定版**：项目工作台批次 1–5 已完成；[PR #26](https://github.com/sgd-shine/whaledock/pull/26) 与发布 tag 修复 [PR #27](https://github.com/sgd-shine/whaledock/pull/27) 已合入，最终 [main CI 33700519175](https://github.com/sgd-shine/whaledock/actions/runs/33700519175) 全绿。[Release run 33700665122](https://github.com/sgd-shine/whaledock/actions/runs/33700665122) attempt 2 成功，公开页为非 draft、prerelease，共 8 项资产；`releases/latest` 仍指向 v0.10.0。
 - **批次 5 补齐项目级桌面能力**：终端由 Host 创建 PTY，以项目根为 cwd、只下发环境白名单，并用绑定项目/窗格/页面生命周期的能力令牌保护读写；页面不接收路径、环境、shell 或 pid。这个边界限制的是鲸坞接口，**不是操作系统文件系统或网络沙箱**，终端命令仍拥有当前登录用户本来就有的文件与网络权限。
 - **项目可搬、可换肤、可分离查看**：原生皮肤只投影七个数据化颜色值到鲸坞窗格；旁车只有用户明确点击后才写入 `.whaledock/project.json`，跨机器或搬家后可从旁车重新认领；分离窗使用受限本地窗口，不把任意网页或 HTML 当作可执行内容。
 - **控制室只显示脱敏近况**：recent 摘要来自 Host 已观察到的事件流，经过长度限制与路径、邮箱、URL、凭据形态脱敏；不读取 `face.history`，也不把完整对话历史交给页面。
 - **同屏创作台已进入正式版**：左边选内容、中间推进概览/脚本/拍摄/发布/复盘，右边交给 AI 执行，结果回到原内容。首次进入和从「对话记录」返回时会自动复用或打开对应会话；异常时才显示人话说明与可执行按钮。
 - **受管 dsh 数据与用户旧环境完全分开**：v0.10.0 使用鲸坞自己的 `userData/context-poc/v1/dsh-home`，跨后端、App 重启和工作区切换保留会话等数据；绝不读取、写入、迁移、覆盖或清理 `~/.dsh`。旧数据不会自动导入，首次进入 AI 工作台可能需要重新配置一次模型。
-- **发版前本地门全过**：统一 `npm run smoke` 实跑 **860 PASS / 44 个 ALL PASS**，context-poc 基线为 **15 个文件 / 810,828 B**，digest `16ffc4198355b93a1950965eece991d4b615d5005f63b3ab2da6933038496fb1`；两个 dsh UI fork 可从锁定的 `0.1.1-rc.2` 上游材料与精确 patch 重现。
-- **官方 macOS arm64 成品已安装并成功拉起**：回读日志为 `[2026-08-30T07:51:27.824Z] [app] 鲸坞 WhaleDock v0.10.0 启动 (darwin/arm64)`；安装体版本/架构、Developer ID Application、Hardened Runtime、严格验签与 Gatekeeper `Notarized Developer ID` 均通过。`Resources/context-poc` 精确回读上述 15 文件 digest；内置 dsh 与根 App runtime 两条成品合规 verifier 均通过，App runtime 为 `52 packages / 449 files`。
-- **公证票据证据分开记录**：公开 arm64 DMG 通过 `stapler validate`，有离线公证票据；拖入 `/Applications` 后的裸 `.app` 本体没有独立 stapled ticket，但 Gatekeeper 仍接受为 `Notarized Developer ID`。二者不互相代替。
-- **安装可见性尚有人工门**：文件系统直接回读 `/Applications` 只有一个正式 `WhaleDock.app`；但 Spotlight 当前对整个 `/Applications` 都没有索引结果，不能据此宣称“Spotlight 唯一”，LaunchServices 还对外置证据归档保留 1 项残留登记。系统「应用程序」界面仍需 SGD 亲手确认，记为 `NEEDS-HUMAN`。
-- **证据边界不变**：Windows x64 仍是未签名、未真机验证的实验性支持；x64 macOS 的云端构建/签名/公证和历史 Rosetta 抽查都不是 Intel 真机证据。正式 v0.10.0 的完整 GUI 手感、真实模型、钥匙串/TCC 及其他人工项仍需分别验收；源码 smoke、CI、安装与进程级启动不替代这些证据。
+- **v0.11.0-alpha.1 发版门全过**：统一 `npm run smoke` 实跑 **1054 PASS / 56 个 ALL PASS 标记**；context-poc 为 **15 文件 / 1,063,154 B**，digest `9a820510e6c63518a813c3dcd2c783cb662caed265c43db634fd3f293bbaa247`。arm64/x64 四项 Apple submission 全部 `Accepted`，两份 DMG 完成 staple/validate；Windows Setup 与 portable 的打包、inventory 和载体回读也全部通过。
+- **当前 `/Applications/WhaleDock.app` 是官方 macOS arm64 alpha 成品**：安装体回读 `0.11.0-alpha.1 / arm64`，日志为 `[2026-09-03T01:02:09.087Z] [app] 鲸坞 WhaleDock v0.11.0-alpha.1 启动 (darwin/arm64)`；Developer ID、Hardened Runtime、严格验签、Gatekeeper `Notarized Developer ID`、context、内置 dsh 与根 App runtime 两条成品合规 verifier 均通过。App / dsh runtime 为 `603,288 / 286,668 KiB`，成品 App runtime 为 `52 packages / 449 files`。
+- **公证票据证据分开记录**：公开 alpha arm64 DMG 通过 `stapler validate`，有离线公证票据；安装后的裸 `.app` 由 Gatekeeper 接受为 `Notarized Developer ID`。不把 DMG 票据、App 验签与 Gatekeeper 接受混成同一项证据。
+- **安装可见性尚有人工门**：文件系统直接回读 `/Applications` 只有一个正式 `WhaleDock.app`，Spotlight bundle-id 查询也只返回该安装体；LaunchServices dump 仍含已卸载临时挂载点或历史版本的陈旧登记，不能据此宣称系统层完全去重。系统「应用程序」界面仍需 SGD 亲手确认，记为 `NEEDS-HUMAN`。
+- **证据边界不变**：安装 alpha 已回读项目抽屉、控制室、双栏、模板动作、显式旁车/认领入口，并实跑项目终端 `pwd` 后关闭；这仍不替代 SGD 的双项目 need 卡、真实 Agent 回流、真实 v0.10 数据升级、皮肤/分离窗/recent 完整手感。Windows x64 仍是未签名、未真机验证的实验性支持；x64 云端签名/公证也不是 Intel 真机证据，真实模型、钥匙串/TCC 与系统 App 界面继续单列。
 
 ## v0.2 带来了什么
 

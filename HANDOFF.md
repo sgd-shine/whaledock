@@ -1,6 +1,6 @@
-# HANDOFF.md — WhaleDock v0.10.0 发布收口与 v0.11 alpha 当前交接
+# HANDOFF.md — WhaleDock v0.11.0-alpha.1 发布安装收口与真机交接
 
-更新：2026-09-02 · SGD 已拍板 v0.11 路线 B 与 Q1–Q5，并授权批次 5、安装和上传；批次 1–5 源码实现已完成，`v0.11.0-alpha.1` 的回归、CI、签名/公证、安装与预发布上传须继续分层回读
+更新：2026-09-02 · SGD 已拍板 v0.11 路线 B 与 Q1–Q5，并授权批次 5、安装和上传；批次 1–5、三平台 CI、双架构 macOS 签名/公证、8 项 prerelease 资产与官方 arm64 安装启动均已分层回读，现交给 SGD 做真实项目与完整手感验收
 
 ## v0.11 批次 0（2026-09-02，Claude）：标杆审计与项目/控制室地基
 
@@ -20,13 +20,18 @@
 - 全量 `npm run smoke` 实跑 **1007 PASS / 55 个 ALL PASS 标记**，末行 `ALL PASS`；定向回归为 plugin 28、main v0.11 25、project ops 22、projects 17、P0B 21、backend context 19。context 固定包为 **15 文件 / 998,730 B**，digest `4120ef87ecf588829de06b9424c1f7f89d9526148504fb43609a9c5a749db8b5`。App runtime 合规仍为 52 包 / 830 文件，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`。
 - 隔离源码 UI 证据位于 `docs/验收证据-v0.11-项目工作台-2026-09-02/`，完整记录为 `docs/验收记录-v0.11-项目工作台-批次1至4-2026-09-02.md`；两者均命中 `.git/info/exclude`。本批没有构建 v0.11 包、没有触碰正式安装、没有推送/PR/tag/Release，也没有程序化录屏；3 张 PNG 不能代替方案要求的 PR/录屏或 SGD 人工验收。
 
-## v0.11 批次 5（2026-09-02，Codex）：源码实现完成，alpha 发布链收口中
+## v0.11 批次 5（2026-09-02，Codex）：源码、预发布与本机安装已收口
 
 - **终端窗格**：PTY 只由 Host 创建，以 Host 回读的项目根为 cwd，只传入环境白名单；open/read/write/SIGINT/close 使用与项目、窗格、Host、控制器、页面、选择和后端代次绑定的能力令牌，并在每次操作时重新校验。页面不接收 cwd、绝对路径、环境、shell 或 pid，输出先清控制序列再按私有缓冲上限分页。该接口不是 OS 文件系统或网络沙箱，命令仍能使用当前登录用户原有权限。
 - **皮肤、旁车和跨机认领**：模板皮肤只把七个受校验的颜色值投影到鲸坞窗格，不执行包内代码；registry 继续是默认身份源，只有用户显式点击才写 `.whaledock/project.json`，旁车仅保存项目身份、名称、图标和模板，不含对话或绝对路径；选择已有文件夹后可按旁车 id 重新认领。
 - **受限分离窗**：Markdown、文本、图片、浏览器地址等窗格可从当前项目分离查看；子窗保持 sandbox/context isolation、拒绝导航/弹窗/下载/权限和任意网络，HTML 只按文本显示，图片只接受校验过头部的 PNG/JPEG data URL。终端不以静态分离窗伪装成可交互终端。
 - **控制室 recent 摘要**：近况来自 Host 已观察的用户/助手事件流，先做控制字符、URL、邮箱、路径、凭据形态与长度脱敏，再随控制室安全快照下发；不调用 `face.history`，不把完整历史交给页面。
-- 源码版本已准备为 `0.11.0-alpha.1`，定位是给 SGD 真机验收的 prerelease；不得提前写成新的 `releases/latest` 或稳定版。当前文档不把尚未完成的 CI、签名、公证、正式安装替换和公开预发布上传记为通过。
+- **合并与 CI**：[PR #26](https://github.com/sgd-shine/whaledock/pull/26) 以 merge commit `316bd547dd96236db8d137d27b737517fdde0a98` 合入批次 5，最终 PR CI [33699851931](https://github.com/sgd-shine/whaledock/actions/runs/33699851931) 与合并后 main CI [33700001445](https://github.com/sgd-shine/whaledock/actions/runs/33700001445) 全绿。注解 tag 校验修复 [PR #27](https://github.com/sgd-shine/whaledock/pull/27) 合入 `main@8c3d8d5e93bae1e45c6de07dc926ba02b1c606b0`，PR CI [33700371840](https://github.com/sgd-shine/whaledock/actions/runs/33700371840) 与最终 main CI [33700519175](https://github.com/sgd-shine/whaledock/actions/runs/33700519175) 全绿。
+- **tag 与发布**：注解 tag `v0.11.0-alpha.1` 的 tag object 为 `a9db6cc25145b7760f440736fd2a658f0cc07ba6`，解引用到 `8c3d8d5e93bae1e45c6de07dc926ba02b1c606b0`。[Release run 33700665122](https://github.com/sgd-shine/whaledock/actions/runs/33700665122) 首轮 macOS/Windows build 成功、publish 按设计被空审批门阻止；精确发布集哈希 `b0df3fc33a65da703a401620091ae2f9575f71729e68ccc7fee760a497911e29` 本机复核后，attempt 2 的 [publish job 100482588862](https://github.com/sgd-shine/whaledock/actions/runs/33700665122/job/100482588862) 成功。审批变量随即删除，仓库变量回读为 0。
+- **公开状态与资产**：[v0.11.0-alpha.1 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.11.0-alpha.1) 为非 draft、prerelease，共 8 项资产；`releases/latest` 仍是 v0.10.0。arm64 DMG/ZIP 为 177,004,978 / 195,261,163 B，x64 DMG/ZIP 为 181,869,163 / 200,176,876 B，Windows Setup/portable 为 153,061,247 / 152,873,384 B；两份 checksum 为 408 / 207 B。六个安装产物的本机 SHA-256 与公开 Release digest 全部一致。
+- **签名、公证与成品合规**：arm64/x64 四项 Apple submission 全部 `Accepted`；两份 DMG 均完成 staple/validate，挂载 App 均由 Gatekeeper 接受为 `Notarized Developer ID`。每种成品载体再次通过 context、dsh 与 App runtime 回读；成品 App runtime 为 `52 packages / 449 files`，tree `b363e6c80bca9296e566e0accae30143e6ce02dc53a660ec706bf8c9cfac1d02`。
+- **官方 arm64 安装**：公开成品已安装到 `/Applications/WhaleDock.app`，回读 `0.11.0-alpha.1 / arm64`、Developer ID `CS4NK76DA5`、Hardened Runtime、严格验签与 Gatekeeper 全过；App / dsh runtime 为 `603,288 / 286,668 KiB`，`app.asar` 为 20,161,070 B、SHA-256 `cfd2fa3c80a549e751f368601044c319f574ca75177205ff23411456187e0001`。启动日志为 `[2026-09-03T01:02:09.087Z] [app] 鲸坞 WhaleDock v0.11.0-alpha.1 启动 (darwin/arm64)`，主进程与内置 dsh 均来自正式安装体。
+- **安装 GUI 基线**：可访问性树和截图回读项目抽屉、控制室、双栏、模板动作、右侧原生对话及显式“旁车/认领”入口。终端可见边界文案准确，实跑 `pwd` 返回项目根 `/Users/shine/Documents/鲸坞工作台/电商客服`，关闭后状态为“已关闭”；没有写旁车、没有发送模型消息。`/Applications` 文件系统盘点只有一个正式鲸坞，系统 App 界面仍保留人工门。
 - 批次 5 加入后的统一 `npm run smoke` 实跑 **1054 PASS / 56 个 ALL PASS 标记**，末行 `ALL PASS`；context-poc 固定包为 **15 文件 / 1,063,154 B**，digest `9a820510e6c63518a813c3dcd2c783cb662caed265c43db634fd3f293bbaa247`。App runtime 合规为 52 包 / 830 文件，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`。
 
 ## v0.10.0 已公开发布与本机收口
@@ -46,21 +51,21 @@
 - Batch 1c 的四步 alpha 卡已由 SGD 回复通过；v0.9.1 到 v0.10.0 的线上更新提醒也已由 SGD 亲手点击通过。二者都不能外推成真实模型或正式版完整手感通过。
 - Windows 仍只有 CI、公开资产与自动校验，安装器未签名且未做真机。macOS x64 的签名、公证与成品校验不等于 Intel 真机；历史 Apple Silicon + Rosetta 证据也不能代替。
 - 正式 v0.10.0 尚未用真实模型完成整条创作链；完整视觉、滚动、长时间操作、真实会话与整体手感仍待人工。系统 App 界面唯一可见性也因上述索引边界保持 **NEEDS-HUMAN**。
-- 后续功能从当前 main 新开独立 v0.11 分支；不得回到 v0.9.x，也不得在清理批次前擅自删除旧 worktree、已合并分支或 `docs/_to_delete/`。
+- 后续功能从当前 main 新开独立分支；不得回到 v0.9.x，也不得在清理批次前擅自删除旧 worktree、已合并分支或 `docs/_to_delete/`。
 
 ## v0.11 剩余人工与授权闸门
 
 1. 批次 2：SGD 用安装 alpha 建两个真实项目并分别绑定对话，制造一次 need 状态，确认黄灯、点卡切换与五分钟手感。
 2. 批次 3：真实 Agent 在项目根生成 Markdown 与 `widget-result.json`，确认产物自动回到指定「窗口N」。
 3. 批次 4：用真实 v0.10.0 用户数据升级，回读原短视频工作区只迁成一个项目且旧配置未被改写。
-4. 批次 5 已获 SGD 授权并完成源码实现；仍需在安装 alpha 中检查终端边界、旁车显式写入/重新认领、原生皮肤、受限分离窗和控制室 recent 摘要的实际可见行为。
-5. Windows/Intel 真机、真实模型、钥匙串/TCC 与系统 App 界面仍是独立 `NEEDS-HUMAN`；CI、签名/公证、安装与 prerelease 上传也必须以本次真实回读为准，不能由源码 smoke 或隔离 UI 代替。
+4. 批次 5 的安装基线已回读终端边界、项目根 `pwd`、关闭生命周期与显式旁车/认领入口；仍需 SGD 亲手验证旁车写入/重新认领、七色皮肤、受限分离窗、控制室 recent 摘要及连续操作手感。
+5. Windows/Intel 真机、真实模型、钥匙串/TCC 与系统 App 界面仍是独立 `NEEDS-HUMAN`；当前 CI、签名/公证、安装与 prerelease 上传已经闭环，但不能外推上述人工项。
 
 ## v0.9.1 历史恢复与更新提醒基线
 
 - PR [#18](https://github.com/sgd-shine/whaledock/pull/18) 已合入 `main@670e32c1abd45f5cb355dfd6e6eeaa9ee18ff27c`；[main CI 32869008546](https://github.com/sgd-shine/whaledock/actions/runs/32869008546) 三平台全绿。
 - [Release run 32869263514](https://github.com/sgd-shine/whaledock/actions/runs/32869263514) attempt 2 成功；[v0.9.1 Release](https://github.com/sgd-shine/whaledock/releases/tag/v0.9.1) 为非 draft、非 prerelease，共 8 项资产。macOS arm64 DMG/ZIP 为 176,646,943 / 194,888,771 B，x64 为 181,493,987 / 199,804,430 B，Windows Setup/portable 为 152,772,664 / 152,584,811 B。
-- 官方 v0.9.1 arm64 此前已完成安装回读，并保留本地 ZIP/DMG 与 no-index App 恢复副本；它已用于真实点击「立即检查」并由日志确认发现 v0.10.0。当前 `/Applications/WhaleDock.app` 是官方 v0.10.0 arm64 正式版，v0.9.1 不再是公开稳定入口。
+- 官方 v0.9.1 arm64 此前已完成安装回读，并保留本地 ZIP/DMG 与 no-index App 恢复副本；它已用于真实点击「立即检查」并由日志确认发现 v0.10.0。当前 `/Applications/WhaleDock.app` 是官方 v0.11.0-alpha.1 arm64 验收候选；公开稳定入口仍为 v0.10.0。
 
 ## v0.10 前置 P1 已合入历史
 
