@@ -27,7 +27,7 @@
 - **受限分离窗**：Markdown、文本、图片、浏览器地址等窗格可从当前项目分离查看；子窗保持 sandbox/context isolation、拒绝导航/弹窗/下载/权限和任意网络，HTML 只按文本显示，图片只接受校验过头部的 PNG/JPEG data URL。终端不以静态分离窗伪装成可交互终端。
 - **控制室 recent 摘要**：近况来自 Host 已观察的用户/助手事件流，先做控制字符、URL、邮箱、路径、凭据形态与长度脱敏，再随控制室安全快照下发；不调用 `face.history`，不把完整历史交给页面。
 - 源码版本已准备为 `0.11.0-alpha.1`，定位是给 SGD 真机验收的 prerelease；不得提前写成新的 `releases/latest` 或稳定版。当前文档不把尚未完成的 CI、签名、公证、正式安装替换和公开预发布上传记为通过。
-- 批次 5 加入后的统一 `npm run smoke` 实跑 **1054 PASS / 56 个 ALL PASS 标记**，末行 `ALL PASS`；context-poc 固定包为 **15 文件 / 1,062,446 B**，digest `a486c9008d9d871d5ddf05dd9778de3256e706a47116326cb55c715af7921f0b`。App runtime 合规为 52 包 / 830 文件，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`。
+- 批次 5 加入后的统一 `npm run smoke` 实跑 **1054 PASS / 56 个 ALL PASS 标记**，末行 `ALL PASS`；context-poc 固定包为 **15 文件 / 1,063,154 B**，digest `9a820510e6c63518a813c3dcd2c783cb662caed265c43db634fd3f293bbaa247`。App runtime 合规为 52 包 / 830 文件，closure `667da495556a76100d4a0530a3ce655882ae3fedf37548436aa3f30c8a522dc6`。
 
 ## v0.10.0 已公开发布与本机收口
 

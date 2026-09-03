@@ -228,7 +228,9 @@ function canonicalSessionRoot(value) {
 function projectTerminalRootIdentity(root) {
   if (typeof root !== 'string' || !root) return null;
   try {
-    const stat = statSync(root);
+    // Windows 的 64-bit file index 可超出 Number 的安全整数范围。
+    // 终端代际绑定必须保留完整 dev/ino，不能因平台精度退化为 unavailable。
+    const stat = statSync(root, { bigint: true });
     if (!stat?.isDirectory()) return null;
     const field = (value) => {
       if (typeof value === 'bigint') return value >= 0n ? String(value) : null;
@@ -238,6 +240,13 @@ function projectTerminalRootIdentity(root) {
     const ino = field(stat.ino);
     return dev === null || ino === null ? null : `${dev}:${ino}`;
   } catch (_error) { return null; }
+}
+
+function sameProjectTerminalPath(left, right) {
+  if (typeof left !== 'string' || typeof right !== 'string') return false;
+  return process.platform === 'win32'
+    ? left.toLocaleLowerCase('en-US') === right.toLocaleLowerCase('en-US')
+    : left === right;
 }
 
 function projectTerminalRootGeneration(secret, hostInstanceId, root, identity) {
@@ -412,9 +421,11 @@ function createProjectTerminalHome() {
     const resolver = typeof realpathSync.native === 'function' ? realpathSync.native : realpathSync;
     const parent = resolver(tmpdir());
     created = mkdtempSync(path.join(parent, PROJECT_TERMINAL_HOME_PREFIX));
-    chmodSync(created, 0o700);
+    // chmod 在 Windows 上不表示 POSIX 权限，且部分 NTFS/runner 会拒绝
+    // 0700；此处依赖当前用户 TEMP 的 ACL，只在 POSIX 上收紧 mode。
+    if (process.platform !== 'win32') chmodSync(created, 0o700);
     const canonical = resolver(created);
-    if (path.dirname(canonical) !== parent
+    if (!sameProjectTerminalPath(path.dirname(canonical), parent)
         || !path.basename(canonical).startsWith(PROJECT_TERMINAL_HOME_PREFIX)) {
       throw new Error('terminal home escaped private parent');
     }
@@ -429,7 +440,7 @@ function createProjectTerminalHome() {
 
 function removeProjectTerminalHome(home) {
   if (!home || typeof home.path !== 'string' || typeof home.parent !== 'string'
-      || path.dirname(home.path) !== home.parent
+      || !sameProjectTerminalPath(path.dirname(home.path), home.parent)
       || !path.basename(home.path).startsWith(PROJECT_TERMINAL_HOME_PREFIX)) return false;
   try {
     rmSync(home.path, { recursive: true, force: true });

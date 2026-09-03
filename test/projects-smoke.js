@@ -289,10 +289,13 @@ async function main() {
 
     // 复制旁车不能在旧项目根仍有效时静默劫持同一个项目 id。
     const copiedFolder = mkdir(path.join(tmp, 'work', '旅行图鉴-复制旁车'));
-    fs.cpSync(
-      path.join(folderA, projects.MANIFEST_DIRNAME),
-      path.join(copiedFolder, projects.MANIFEST_DIRNAME),
-      { recursive: true }
+    const copiedSidecar = mkdir(path.join(copiedFolder, projects.MANIFEST_DIRNAME));
+    // Node 22.17+ 的 Windows cpSync 目录原生 fast path 遇到文件系统错误时
+    // 可能直接以 0xC0000409 终止进程，无法由测试捕获。这里要模拟的事实只是
+    // “同一份合法旁车被复制到另一项目根”，逐文件复制也避免意外跟随目录链接。
+    fs.copyFileSync(
+      path.join(folderA, projects.MANIFEST_DIRNAME, projects.MANIFEST_FILENAME),
+      path.join(copiedSidecar, projects.MANIFEST_FILENAME)
     );
     assert.throws(
       () => store.adoptFolder(copiedFolder),

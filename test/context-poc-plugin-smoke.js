@@ -139,6 +139,12 @@ async function main() {
     assert.match(pluginClient, /function creatorProjects/);
     assert.match(pluginClient, /archivedSessionIds/);
     assert.doesNotMatch(pluginClient, /const STAGE_COPY = new Map/);
+    assert.match(pluginHost, /statSync\(root, \{ bigint: true \}\)/,
+      'Windows 64-bit file identity 不得因 Number 精度让终端退化为 unavailable');
+    assert.match(pluginHost, /if \(process\.platform !== 'win32'\) chmodSync\(created, 0o700\)/,
+      'Windows 私有 TEMP 依赖 ACL，不得强行 POSIX chmod');
+    assert.match(pluginHost, /sameProjectTerminalPath\(path\.dirname\(canonical\), parent\)/,
+      'Windows realpath 大小写差异不得误判逃离私有 TEMP');
     const workspaceOperations = [
       'catalog.read', 'overview.read', 'document.read', 'topic.choose',
       'project.action.prepare', 'project.action.submit',

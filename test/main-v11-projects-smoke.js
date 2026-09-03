@@ -822,9 +822,15 @@ async function run() {
           selectionRevision: 9
         }
       };
+      // main 与真实 Host 都优先用 native realpath；Windows 上不能用
+      // fs.realpathSync 的另一种路径表示伪造 Host proof 作为对照。
+      const realpath = typeof fs.realpathSync.native === 'function'
+        ? fs.realpathSync.native : fs.realpathSync;
+      const canonicalFolderA = projectRootRef.canonicalRootKey(realpath(folderA));
+      const canonicalFolderB = projectRootRef.canonicalRootKey(realpath(folderB));
       const mainProof = main.contextPocProjectSessionRootRef(runtime, projectA.id);
       const hostProof = projectRootRef.sessionRootRef(
-        secret, hostInstanceId, fs.realpathSync(folderA)
+        secret, hostInstanceId, canonicalFolderA
       );
       assert.equal(mainProof, hostProof);
       assert.equal(JSON.stringify({ mainProof }).includes(folderA), false);
@@ -855,7 +861,7 @@ async function run() {
         projectId: projectA.id,
         openToken
       }, { now: () => 1234 });
-      assert.equal(openedTicket.root, fs.realpathSync(folderA));
+      assert.equal(projectRootRef.canonicalRootKey(openedTicket.root), canonicalFolderA);
 
       let wakes = 0;
       const wakeBridge = () => { wakes += 1; return false; };
@@ -864,7 +870,7 @@ async function run() {
       const snapshotA = main.currentVideoWorkspaceSnapshot();
       const identityA = main.currentContextPocWorkspaceIdentity();
       const contextA = main.currentContextPocProject(identityA);
-      assert.equal(locationA.root, fs.realpathSync(folderA));
+      assert.equal(projectRootRef.canonicalRootKey(locationA.root), canonicalFolderA);
       assert.equal(locationA.generation, openedA.generation);
       assert.equal(snapshotA.status, 'ready');
       assert.equal(snapshotA.generation, openedA.generation);
@@ -905,7 +911,7 @@ async function run() {
       const snapshotB = main.currentVideoWorkspaceSnapshot();
       const identityB = main.currentContextPocWorkspaceIdentity();
       const contextB = main.currentContextPocProject(identityB);
-      assert.equal(locationB.root, fs.realpathSync(folderB));
+      assert.equal(projectRootRef.canonicalRootKey(locationB.root), canonicalFolderB);
       assert.equal(locationB.generation, openedB.generation);
       assert(openedB.generation > openedA.generation);
       assert.equal(snapshotB.status, 'ready');

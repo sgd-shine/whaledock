@@ -21,10 +21,12 @@ const secretA = 'ab'.repeat(32);
 const secretB = 'cd'.repeat(32);
 const hostA = 'host-project-root-0001';
 const hostB = 'host-project-root-0002';
+const POSIX_OPTIONS = Object.freeze({ platform: 'linux', pathImpl: path.posix });
 
 test('POSIX canonical root 字面归一', () => {
-  assert.equal(rootRef.canonicalRootKey('/tmp/project/../project'), '/tmp/project');
-  assert.match(rootRef.sessionRootRef(secretA, hostA, '/tmp/project'),
+  assert.equal(rootRef.canonicalRootKey('/tmp/project/../project', POSIX_OPTIONS),
+    '/tmp/project');
+  assert.match(rootRef.sessionRootRef(secretA, hostA, '/tmp/project', POSIX_OPTIONS),
     rootRef.SESSION_ROOT_REF_RE);
 });
 
