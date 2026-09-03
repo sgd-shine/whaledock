@@ -36,6 +36,9 @@ jobs:
       - name: Verify annotated tag is reachable from main
         shell: bash
         run: |
+          # actions/checkout 会在 tag 事件里把本地同名 ref 重写为已剥离 commit；
+          # 必须从远端精确取回 tag object，才能真实区分 annotated/lightweight。
+          git fetch --force --no-tags origin "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           if [[ "$(git cat-file -t "$GITHUB_REF")" != "tag" ]]; then
             echo "::error title=Annotated release tag required::$GITHUB_REF_NAME is not an annotated tag"
@@ -482,6 +485,9 @@ jobs:
       - name: Verify annotated tag is reachable from main
         shell: bash
         run: |
+          # actions/checkout 会在 tag 事件里把本地同名 ref 重写为已剥离 commit；
+          # 必须从远端精确取回 tag object，才能真实区分 annotated/lightweight。
+          git fetch --force --no-tags origin "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           if [[ "$(git cat-file -t "$GITHUB_REF")" != "tag" ]]; then
             echo "::error title=Annotated release tag required::$GITHUB_REF_NAME is not an annotated tag"

@@ -49,6 +49,12 @@ jobs:
             echo "::error title=Invalid release tag::$RELEASE_TAG"
             exit 1
           fi
+          # checkout(ref: tag) 同样会把本地 ref 剥离到 commit；显式恢复远端 tag object。
+          git fetch --force --no-tags origin "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          if [[ "$(git cat-file -t "refs/tags/$RELEASE_TAG")" != "tag" ]]; then
+            echo "::error title=Annotated release tag required::$RELEASE_TAG is not an annotated tag"
+            exit 1
+          fi
           expected_sha="$(git rev-parse "refs/tags/$RELEASE_TAG^{}")"
           export EXPECTED_SHA="$expected_sha"
           run_json="$RUNNER_TEMP/whaledock-source-run.json"
