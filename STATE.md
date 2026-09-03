@@ -28,7 +28,7 @@
 - macOS arm64/x64 的四项 Apple submission 均为 `Accepted`；两份 DMG 均完成 staple/validate，挂载 App 由 Gatekeeper 接受。DMG 有公证票据；正式安装后的裸 `/Applications/WhaleDock.app` 没有独立 stapled ticket，但 Gatekeeper 仍接受，二者不混写。
 - 正式版本地统一 `npm run smoke` 为 **860 PASS / 44 个 ALL PASS**，末行 `ALL PASS`。固定 context 资产仍为 **15 个文件 / 810,828 B**，digest `16ffc4198355b93a1950965eece991d4b615d5005f63b3ab2da6933038496fb1`；refork 差异仍为布局 `42+/5-`、对话 `19+/3-`，双源码合规链与成品 verifier 均通过。Batch 1c 的 **856 PASS / 44 个 ALL PASS** 是 alpha 历史值，不与正式版本次混写。
 - v0.10.0 的历史正式安装证据为：官方 arm64 公共 DMG 曾安装并回读版本/arm64、启动、Developer ID、Hardened Runtime、Gatekeeper、15 文件 context digest、内置 dsh 与根 App 两条成品合规链；当时 App / dsh runtime 为 `602,740 / 286,668 KiB`，`app.asar` SHA-256 为 `959947422e04f65fc237c7978471f2b62b541ae97bc92b731fcd4e2de1cf8e6f`。当前正式安装位置已经替换为上述 v0.11.0-alpha.1 验收候选。
-- 唯一安装边界保持分列：`/Applications` 文件系统顶层只有一个正式 `WhaleDock.app`；当前整个 `/Applications` 无法由 `mdls` 建立索引，LaunchServices 仍保留一条位于外置 no-index 证据归档的旧登记，注销返回 `-10814`。因此不能写成 Spotlight/LaunchServices 已完全清零，系统 App 界面的唯一可见性仍为 **NEEDS-HUMAN**。
+- 唯一安装边界保持分列：`/Applications` 文件系统顶层只有一个正式 `WhaleDock.app`，当前 Spotlight bundle-id 查询也只返回该安装体；LaunchServices dump 仍含已卸载临时挂载点或历史版本的陈旧登记。因此不能写成 LaunchServices 已完全清零，系统 App 界面的唯一可见性仍为 **NEEDS-HUMAN**。
 - SGD 已在官方 v0.9.1 中亲手点击「立即检查」并回复通过；日志于 `2026-08-30T06:11:52.320Z` 回读发现新版本 `0.10.0`。当次提示框截图没有留存，不得写成已有截图证据。
 - Batch 1c 的四步 alpha 人工卡此前已通过；内容态只认工作台当前工作区，首次进入、从「对话记录」返回或目标路径变化时自动复用/创建根会话，异常时保留人话兜底。受管数据根继续固定为 WhaleDock-owned `userData/context-poc/v1/dsh-home`；`~/.dsh` 不读、不写、不迁移、不清理，也不自动导入，首次使用可能需要重新配置模型。
 - 真实内置 rc.2 的双冷启动持久性证据仍为 `RC2_PERSISTENCE_PASS`，但这不等于真实模型回复通过。Windows 仍只有 CI/构建与公开资产证据，未签名且未做真机；x64 的签名/公证不等于 Intel 真机；v0.11 alpha 的完整视觉、滚动、长时间操作与真实会话手感仍需 SGD 另行验收。

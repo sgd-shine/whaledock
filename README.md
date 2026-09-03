@@ -18,7 +18,7 @@
 - **v0.11.0-alpha.1 发版门全过**：统一 `npm run smoke` 实跑 **1054 PASS / 56 个 ALL PASS 标记**；context-poc 为 **15 文件 / 1,063,154 B**，digest `9a820510e6c63518a813c3dcd2c783cb662caed265c43db634fd3f293bbaa247`。arm64/x64 四项 Apple submission 全部 `Accepted`，两份 DMG 完成 staple/validate；Windows Setup 与 portable 的打包、inventory 和载体回读也全部通过。
 - **当前 `/Applications/WhaleDock.app` 是官方 macOS arm64 alpha 成品**：安装体回读 `0.11.0-alpha.1 / arm64`，日志为 `[2026-09-03T01:02:09.087Z] [app] 鲸坞 WhaleDock v0.11.0-alpha.1 启动 (darwin/arm64)`；Developer ID、Hardened Runtime、严格验签、Gatekeeper `Notarized Developer ID`、context、内置 dsh 与根 App runtime 两条成品合规 verifier 均通过。App / dsh runtime 为 `603,288 / 286,668 KiB`，成品 App runtime 为 `52 packages / 449 files`。
 - **公证票据证据分开记录**：公开 alpha arm64 DMG 通过 `stapler validate`，有离线公证票据；安装后的裸 `.app` 由 Gatekeeper 接受为 `Notarized Developer ID`。不把 DMG 票据、App 验签与 Gatekeeper 接受混成同一项证据。
-- **安装可见性尚有人工门**：文件系统直接回读 `/Applications` 只有一个正式 `WhaleDock.app`；但 Spotlight 当前对整个 `/Applications` 都没有索引结果，不能据此宣称“Spotlight 唯一”，LaunchServices 还对外置证据归档保留 1 项残留登记。系统「应用程序」界面仍需 SGD 亲手确认，记为 `NEEDS-HUMAN`。
+- **安装可见性尚有人工门**：文件系统直接回读 `/Applications` 只有一个正式 `WhaleDock.app`，Spotlight bundle-id 查询也只返回该安装体；LaunchServices dump 仍含已卸载临时挂载点或历史版本的陈旧登记，不能据此宣称系统层完全去重。系统「应用程序」界面仍需 SGD 亲手确认，记为 `NEEDS-HUMAN`。
 - **证据边界不变**：安装 alpha 已回读项目抽屉、控制室、双栏、模板动作、显式旁车/认领入口，并实跑项目终端 `pwd` 后关闭；这仍不替代 SGD 的双项目 need 卡、真实 Agent 回流、真实 v0.10 数据升级、皮肤/分离窗/recent 完整手感。Windows x64 仍是未签名、未真机验证的实验性支持；x64 云端签名/公证也不是 Intel 真机证据，真实模型、钥匙串/TCC 与系统 App 界面继续单列。
 
 ## v0.2 带来了什么
