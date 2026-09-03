@@ -2611,7 +2611,10 @@ async function main() {
       assert.equal(first.value.page.contentType, 'text/plain');
       assert.equal(/cwd|root|path|env|shell|pid/i.test(JSON.stringify(first.value)), false,
         '公开绑定不得暴露 Host 路径或进程信息');
-      assert.equal(specs[0].cwd, fs.realpathSync(roots[0]));
+      const rootResolver = typeof fs.realpathSync.native === 'function'
+        ? fs.realpathSync.native : fs.realpathSync;
+      assert.equal(specs[0].cwd,
+        projectRootRef.canonicalRootKey(rootResolver(roots[0])));
       assert.notEqual(specs[0].env.HOME, roots[0], 'HOME 不得污染项目根');
       assert.equal(specs[0].env.HOME, specs[0].env.TMPDIR || specs[0].env.TEMP);
       assert.equal(Object.prototype.hasOwnProperty.call(
