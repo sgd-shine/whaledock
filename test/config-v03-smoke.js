@@ -162,6 +162,32 @@ try {
     }
   });
 
+  test('config: 项目迁移 marker 是严格 durable once 内部字段', () => {
+    const dir = path.join(tmp, 'project-migration-marker');
+    const defaults = config.init(dir);
+    assert.strictEqual(defaults.projectMigrationVersion, 0);
+    assert(!config.SETTINGS_FIELDS.has('projectMigrationVersion'));
+    assertThrowsField(() => config.validateSettingsPatch({
+      projectMigrationVersion: 1
+    }), 'projectMigrationVersion');
+    for (const invalid of [-1, 2, true, '1', null]) {
+      assertThrowsField(() => config.set({ projectMigrationVersion: invalid }),
+        'projectMigrationVersion');
+    }
+    config.set({ projectMigrationVersion: 1 });
+    assert.strictEqual(config.init(dir).projectMigrationVersion, 1);
+    const persisted = JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'));
+    assert.strictEqual(persisted.projectMigrationVersion, 1);
+
+    const legacy = path.join(tmp, 'project-migration-invalid-marker');
+    fs.mkdirSync(legacy, { recursive: true });
+    fs.writeFileSync(path.join(legacy, 'config.json'), JSON.stringify({
+      workdir: null, workbenchId: null, projectMigrationVersion: 2
+    }));
+    assert.strictEqual(config.init(legacy).projectMigrationVersion, 0,
+      '非法旧 marker 只回落默认，不伪造已迁移');
+  });
+
   test('config/settings: v0.10 只公开内容视图枚举，提示记忆保持内部', () => {
     const dir = path.join(tmp, 'v10-content-preferences');
     fs.mkdirSync(dir, { recursive: true });

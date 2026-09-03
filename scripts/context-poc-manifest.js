@@ -1,7 +1,7 @@
 'use strict';
 
 // v0.10 context-poc 的固定信任根生成与校验器。构建流程只允许调用
-// assertCommittedBaseline() 对账；本脚本没有写文件模式，避免构建时自动 bless。
+// assertCommittedBaseline() 对账；--bless 仅供人工显式更新，禁止进入构建流程。
 
 const crypto = require('crypto');
 const fs = require('fs');
@@ -213,6 +213,71 @@ function assertCommittedBaseline(options = {}) {
   });
 }
 
+function blessBaseline(options = {}) {
+  if (!options || typeof options !== 'object' || Array.isArray(options)) {
+    throw new Error('CONTEXT_POC_BLESS_ARGS bless 参数无效');
+  }
+  const rootSpecified = Object.prototype.hasOwnProperty.call(options, 'rootDir');
+  const baselineSpecified = Object.prototype.hasOwnProperty.call(options, 'baselinePath');
+  if (rootSpecified !== baselineSpecified) {
+    throw new Error('CONTEXT_POC_BLESS_ARGS --root 与 --baseline 必须成对提供');
+  }
+  if ((rootSpecified && (typeof options.rootDir !== 'string' || !options.rootDir.trim()))
+      || (baselineSpecified
+        && (typeof options.baselinePath !== 'string' || !options.baselinePath.trim()))) {
+    throw new Error('CONTEXT_POC_BLESS_ARGS bless 路径不能为空');
+  }
+
+  const rootDir = path.resolve(options.rootDir || CONTEXT_POC_ROOT);
+  const baselinePath = path.resolve(options.baselinePath || BASELINE_PATH);
+  const baselineDir = path.dirname(baselinePath);
+  assertDirectory(baselineDir, 'baseline 目录');
+  const baselineStat = fs.lstatSync(baselinePath);
+  if (!baselineStat.isFile() || baselineStat.isSymbolicLink()) {
+    throw new Error('CONTEXT_POC_BLESS_PATH baseline 必须是普通文件');
+  }
+
+  const previous = readBaseline(baselinePath);
+  const next = createManifest(rootDir);
+  const bytes = canonicalBytes(next);
+  const mode = baselineStat.mode & 0o777;
+  const tempPath = path.join(
+    baselineDir,
+    `.${path.basename(baselinePath)}.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString('hex')}.tmp`
+  );
+  let descriptor = null;
+  try {
+    descriptor = fs.openSync(tempPath, 'wx', mode || 0o644);
+    fs.writeFileSync(descriptor, bytes);
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = null;
+
+    const staged = readBaseline(tempPath);
+    assertManifestMatches(staged, next);
+    const stillCurrent = readBaseline(baselinePath);
+    if (!canonicalBytes(stillCurrent).equals(canonicalBytes(previous))) {
+      throw new Error('CONTEXT_POC_BLESS_RACE baseline 在写入期间发生变化');
+    }
+
+    fs.renameSync(tempPath, baselinePath);
+    const receipt = assertCommittedBaseline({ rootDir, baselinePath });
+    return Object.freeze({
+      oldDigest: previous.digest,
+      newDigest: receipt.digest,
+      files: receipt.files,
+      totalBytes: receipt.totalBytes,
+      baselinePath,
+      rootDir
+    });
+  } finally {
+    if (descriptor !== null) {
+      try { fs.closeSync(descriptor); } catch (_error) {}
+    }
+    try { fs.rmSync(tempPath, { force: true }); } catch (_error) {}
+  }
+}
+
 function verifyPackagedResources(resourcesPath) {
   if (typeof resourcesPath !== 'string' || !resourcesPath.trim()) {
     throw new Error('CONTEXT_POC_RESOURCES_ARGS 缺少成品 Resources 目录');
@@ -245,8 +310,8 @@ function parseArgs(argv) {
   let rootSpecified = false;
   let baselineSpecified = false;
   for (const value of argv) {
-    if (value === '--check' || value === '--print') {
-      if (explicitMode && explicitMode !== value) {
+    if (value === '--check' || value === '--print' || value === '--bless') {
+      if (explicitMode) {
         throw new Error('CONTEXT_POC_MANIFEST_ARGS 只能选择一种模式');
       }
       explicitMode = value;
@@ -260,17 +325,28 @@ function parseArgs(argv) {
       result.mode = 'resources';
       result.resourcesPath = path.resolve(resourcesPath);
     } else if (value.startsWith('--root=')) {
+      const rootDir = value.slice('--root='.length);
+      if (rootSpecified || !rootDir.trim()) {
+        throw new Error('CONTEXT_POC_MANIFEST_ARGS --root 必须且只能指定一次');
+      }
       rootSpecified = true;
-      result.rootDir = path.resolve(value.slice(7));
+      result.rootDir = path.resolve(rootDir);
     }
     else if (value.startsWith('--baseline=')) {
+      const baselinePath = value.slice('--baseline='.length);
+      if (baselineSpecified || !baselinePath.trim()) {
+        throw new Error('CONTEXT_POC_MANIFEST_ARGS --baseline 必须且只能指定一次');
+      }
       baselineSpecified = true;
-      result.baselinePath = path.resolve(value.slice(11));
+      result.baselinePath = path.resolve(baselinePath);
     }
     else throw new Error(`CONTEXT_POC_MANIFEST_ARGS 未知参数：${value}`);
   }
   if (result.mode === 'resources' && (rootSpecified || baselineSpecified)) {
     throw new Error('CONTEXT_POC_MANIFEST_ARGS --resources 只使用 committed baseline');
+  }
+  if (result.mode === 'bless' && rootSpecified !== baselineSpecified) {
+    throw new Error('CONTEXT_POC_MANIFEST_ARGS --bless 的 --root 与 --baseline 必须成对提供');
   }
   return result;
 }
@@ -286,6 +362,11 @@ function main(argv = process.argv.slice(2)) {
     console.log(
       `CONTEXT_POC_RESOURCES_VERIFIED files=${result.files} bytes=${result.totalBytes} digest=${result.digest}`
     );
+    return;
+  }
+  if (args.mode === 'bless') {
+    const result = blessBaseline(args);
+    console.log(`BLESS ${result.oldDigest} -> ${result.newDigest}`);
     return;
   }
   const result = assertCommittedBaseline(args);
@@ -312,6 +393,7 @@ module.exports = Object.freeze({
   readBaseline,
   assertManifestMatches,
   assertCommittedBaseline,
+  blessBaseline,
   verifyPackagedResources,
   parseArgs,
   main

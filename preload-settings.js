@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('whaleSettings', Object.freeze({
   switchWorkbench: (workbenchId) => ipcRenderer.invoke('settings:switch-workbench', workbenchId),
   removeWorkbench: (workbenchId) => ipcRenderer.invoke('settings:remove-workbench', workbenchId),
   rescanWorkbenches: () => ipcRenderer.invoke('settings:rescan-workbenches'),
+  openClassicCockpit: () => ipcRenderer.invoke('settings:open-classic-cockpit'),
+  returnProjectWorkbench: () => ipcRenderer.invoke('settings:return-project-workbench'),
   // 飞书凭据是三条固定动作：保存、清除、自检。渲染层不能传通道名、路径或命令。
   saveFeishuCredentials: (value) => ipcRenderer.invoke('settings:remote-feishu-credentials-save', value),
   clearFeishuCredentials: () => ipcRenderer.invoke('settings:remote-feishu-credentials-clear'),

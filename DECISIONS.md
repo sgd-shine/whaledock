@@ -33,3 +33,11 @@
 **D13 · 经六门侦察把默认 dsh 从 `0.1.0-rc.6` 晋升到 `0.1.1-rc.2`。** 生产只接受已核验的精确 lock、三平台原生 inventory、NOTICE/SOURCES 与 214 份许可材料；若 npm `latest` 在发版前漂移，不自动追新，停止并重走侦察。旧配置只有字节精确等于历史默认 rc.6 时一次性迁移，`latest`、其他版本、自定义命令和非规范值全部保留。dsh 自有 SQLite schema 15→17 由上游负责，鲸坞仍不读写、迁移或清理 `~/.dsh`。
 
 **D14 · 为飞书低层长连接批准唯一根运行时依赖例外。** `@larksuiteoapi/node-sdk` 精确锁定 `1.73.0`，只使用 `WSClient` 与 `EventDispatcher`，仅在用户启用并连接飞书时惰性加载；关闭态必须零 SDK 加载、零平台网络。该 52 包生产闭包使用独立 `compliance/app-runtime/` inventory、NOTICE、内容哈希许可原文和成品 verifier，不得混入 `vendor/dsh-runtime` 的 inventory/NOTICE/licenses。以后新增或升级根运行时依赖必须重新通过同一 fail-closed 合规门。
+
+## 2026-09-02 · v0.11 以 dsh-worktable 为标杆重定产品模型（SGD 已拍板，Codex 执行）
+
+**D15 · 产品主语改为「项目（含文件夹）→ 绑定对话 → 窗口N → 产物回到窗口」，走路线 B。** 标杆 [Aisland-SJL/dsh-worktable](https://github.com/Aisland-SJL/dsh-worktable)（MIT）在“多 Agent 项目工作台”上的四个模型（项目一等对象并绑定会话、控制室回答“谁在干活哪里等我”、布局只是容器、产物回到工作处）是差距所在。不采用其代码：服务端文件路由不限项目根、终端继承全部环境、硬读 `~/.dsh`、localStorage 单点、DOM 探测挤压、无 CI、macOS 未验证，均与硬性约束冲突。在鲸坞私有插件 + `whaledock.content-shell/v1` seam 上重建，项目状态落 `userData/projects/registry.json`（`lib/projects.js`），控制室由 `lib/control-room.js` 纯函数镜像 rc.2 会话快照。SGD 已明确选择“是”：用“桌面智能体随时插入不同项目”替代总纲第 3 层“视频驾驶舱版”完成态；同时按 Claude 推荐推翻 D8 一半，保留零概念首次路径，并让项目抽屉作为切换入口回归。首批项目与会话保持 1:1，控制室独立采用作用域内的暗色蓝图视觉。依据见 `docs/审计-以dsh-worktable为标杆的项目审计-Claude-2026-09-02.md`。
+
+**D16 · 项目身份采用 app-owned registry 为主、旁车可选（A2.1 §5 二选一，SGD 已拍板）。** `proj_` + 32 hex 随机 id，永不由路径派生；默认不在用户文件夹写任何文件；用户显式选择后写 `.whaledock/project.json`，跨机器或搬家后按旁车 id 重新认领。改名、换文件夹、移动都不改 id。
+
+**D17 · 批次 5 采用 Host 限权能力，不宣称 OS 级沙箱（SGD 已授权执行）。** 项目终端由 Host 创建 PTY，cwd 取 Host 已校验的项目根，只传环境白名单；页面只持有与项目/窗格/Host/控制器/页面/选择/后端代次绑定的随机能力令牌，不接收 cwd、绝对路径、环境、shell 或 pid，每次操作重验身份并限制、净化输出，相关生命周期结束即失效。这个设计缩小鲸坞暴露面，但终端命令仍以当前登录用户权限运行，能读取该用户可读文件并访问系统允许的网络，不得写成文件系统或网络沙箱。模板原生皮肤继续是七色数据投影；registry 为默认、旁车只在显式操作后写入并用于跨机认领；分离窗只呈现受限本地内容；控制室 recent 只使用 Host 事件流的脱敏、截断摘要，不读取 `face.history`。`v0.11.0-alpha.1` 只作为真机验收 prerelease，不能晋升为稳定版，Windows/Intel、真实模型、钥匙串/TCC 与系统 App 界面仍各自保持 `NEEDS-HUMAN`。

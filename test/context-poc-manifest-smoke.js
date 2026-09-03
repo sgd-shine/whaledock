@@ -31,6 +31,16 @@ function fileAt(root, relative) {
   return path.join(root, ...relative.split('/'));
 }
 
+function committedBytes() {
+  return Object.freeze({
+    baseline: fs.readFileSync(manifest.BASELINE_PATH),
+    source: manifest.SOURCE_FILES.map((relative) => Object.freeze({
+      relative,
+      bytes: fs.readFileSync(fileAt(manifest.CONTEXT_POC_ROOT, relative))
+    }))
+  });
+}
+
 function main() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'whaledock-context-root-'));
   try {
@@ -116,6 +126,101 @@ function main() {
         digest: '0'.repeat(64)
       }), /BASELINE_DIGEST/);
       assert.throws(() => manifest.parseArgs(['--write']), /MANIFEST_ARGS/);
+    });
+
+    test('--bless 只更新成对 temp root/baseline，原子回读且不触碰 committed 字节', () => {
+      const committedBefore = committedBytes();
+      const fixtureDir = path.join(tmp, 'bless fixture with spaces');
+      const fixtureRoot = copySource(path.join(fixtureDir, 'context-poc'));
+      const fixtureBaseline = path.join(fixtureDir, 'context-poc-baseline.json');
+      fs.copyFileSync(manifest.BASELINE_PATH, fixtureBaseline);
+      const previous = manifest.readBaseline(fixtureBaseline);
+      fs.appendFileSync(
+        fileAt(fixtureRoot, 'plugin/lib/client.js'),
+        '\n// temp bless fixture\n'
+      );
+      const expected = manifest.createManifest(fixtureRoot);
+
+      const cli = spawnSync(process.execPath, [
+        path.join(__dirname, '..', 'scripts', 'context-poc-manifest.js'),
+        '--bless',
+        `--root=${fixtureRoot}`,
+        `--baseline=${fixtureBaseline}`
+      ], { encoding: 'utf8' });
+      assert.equal(cli.status, 0, cli.stderr);
+      assert.equal(cli.stderr, '');
+      assert.equal(cli.stdout, `BLESS ${previous.digest} -> ${expected.digest}\n`);
+      assert.notEqual(previous.digest, expected.digest);
+      assert.equal(manifest.readBaseline(fixtureBaseline).digest, expected.digest);
+      assert.deepEqual(
+        fs.readdirSync(fixtureDir).filter((name) => name.endsWith('.tmp')),
+        []
+      );
+
+      const check = spawnSync(process.execPath, [
+        path.join(__dirname, '..', 'scripts', 'context-poc-manifest.js'),
+        '--check',
+        `--root=${fixtureRoot}`,
+        `--baseline=${fixtureBaseline}`
+      ], { encoding: 'utf8' });
+      assert.equal(check.status, 0, check.stderr);
+      assert.match(check.stdout, /^CONTEXT_POC_BASELINE_PASS /);
+
+      fs.appendFileSync(fileAt(fixtureRoot, 'plugin/lib/client.js'), '\n// tampered\n');
+      const rejected = spawnSync(process.execPath, [
+        path.join(__dirname, '..', 'scripts', 'context-poc-manifest.js'),
+        '--check',
+        `--root=${fixtureRoot}`,
+        `--baseline=${fixtureBaseline}`
+      ], { encoding: 'utf8' });
+      assert.notEqual(rejected.status, 0);
+      assert.match(rejected.stderr, /CONTEXT_POC_BASELINE_MISMATCH/);
+
+      const committedAfter = committedBytes();
+      assert.deepEqual(committedAfter, committedBefore);
+    });
+
+    test('--bless 模式互斥、路径必须成对且导出函数同样 fail-closed', () => {
+      const fixtureRoot = path.join(tmp, 'argument-root');
+      const fixtureBaseline = path.join(tmp, 'argument-baseline.json');
+      assert.equal(manifest.parseArgs(['--bless']).mode, 'bless');
+      assert.equal(manifest.parseArgs([
+        '--bless', `--root=${fixtureRoot}`, `--baseline=${fixtureBaseline}`
+      ]).mode, 'bless');
+      assert.throws(() => manifest.parseArgs(['--bless', '--check']), /一种模式/);
+      assert.throws(() => manifest.parseArgs(['--print', '--bless']), /一种模式/);
+      assert.throws(() => manifest.parseArgs([
+        '--bless', `--resources=${tmp}`
+      ]), /必须单独指定一次/);
+      assert.throws(() => manifest.parseArgs([
+        '--resources=' + tmp, '--bless'
+      ]), /一种模式/);
+      assert.throws(() => manifest.parseArgs([
+        '--bless', `--root=${fixtureRoot}`
+      ]), /必须成对提供/);
+      assert.throws(() => manifest.parseArgs([
+        '--bless', `--baseline=${fixtureBaseline}`
+      ]), /必须成对提供/);
+      assert.throws(() => manifest.parseArgs(['--bless', '--root=', '--baseline=x']), /--root/);
+      assert.throws(() => manifest.parseArgs(['--bless', '--root=  ', '--baseline=x']), /--root/);
+      assert.throws(() => manifest.parseArgs(['--bless', '--root=x', '--baseline=']), /--baseline/);
+      assert.throws(() => manifest.parseArgs(['--bless', '--root=x', '--baseline=  ']), /--baseline/);
+      assert.throws(() => manifest.parseArgs([
+        '--bless', '--root=x', '--root=y', '--baseline=z'
+      ]), /--root/);
+      assert.throws(() => manifest.parseArgs(['--bless', '--bless']), /一种模式/);
+      assert.throws(() => manifest.blessBaseline({ rootDir: fixtureRoot }), /必须成对提供/);
+      assert.throws(() => manifest.blessBaseline({ baselinePath: fixtureBaseline }), /必须成对提供/);
+
+      const workflowsRoot = path.join(__dirname, '..', '.github', 'workflows');
+      for (const name of fs.readdirSync(workflowsRoot)) {
+        if (!/\.ya?ml$/i.test(name)) continue;
+        assert.doesNotMatch(
+          fs.readFileSync(path.join(workflowsRoot, name), 'utf8'),
+          /--bless\b/,
+          `${name} 不得自动 bless 固定信任根`
+        );
+      }
     });
 
     test('成品 Resources 模式精确回读、支持空格路径且拒绝伪 trust root', () => {

@@ -47,6 +47,11 @@ function makeRenderer(React, jsxRuntime, options = {}) {
       const { index, cell } = cellAt('useState');
       if (cell === undefined) {
         let value = typeof initial === 'function' ? initial() : initial;
+        // v0.11 生产态默认进入项目工作台；这个历史 layout
+        // suite 专门验收 v0.10 内容态，由 fixture 显式注入待测 mode。
+        if (typeof options.initialMode === 'string' && value === 'projects') {
+          value = options.initialMode;
+        }
         if (typeof options.creatorTab === 'string' && value === 'overview') {
           value = options.creatorTab;
         }
@@ -55,6 +60,23 @@ function makeRenderer(React, jsxRuntime, options = {}) {
       const state = active.fiber.cells[index];
       return [state.value, (next) => {
         const value = typeof next === 'function' ? next(state.value) : next;
+        if (!Object.is(value, state.value)) {
+          state.value = value;
+          renderer.dirty = true;
+        }
+      }];
+    },
+    useReducer(reducer, initialArg, init) {
+      const { index, cell } = cellAt('useReducer');
+      if (cell === undefined) {
+        active.fiber.cells[index] = {
+          kind: 'reducer',
+          value: typeof init === 'function' ? init(initialArg) : initialArg
+        };
+      }
+      const state = active.fiber.cells[index];
+      return [state.value, (action) => {
+        const value = reducer(state.value, action);
         if (!Object.is(value, state.value)) {
           state.value = value;
           renderer.dirty = true;
@@ -153,6 +175,7 @@ function makeRenderer(React, jsxRuntime, options = {}) {
 
   Object.assign(React, {
     useState: (...args) => renderer.useState(...args),
+    useReducer: (...args) => renderer.useReducer(...args),
     useRef: (...args) => renderer.useRef(...args),
     useMemo: (...args) => renderer.useMemo(...args),
     useCallback: (...args) => renderer.useCallback(...args),
@@ -255,11 +278,17 @@ function loadBundle(services = {}, options = {}) {
   };
   const injected = registration.spec.inject(layoutActions);
   assert.equal(injected.getWhaleDockShell(), integration);
+  let initialMode = options.initialMode;
+  if (initialMode === undefined && options.browserOnly !== true && options.noShell !== true) {
+    const preferred = services.whaledockShellPreferences?.getSnapshot?.()?.contentViewMode;
+    initialMode = preferred === 'sessions' ? 'sessions' : preferred === 'projects'
+      ? 'projects' : 'content';
+  }
   return {
     AppFrame: registration.component,
     integration,
     projectActions: integration?.projectActions,
-    renderer: makeRenderer(React, jsxRuntime, options),
+    renderer: makeRenderer(React, jsxRuntime, { ...options, initialMode }),
     timerLog,
     timers,
     jsxRuntime
@@ -285,7 +314,8 @@ function findAll(node, predicate, output = []) {
 }
 
 function button(tree, label) {
-  const found = findAll(tree, (node) => node.type === 'button' && textOf(node) === label);
+  const currentLabel = ({ '创作文件': '短视频模板', '对话记录': '对话' })[label] || label;
+  const found = findAll(tree, (node) => node.type === 'button' && textOf(node) === currentLabel);
   assert.equal(found.length, 1, `expected one button named ${label}, got ${found.length}`);
   return found[0];
 }
@@ -1567,14 +1597,15 @@ async function main() {
     const leftColumn = classNode(tree, 'wd10-left');
     assert.equal(findAll(leftColumn, (node) => node.props?.role === 'tablist').length, 1);
     assert.deepEqual(findAll(leftColumn, (node) => node.props?.role === 'tab').map(textOf),
-      ['创作文件', '对话记录']);
-    assert.equal(classNode(tree, 'wd10-leftView').props.hidden, false);
+      ['项目', '短视频模板', '对话']);
+    assert.equal(findAll(tree, (node) => String(node.props?.className || '')
+      .split(/\s+/u).includes('wd10-leftView')).filter((node) => node.props.hidden !== true).length, 1);
     assert.equal(classNode(tree, 'wd10-nativeSidebar').props.hidden, true);
     let frame = findAll(tree, (node) => node.props?.['data-whaledock-layout'] === 'v0.10-p1')[0];
     assert.equal(frame.props['data-whaledock-mode'], 'content');
     assert.equal(frame.props['data-whaledock-left'], 'library');
     assert.equal(frame.props['data-whaledock-panel'], 'expanded');
-    assert.match(textOf(tree), /左边选内容，中间推进，右边 AI 执行，结果回到这条内容/u);
+    assert.match(textOf(tree), /短视频模板窗口在中间，右边 AI 执行/u);
     assert.match(textOf(tree), /第1步 选择内容/u);
     assert.match(textOf(tree), /第2步 推进当前内容/u);
     assert.match(textOf(tree), /任务状态/u);
@@ -1588,7 +1619,8 @@ async function main() {
     button(tree, '对话记录').props.onClick();
     harness.renderer.unmounts.length = 0;
     tree = harness.renderer.render(harness.AppFrame, props);
-    assert.equal(classNode(tree, 'wd10-leftView').props.hidden, true);
+    assert(findAll(tree, (node) => String(node.props?.className || '')
+      .split(/\s+/u).includes('wd10-leftView')).every((node) => node.props.hidden === true));
     assert.equal(classNode(tree, 'wd10-nativeSidebar').props.hidden, false);
     frame = findAll(tree, (node) => node.props?.['data-whaledock-layout'] === 'v0.10-p1')[0];
     assert.equal(frame.props['data-whaledock-left'], 'sessions');
@@ -1596,8 +1628,7 @@ async function main() {
     assert.equal(frame.props.style.gridTemplateColumns, '272px minmax(0, 1fr)');
     assert.equal(classNode(tree, 'wd10-detailFrame').props.hidden, true);
     assert.equal(classNode(tree, 'wd10-detailRail').props.hidden, true);
-    assert.match(textOf(tree),
-      /左边选对话记录，右边继续和 AI 沟通；切回“创作文件”推进内容/u);
+    assert.match(textOf(tree), /左边选原生对话，右边继续和 AI 沟通/u);
     assert.equal(findAll(tree, (node) => (
       node.type === 'button' && node.props.className === 'wd10-workspaceChoice'
     )).length, 0);
@@ -1656,7 +1687,7 @@ async function main() {
       uiProps(state, returning.integration, [])
     );
     assert.match(textOf(returningTree),
-      /左边选内容，中间推进，右边 AI 执行，结果回到这条内容/u,
+      /短视频模板窗口在中间，右边 AI 执行/u,
       '旧版已经看过一次性提示的用户也必须看到永久主路径');
 
     const narrowSessions = loadBundle({ whaledockShellPreferences:

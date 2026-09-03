@@ -854,7 +854,9 @@ async function mainTest() {
       workspaceGeneration: 11,
       rootIdentity: { dev: '101', ino: '202' }
     };
-    const runCoordinator = async ({ bindingFor, catalogHandler, claimDeadline }) => {
+    const runCoordinator = async ({
+      bindingFor, catalogHandler, claimDeadline, settleHandler
+    }) => {
       const calls = [];
       const broker = main.contextPocWorkspaceFileBroker({ operations: {
         catalog: catalogHandler || (() => ({
@@ -896,7 +898,11 @@ async function mainTest() {
                   ? request.deadlineMs - 100 : claimDeadline
               };
             }
-            if (endpoint === 'workspace/files/settle') return { settled: true, code: null };
+            if (endpoint === 'workspace/files/settle') {
+              return settleHandler
+                ? settleHandler(payload)
+                : { settled: true, code: null };
+            }
             throw new Error('unexpected workspace endpoint');
           }
         }
@@ -915,6 +921,27 @@ async function mainTest() {
     assert.equal(successSettle.payload.result.kind, 'catalog');
     assert.doesNotMatch(JSON.stringify(successSettle.payload.result),
       /(?:absolutePath|relativePath|workspaceKey|sessionRef|claimToken|hash)/);
+
+    let settleAttempts = 0;
+    const recoveredCalls = await runCoordinator({
+      bindingFor: () => binding,
+      settleHandler(payload) {
+        settleAttempts += 1;
+        if (settleAttempts === 1) throw new Error('fulfilled envelope rejected');
+        assert.deepEqual({ status: payload.status, code: payload.code }, {
+          status: 'rejected', code: 'operation-failed'
+        });
+        return { settled: true, code: 'operation-failed' };
+      }
+    });
+    assert.equal(settleAttempts, 2,
+      'fulfilled settle 的 rejection 必须进入 catch 并改发有限失败回执');
+    assert.deepEqual(recoveredCalls.filter((call) => (
+      call.endpoint === 'workspace/files/settle'
+    )).map((call) => ({ status: call.payload.status, code: call.payload.code })), [
+      { status: 'fulfilled', code: null },
+      { status: 'rejected', code: 'operation-failed' }
+    ]);
 
     let staleRuns = 0;
     const staleCalls = await runCoordinator({

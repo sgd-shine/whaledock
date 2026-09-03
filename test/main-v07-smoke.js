@@ -24,35 +24,43 @@ async function test(name, fn) {
 }
 
 async function run() {
-  await test('经典、创作现场、全宽对话现场与原生逃生门有明确边界', async () => {
+  await test('默认项目全宽；显式经典、创作现场、全宽对话与原生逃生门边界明确', async () => {
     assert.deepEqual(main.mainViewLayout({ width: 1280, height: 820 }), {
+      mode: 'projects', visible: true, bounds: { x: 0, y: 0, width: 1280, height: 820 }
+    });
+    assert.deepEqual(main.mainViewLayout({ width: 1280, height: 820, classicMode: true }), {
       mode: 'classic', visible: true, bounds: { x: 132, y: 0, width: 1148, height: 820 }
     });
     assert.deepEqual(main.mainViewLayout({
-      width: 1280, height: 820, cockpit: 'video', cockpitMode: 'cockpit'
+      width: 1280, height: 820, classicMode: true,
+      cockpit: 'video', cockpitMode: 'cockpit'
     }), {
       mode: 'cockpit', visible: false,
       bounds: { x: 0, y: 136, width: 1280, height: 684 }
     });
     assert.deepEqual(main.mainViewLayout({
-      width: 1280, height: 820, cockpit: 'video', cockpitMode: 'cockpit', chatOpen: true
+      width: 1280, height: 820, classicMode: true,
+      cockpit: 'video', cockpitMode: 'cockpit', chatOpen: true
     }), {
       mode: 'cockpit-chat', visible: true,
       bounds: { x: 0, y: 96, width: 1280, height: 724 }
     });
     assert.deepEqual(main.mainViewLayout({
-      width: 960, height: 620, cockpit: 'video', cockpitMode: 'cockpit', chatOpen: true
+      width: 960, height: 620, classicMode: true,
+      cockpit: 'video', cockpitMode: 'cockpit', chatOpen: true
     }), {
       mode: 'cockpit-chat', visible: true,
       bounds: { x: 0, y: 96, width: 960, height: 524 }
     });
     assert.deepEqual(main.mainViewLayout({
-      width: 1280, height: 820, cockpit: 'video', cockpitMode: 'native'
+      width: 1280, height: 820, classicMode: true,
+      cockpit: 'video', cockpitMode: 'native'
     }), {
       mode: 'classic', visible: true, bounds: { x: 132, y: 0, width: 1148, height: 820 }
     });
     assert.equal(main.mainViewLayout({
-      width: 960, height: 96, cockpit: 'video', cockpitMode: 'cockpit', chatOpen: true
+      width: 960, height: 96, classicMode: true,
+      cockpit: 'video', cockpitMode: 'cockpit', chatOpen: true
     }).visible, false, '顶部控件区不能被 child view 覆盖');
   });
 

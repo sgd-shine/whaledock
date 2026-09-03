@@ -841,6 +841,22 @@
 
     <section id="panel-workbench" role="tabpanel" aria-labelledby="tab-workbench" hidden>
       <div class="section">
+        <h2 class="section-title">兼容入口</h2>
+        <div class="card">
+          <div class="row">
+            <div>
+              <div class="row-label">经典驾驶舱（旧）</div>
+              <div class="row-note">项目工作台是默认入口。这里仅保留旧工作台与旧配置的兼容访问，不会删除或迁移原有内容。</div>
+            </div>
+            <div class="inline-actions">
+              <button id="open-classic-cockpit" class="button">进入经典驾驶舱（旧）</button>
+              <button id="return-project-workbench" class="button">返回项目工作台</button>
+            </div>
+          </div>
+          <div id="classic-cockpit-note" class="row-note" role="status" aria-live="polite"></div>
+        </div>
+      </div>
+      <div class="section">
         <h2 class="section-title">已安装的工作台</h2>
         <div class="card">
           <div class="row">
@@ -1780,10 +1796,35 @@
   function bindWorkbenches() {
     const openDir = document.getElementById('open-workbenches-dir');
     const rescan = document.getElementById('rescan-workbenches');
+    const openClassic = document.getElementById('open-classic-cockpit');
+    const returnProjects = document.getElementById('return-project-workbench');
+    const classicNote = document.getElementById('classic-cockpit-note');
     if (openDir) openDir.addEventListener('click', () => { void api.openResourceDir('workbenches'); });
     if (rescan) {
       rescan.addEventListener('click', () => {
         void api.rescanWorkbenches().then(refreshWorkbenches).catch(() => {});
+      });
+    }
+    if (openClassic) {
+      openClassic.addEventListener('click', () => {
+        openClassic.disabled = true;
+        void api.openClassicCockpit().then((result) => {
+          classicNote.textContent = result && result.text
+            ? result.text : '已进入经典驾驶舱（旧）';
+        }).catch((error) => {
+          classicNote.textContent = messageOf(error, '经典驾驶舱打开失败');
+        }).finally(() => { openClassic.disabled = false; });
+      });
+    }
+    if (returnProjects) {
+      returnProjects.addEventListener('click', () => {
+        returnProjects.disabled = true;
+        void api.returnProjectWorkbench().then((result) => {
+          classicNote.textContent = result && result.text
+            ? result.text : '已返回项目工作台';
+        }).catch((error) => {
+          classicNote.textContent = messageOf(error, '项目工作台打开失败');
+        }).finally(() => { returnProjects.disabled = false; });
       });
     }
   }

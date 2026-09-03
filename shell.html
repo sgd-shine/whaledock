@@ -27,6 +27,8 @@
       display:flex; flex-direction:column; gap:6px; padding:10px 8px;
       background:var(--panel); border-right:1px solid var(--line);
     }
+    /* 项目工作台是默认主界面；旧左栏只在设置中明确进入经典模式后出现。 */
+    body:not(.classic-mode) #rail { display:none; }
     #switcher-button {
       display:flex; align-items:center; gap:6px; width:100%;
       padding:8px 9px; border:1px solid var(--line); border-radius:9px;

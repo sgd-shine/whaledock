@@ -451,7 +451,7 @@ test('v0.9.1 外层 verifier 在启动成品 Electron 前拒绝 context-poc', ()
   }
 });
 
-test('CI、Release 与续公证覆盖两套合规和全部安装载体', () => {
+test('CI、v0.11 alpha Release 与续公证覆盖两套合规和全部安装载体', () => {
   const root = path.join(__dirname, '..');
   const ci = fs.readFileSync(path.join(root, '.github', 'workflows', 'ci.yml'), 'utf8');
   const release = fs.readFileSync(path.join(root, '.github', 'workflows', 'release.yml'), 'utf8');
@@ -479,13 +479,22 @@ test('CI、Release 与续公证覆盖两套合规和全部安装载体', () => {
   assert.match(resume, /Resume tag\/package\/lock version mismatch/);
   assert.match(resume, /verify-packaged-compliance\.js --search="\$mount_dir\/WhaleDock\.app\/Contents\/Resources"/);
   assert.match(resume, /verify-packaged-app-runtime\.js --app="\$mount_dir\/WhaleDock\.app"/);
-  const requiredSessionSentence = 'v0.10 用鲸坞自己的会话数据目录，`~/.dsh` 不读不写不迁移，第一次进 AI 工作台可能要重新配一次模型。';
+  const requiredIntroSentence = '这是 v0.11 项目工作台的预发布验收包，不是稳定版。项目成为一等对象，可绑定对话、从控制室查看需要处理的状态，并在三个布局预设的安全窗格中接收 Markdown 与 `widget-result.json` 产物。';
+  const requiredSessionSentence = '本版继续使用鲸坞自己的受管 dsh 目录，`~/.dsh` 不读、不写、不迁移、不清理。真实旧数据升级、真实 Agent 产物回流与五分钟连续手感仍需用户本人完成。';
+  const requiredWindowsSentence = 'Windows 仍为实验性支持（未签名、未真机验证）。';
   for (const value of [release, resume]) {
-    assert.match(value, /同屏创作台把左边选内容、中间推进任务、右边交给 AI 执行放在一屏，执行结果会回到这条内容。/);
+    assert.equal(value.includes('## v0.11.0-alpha.1 真机验收版'), true);
+    assert.equal(value.includes(requiredIntroSentence), true);
     assert.equal(value.includes(requiredSessionSentence), true);
-    assert.match(value, /Windows 仍为实验性支持（未真机验证）。/);
-    assert.equal(value.includes('本版不含 v0.10 实验功能'), false);
+    assert.equal(value.includes(requiredWindowsSentence), true);
   }
+  assert.equal((release.match(/--config electron-builder\.v0\.11-alpha\.1\.cjs/g) || []).length, 3);
+  assert.equal((release.match(/Verify annotated tag is reachable from main/g) || []).length, 2);
+  assert.match(resume, /git merge-base --is-ancestor "\$tag_commit" origin\/main/);
+  assert.match(release, /Verify macOS release credentials are present/);
+  assert.match(release, /MACOS_RELEASE_CREDENTIALS_PRESENT/);
+  assert.match(release, /prerelease: \$\{\{ contains\(github\.ref_name, '-'\) \}\}/);
+  assert.match(resume, /prerelease: \$\{\{ contains\(inputs\.release_tag, '-'\) \}\}/);
 });
 
 console.log(`PACKAGED APP RUNTIME ALL PASS (${passed})`);

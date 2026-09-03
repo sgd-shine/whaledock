@@ -263,8 +263,8 @@ async function run() {
 
   await check('flag 关闭不改现有 layout，context 降级也不控制 dsh view', async () => {
     assert.deepEqual(main.mainViewLayout({ width: 1280, height: 820 }), {
-      mode: 'classic', visible: true,
-      bounds: { x: 132, y: 0, width: 1148, height: 820 }
+      mode: 'projects', visible: true,
+      bounds: { x: 0, y: 0, width: 1280, height: 820 }
     });
     const value = source('main.js');
     const contextBlock = block(

@@ -1264,6 +1264,13 @@ async function main() {
         requestToken: 'ab'.repeat(32),
         requestSeq: 1
       });
+      await transport.call('workspace/files/authorize', {
+        contract: CONTEXT_BRIDGE_PROTOCOL,
+        hostInstanceId,
+        requestToken: 'ab'.repeat(32),
+        requestSeq: 1,
+        claimToken: 'cd'.repeat(32)
+      });
       await transport.call('workspace/files/settle', {
         contract: CONTEXT_BRIDGE_PROTOCOL,
         hostInstanceId,
@@ -1274,19 +1281,59 @@ async function main() {
         code: 'operation-stale',
         result: null
       });
-      const workspaceBodies = requestBodies.slice(5, 8);
+      const nearConsoleLimit = {
+        kind: 'console',
+        padding: 'x'.repeat(63 * 1024)
+      };
+      await transport.call('workspace/files/settle', {
+        contract: CONTEXT_BRIDGE_PROTOCOL,
+        hostInstanceId,
+        requestToken: 'ab'.repeat(32),
+        requestSeq: 1,
+        claimToken: 'cd'.repeat(32),
+        status: 'fulfilled',
+        code: null,
+        result: nearConsoleLimit
+      });
+      const workspaceBodies = requestBodies.slice(5, 10);
       assert.deepEqual(workspaceBodies.map((body) => body.method), [
-        'workspace/files/read', 'workspace/files/claim', 'workspace/files/settle'
+        'workspace/files/read', 'workspace/files/claim', 'workspace/files/authorize',
+        'workspace/files/settle', 'workspace/files/settle'
       ]);
       assert.equal(workspaceBodies.every((body) => (
         body.payload.authToken === expectedSessionToken
           && JSON.stringify(body.payload).includes(secret) === false
       )), true);
+      const largeSettleBody = workspaceBodies.at(-1);
+      assert.equal(Buffer.byteLength(JSON.stringify(largeSettleBody), 'utf8')
+        > backend.CONTEXT_POC_LIMITS.maxRequestBytes, true,
+      'console.read 合法大结果不能被普通 8KiB 上限误伤');
+      assert.equal(Buffer.byteLength(JSON.stringify(largeSettleBody), 'utf8')
+        < backend.CONTEXT_POC_LIMITS.maxWorkspaceSettleRequestBytes, true);
+
+      const beforeOversizeSettle = requestBodies.length;
+      await assert.rejects(() => transport.call('workspace/files/settle', {
+        contract: CONTEXT_BRIDGE_PROTOCOL,
+        hostInstanceId,
+        requestToken: 'ab'.repeat(32),
+        requestSeq: 1,
+        claimToken: 'cd'.repeat(32),
+        status: 'fulfilled',
+        code: null,
+        result: { padding: 'x'.repeat(
+          backend.CONTEXT_POC_LIMITS.maxWorkspaceSettleRequestBytes
+        ) }
+      }), /too large/);
+      assert.equal(requestBodies.length, beforeOversizeSettle,
+        '超过 settle 专属上限必须在底层请求前拒绝');
 
       await assert.rejects(() => transport.call('unknown', {}));
+      const beforeOversizeOrdinary = requestBodies.length;
       await assert.rejects(() => transport.call('context/stage', {
         text: 'x'.repeat(backend.CONTEXT_POC_LIMITS.maxRequestBytes)
       }), /too large/);
+      assert.equal(requestBodies.length, beforeOversizeOrdinary,
+        '普通端点超过 8KiB 必须在底层请求前拒绝');
 
       let refusedRequests = 0;
       const refusedRequest = () => {

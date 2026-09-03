@@ -4,6 +4,7 @@ const assert = require('assert/strict');
 const {
   STATES,
   DEFAULT_LIMITS,
+  OPERATION_LIMIT_CEILINGS,
   normalizeBinding,
   createContextFileRpcBroker
 } = require('../lib/context-file-rpc');
@@ -35,6 +36,16 @@ function binding(overrides = {}) {
     contextRevision: 7,
     workspaceGeneration: 11,
     rootIdentity: { dev: '101', ino: '202' },
+    ...overrides
+  };
+}
+
+function globalBinding(overrides = {}) {
+  return {
+    hostInstanceId: 'host-instance-0001',
+    controllerId: 'controller-instance-0001',
+    pageInstanceId: 'page-instance-0001',
+    selectionRevision: 3,
     ...overrides
   };
 }
@@ -125,6 +136,7 @@ async function run() {
       maxResultBytes: 6144,
       maxJsonDepth: 8,
       maxJsonNodes: 512,
+      maxJsonKeyChars: 64,
       maxOperations: 32,
       maxTokenAttempts: 8,
       queueTtlMs: 10000,
@@ -145,6 +157,31 @@ async function run() {
       binding({ rootIdentity: { dev: '../1', ino: '2' } }),
       { ...binding(), extra: true }
     ]) throwsCode(() => normalizeBinding(invalid), 'ERR_BINDING_INVALID');
+
+    const normalizedGlobal = normalizeBinding(globalBinding());
+    assert.equal(Object.isFrozen(normalizedGlobal), true);
+    assert.deepEqual(normalizedGlobal, globalBinding());
+    for (const invalid of [
+      globalBinding({ selectionRevision: 0 }),
+      globalBinding({ controllerId: 'short' }),
+      { ...globalBinding(), projectId: `wdp1_${'a'.repeat(32)}` }
+    ]) throwsCode(() => normalizeBinding(invalid), 'ERR_BINDING_INVALID');
+  });
+
+  await test('全局项目 binding 与工作区 binding 是两个不可串用的精确作用域', async () => {
+    const broker = createContextFileRpcBroker({
+      randomBytes: makeRandom(), operations: { 'topic.choose': topicDescriptor() }
+    });
+    const owner = globalBinding();
+    const queued = broker.enqueue({
+      binding: owner, operation: 'topic.choose',
+      input: { projectToken: `project-${'0'.repeat(24)}`, field: 'angle', value: '控制室' }
+    });
+    const row = broker.read({ binding: owner, limit: 1 })[0];
+    assert.deepEqual(row.binding, owner);
+    assert.deepEqual(broker.read({ binding: binding(), limit: 1 }), []);
+    assert.equal(broker.snapshot({ binding: binding(), requestToken: queued.requestToken }).code,
+      'request-unavailable');
   });
 
   await test('只能登记高层 operation，通用路径/frontmatter patch 名称直接拒绝', async () => {
@@ -160,6 +197,69 @@ async function run() {
     throwsCode(() => broker.registerOperation('topic.bad', {
       validate() {}, handle() {}
     }), 'ERR_HANDLER_INVALID');
+    [
+      { maxInputBytes: 0 },
+      { maxInputBytes: OPERATION_LIMIT_CEILINGS.maxInputBytes + 1 },
+      { maxResultBytes: OPERATION_LIMIT_CEILINGS.maxResultBytes + 1 },
+      { unknown: 1 }
+    ].forEach((limits, index) => {
+      throwsCode(() => broker.registerOperation(`topic.bad-${index}`, topicDescriptor({ limits })),
+        'ERR_HANDLER_INVALID');
+    });
+  });
+
+  await test('operation 可单独放宽至有界项目预算，旧 operation 仍保持默认 4/6 KiB', async () => {
+    assert.deepEqual(OPERATION_LIMIT_CEILINGS, {
+      maxInputBytes: 48 * 1024,
+      maxResultBytes: 64 * 1024,
+      maxJsonDepth: 16,
+      maxJsonNodes: 8192,
+      maxJsonKeyChars: 128
+    });
+    const expanded = topicDescriptor({
+      limits: {
+        maxInputBytes: 48 * 1024,
+        maxResultBytes: 48 * 1024,
+        maxJsonDepth: 10,
+        maxJsonNodes: 2048,
+        maxJsonKeyChars: 128
+      },
+      validate(value) {
+        if (!value || typeof value.payload !== 'object' || Array.isArray(value.payload)) {
+          throw new Error('invalid');
+        }
+        return { payload: value.payload };
+      },
+      async handle({ input }) { return { payload: input.payload }; },
+      redact(value) { return { payload: value.payload }; }
+    });
+    const broker = createContextFileRpcBroker({
+      randomBytes: makeRandom(),
+      operations: {
+        'console.read': expanded,
+        'topic.choose': topicDescriptor({ validate(value) { return value; } })
+      }
+    });
+    const owner = globalBinding();
+    const stableRef = `session-binding-${'a'.repeat(64)}`;
+    const payload = { [stableRef]: 'x'.repeat(12 * 1024) };
+    const queued = broker.enqueue({
+      binding: owner, operation: 'console.read', input: { payload }
+    });
+    const row = broker.read({ binding: owner, limit: 1 })[0];
+    const claim = broker.claim({
+      binding: owner, requestToken: queued.requestToken, requestSeq: row.requestSeq
+    });
+    const settled = await broker.execute({
+      binding: owner, requestToken: queued.requestToken, requestSeq: row.requestSeq,
+      claimToken: claim.claimToken, context: {}
+    });
+    assert.equal(settled.settled, true);
+    assert.deepEqual(broker.snapshot({ binding: owner, requestToken: queued.requestToken }).result.payload,
+      payload);
+    throwsCode(() => broker.enqueue({
+      binding: owner, operation: 'topic.choose', input: { payload: 'x'.repeat(12 * 1024) }
+    }), 'ERR_INPUT_TOO_LARGE');
   });
 
   await test('入队只公开 requestToken/状态，random seq 与 claimToken 不泄露', async () => {
