@@ -451,9 +451,11 @@ async function main() {
       && resumeWorkflow.includes("prerelease: ${{ contains(inputs.release_tag, '-') }}"));
   check('packaging: v0.11 alpha tag 必须是 main 可达的注解 tag',
     (releaseWorkflow.match(/Verify annotated tag is reachable from main/g) || []).length === 2
+      && (releaseWorkflow.match(/git fetch --force --no-tags origin "\+refs\/tags\/\$GITHUB_REF_NAME:refs\/tags\/\$GITHUB_REF_NAME"/g) || []).length === 2
       && releaseWorkflow.includes('git merge-base --is-ancestor "$tag_commit" origin/main')
       && resumeWorkflow.includes('Verify source manifest and tag')
       && resumeWorkflow.includes('Verify source Release run identity')
+      && resumeWorkflow.includes('git fetch --force --no-tags origin "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"')
       && resumeWorkflow.includes("path: '.github/workflows/release.yml'")
       && resumeWorkflow.includes("event: 'push'")
       && resumeWorkflow.includes('head_sha: process.env.EXPECTED_SHA')
